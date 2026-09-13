@@ -3,6 +3,11 @@ package com.researchassistant.common.error;
 import com.researchassistant.common.exception.AuthenticationFailedException;
 import com.researchassistant.common.exception.DuplicateResourceException;
 import com.researchassistant.common.exception.ResourceNotFoundException;
+import com.researchassistant.document.exception.DocumentAccessDeniedException;
+import com.researchassistant.document.exception.DocumentStorageException;
+import com.researchassistant.document.exception.DocumentUploadException;
+import com.researchassistant.document.exception.InvalidDocumentOperationException;
+import com.researchassistant.document.exception.UnsupportedDocumentTypeException;
 import com.researchassistant.project.exception.InvalidProjectOperationException;
 import com.researchassistant.project.exception.ProjectAccessDeniedException;
 import com.researchassistant.workspace.exception.InvalidWorkspaceOperationException;
@@ -140,6 +145,81 @@ public class GlobalExceptionHandler {
         return buildResponse(
                 HttpStatus.CONFLICT,
                 exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+
+    @ExceptionHandler(DocumentAccessDeniedException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentAccessDenied(
+            DocumentAccessDeniedException exception,
+            HttpServletRequest request
+    ) {
+
+        return buildResponse(
+                HttpStatus.FORBIDDEN,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+
+    @ExceptionHandler(InvalidDocumentOperationException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidDocumentOperation(
+            InvalidDocumentOperationException exception,
+            HttpServletRequest request
+    ) {
+
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+
+    @ExceptionHandler(UnsupportedDocumentTypeException.class)
+    public ResponseEntity<ApiErrorResponse> handleUnsupportedDocumentType(
+            UnsupportedDocumentTypeException exception,
+            HttpServletRequest request
+    ) {
+
+        return buildResponse(
+                HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+
+    @ExceptionHandler(DocumentUploadException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentUpload(
+            DocumentUploadException exception,
+            HttpServletRequest request
+    ) {
+
+        return buildResponse(
+                HttpStatus.PAYLOAD_TOO_LARGE,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+
+    @ExceptionHandler(DocumentStorageException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentStorage(
+            DocumentStorageException exception,
+            HttpServletRequest request
+    ) {
+
+        return buildResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Document storage failed.",
                 request.getRequestURI(),
                 Map.of()
         );

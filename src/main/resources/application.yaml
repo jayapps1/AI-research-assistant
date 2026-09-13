@@ -19,6 +19,11 @@ spring:
   flyway:
     enabled: true
 
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 55MB
+
   cache:
     type: simple
 
@@ -49,3 +54,8 @@ app:
       encryption-key: ${CREDENTIAL_ENCRYPTION_KEY}
     totp:
       issuer: ${TOTP_ISSUER:AI Research Assistant}
+  document:
+    max-upload-size-bytes: ${DOCUMENT_MAX_UPLOAD_SIZE_BYTES:52428800}
+    storage:
+      type: local
+      local-directory: ${DOCUMENT_STORAGE_DIR:./data/documents}
