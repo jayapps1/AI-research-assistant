@@ -1,0 +1,51 @@
+spring:
+  application:
+    name: research-assistant-api
+
+  docker:
+    compose:
+      enabled: false
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${POSTGRES_DB:research_assist}
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+
+  cache:
+    type: simple
+
+  ai:
+    model:
+      chat: none
+      embedding: none
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
+
+    vectorstore:
+      type: none
+
+server:
+  port: 8096
+
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET}
+      issuer: research-assistant-api
+      access-token-minutes: 15
+      refresh-token-days: 30
+    credentials:
+      encryption-key: ${CREDENTIAL_ENCRYPTION_KEY}
+    totp:
+      issuer: ${TOTP_ISSUER:AI Research Assistant}

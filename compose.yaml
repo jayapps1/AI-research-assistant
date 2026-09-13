@@ -1,0 +1,37 @@
+services:
+
+  pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: research-assistant-postgres
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    labels:
+      - "org.springframework.boot.service-connection=postgres"
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    container_name: research-assistant-redis
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      - redis_data:/data
+
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
