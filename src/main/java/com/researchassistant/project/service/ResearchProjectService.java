@@ -1,5 +1,6 @@
 package com.researchassistant.project.service;
 
+import com.researchassistant.cache.CacheInvalidationService;
 import com.researchassistant.common.exception.DuplicateResourceException;
 import com.researchassistant.common.exception.ResourceNotFoundException;
 import com.researchassistant.identity.entity.User;
@@ -48,6 +49,7 @@ public class ResearchProjectService {
     private final WorkspaceAuthorizationService workspaceAuthorizationService;
     private final ProjectAuthorizationService authorizationService;
     private final SecurityAuditService auditService;
+    private final CacheInvalidationService cacheInvalidationService;
 
     public ResearchProjectService(
             ResearchProjectRepository projectRepository,
@@ -56,7 +58,8 @@ public class ResearchProjectService {
             WorkspaceMembershipRepository workspaceMembershipRepository,
             WorkspaceAuthorizationService workspaceAuthorizationService,
             ProjectAuthorizationService authorizationService,
-            SecurityAuditService auditService
+            SecurityAuditService auditService,
+            CacheInvalidationService cacheInvalidationService
     ) {
         this.projectRepository = projectRepository;
         this.membershipRepository = membershipRepository;
@@ -65,6 +68,7 @@ public class ResearchProjectService {
         this.workspaceAuthorizationService = workspaceAuthorizationService;
         this.authorizationService = authorizationService;
         this.auditService = auditService;
+        this.cacheInvalidationService = cacheInvalidationService;
     }
 
     public ResearchProjectResponse createProject(
@@ -109,6 +113,7 @@ public class ResearchProjectService {
                 currentUser.getId(),
                 SecurityAuditEventType.RESEARCH_PROJECT_CREATED
         );
+        cacheInvalidationService.evictProjectMetadata(savedProject.getId());
 
         return toProjectResponse(savedProject, membership);
     }
@@ -166,6 +171,12 @@ public class ResearchProjectService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public ResearchProject getProjectEntity(UUID projectId) {
+        return projectRepository.findById(projectId)
+                .orElseThrow(() -> new ResourceNotFoundException("Research project not found."));
+    }
+
     public ResearchProjectResponse updateProject(
             UUID projectId,
             User currentUser,
@@ -190,6 +201,7 @@ public class ResearchProjectService {
                 currentUser.getId(),
                 SecurityAuditEventType.RESEARCH_PROJECT_UPDATED
         );
+        cacheInvalidationService.evictProjectMetadata(projectId);
 
         return toProjectResponse(
                 project,
@@ -220,6 +232,7 @@ public class ResearchProjectService {
                 currentUser.getId(),
                 SecurityAuditEventType.RESEARCH_PROJECT_ACTIVATED
         );
+        cacheInvalidationService.evictProjectMetadata(projectId);
 
         return toProjectResponse(
                 project,
@@ -249,6 +262,7 @@ public class ResearchProjectService {
                 currentUser.getId(),
                 SecurityAuditEventType.RESEARCH_PROJECT_COMPLETED
         );
+        cacheInvalidationService.evictProjectMetadata(projectId);
 
         return toProjectResponse(
                 project,
@@ -273,6 +287,7 @@ public class ResearchProjectService {
                 currentUser.getId(),
                 SecurityAuditEventType.RESEARCH_PROJECT_ARCHIVED
         );
+        cacheInvalidationService.evictProjectMetadata(projectId);
 
         return toProjectResponse(
                 project,
@@ -364,6 +379,7 @@ public class ResearchProjectService {
                 currentUser.getId(),
                 SecurityAuditEventType.PROJECT_MEMBER_ADDED
         );
+        cacheInvalidationService.evictProjectMetadata(projectId);
 
         return toMemberResponse(savedMembership);
     }
@@ -415,6 +431,7 @@ public class ResearchProjectService {
                 currentUser.getId(),
                 SecurityAuditEventType.PROJECT_MEMBER_ROLE_CHANGED
         );
+        cacheInvalidationService.evictProjectMetadata(projectId);
 
         return toMemberResponse(targetMembership);
     }
@@ -453,6 +470,7 @@ public class ResearchProjectService {
                 currentUser.getId(),
                 SecurityAuditEventType.PROJECT_MEMBER_REMOVED
         );
+        cacheInvalidationService.evictProjectMetadata(projectId);
     }
 
     private long activeLeadCount(UUID projectId) {

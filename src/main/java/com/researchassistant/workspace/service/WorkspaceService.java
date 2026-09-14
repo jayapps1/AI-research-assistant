@@ -1,5 +1,6 @@
 package com.researchassistant.workspace.service;
 
+import com.researchassistant.cache.CacheInvalidationService;
 import com.researchassistant.common.exception.DuplicateResourceException;
 import com.researchassistant.common.exception.ResourceNotFoundException;
 import com.researchassistant.identity.entity.User;
@@ -40,19 +41,22 @@ public class WorkspaceService {
     private final UserRepository userRepository;
     private final WorkspaceAuthorizationService authorizationService;
     private final SecurityAuditService auditService;
+    private final CacheInvalidationService cacheInvalidationService;
 
     public WorkspaceService(
             WorkspaceRepository workspaceRepository,
             WorkspaceMembershipRepository membershipRepository,
             UserRepository userRepository,
             WorkspaceAuthorizationService authorizationService,
-            SecurityAuditService auditService
+            SecurityAuditService auditService,
+            CacheInvalidationService cacheInvalidationService
     ) {
         this.workspaceRepository = workspaceRepository;
         this.membershipRepository = membershipRepository;
         this.userRepository = userRepository;
         this.authorizationService = authorizationService;
         this.auditService = auditService;
+        this.cacheInvalidationService = cacheInvalidationService;
     }
 
     public WorkspaceResponse createWorkspace(
@@ -125,6 +129,7 @@ public class WorkspaceService {
         }
 
         auditService.record(currentUser.getId(), SecurityAuditEventType.WORKSPACE_UPDATED);
+        cacheInvalidationService.evictAllProjectMetadata();
 
         return toWorkspaceResponse(workspace, membership);
     }
@@ -140,6 +145,7 @@ public class WorkspaceService {
         workspace.setStatus(WorkspaceStatus.ARCHIVED);
 
         auditService.record(currentUser.getId(), SecurityAuditEventType.WORKSPACE_ARCHIVED);
+        cacheInvalidationService.evictAllProjectMetadata();
 
         return toWorkspaceResponse(workspace, membership);
     }
@@ -218,6 +224,7 @@ public class WorkspaceService {
                 membershipRepository.save(membership);
 
         auditService.record(currentUser.getId(), SecurityAuditEventType.WORKSPACE_MEMBER_ADDED);
+        cacheInvalidationService.evictAllProjectMetadata();
 
         return toMemberResponse(savedMembership);
     }
@@ -253,6 +260,7 @@ public class WorkspaceService {
         targetMembership.setRole(request.role());
 
         auditService.record(currentUser.getId(), SecurityAuditEventType.WORKSPACE_MEMBER_ROLE_CHANGED);
+        cacheInvalidationService.evictAllProjectMetadata();
 
         return toMemberResponse(targetMembership);
     }
@@ -292,6 +300,7 @@ public class WorkspaceService {
         targetMembership.setStatus(WorkspaceMembershipStatus.REMOVED);
 
         auditService.record(currentUser.getId(), SecurityAuditEventType.WORKSPACE_MEMBER_REMOVED);
+        cacheInvalidationService.evictAllProjectMetadata();
     }
 
     private WorkspaceResponse toWorkspaceResponse(

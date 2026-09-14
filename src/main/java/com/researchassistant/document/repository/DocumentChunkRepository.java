@@ -11,5 +11,7 @@ public interface DocumentChunkRepository extends JpaRepository<DocumentChunk, UU
 
     List<DocumentChunk> findAllByDocumentVersionIdOrderByChunkNumber(UUID versionId);
 
+    List<DocumentChunk> findAllByDocumentVersionDocumentProjectId(UUID projectId);
+
     void deleteByDocumentVersionId(UUID versionId);
 }

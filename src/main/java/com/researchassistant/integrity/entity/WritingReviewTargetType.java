@@ -1,0 +1,2 @@
+package com.researchassistant.integrity.entity;
+public enum WritingReviewTargetType { RESEARCH_PROBLEM, LITERATURE_REVIEW_SECTION, METHODOLOGY, FINDING, DISCUSSION, CONCLUSION, RECOMMENDATION, REPORT_SECTION, REPORT }

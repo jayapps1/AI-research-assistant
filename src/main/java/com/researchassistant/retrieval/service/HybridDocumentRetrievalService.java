@@ -1,6 +1,7 @@
 package com.researchassistant.retrieval.service;
 
 import com.researchassistant.document.embedding.DocumentEmbeddingProvider;
+import com.researchassistant.document.embedding.DisabledDocumentEmbeddingProvider;
 import com.researchassistant.document.embedding.EmbeddingProperties;
 import com.researchassistant.document.embedding.EmbeddingVector;
 import com.researchassistant.document.entity.Document;
@@ -19,6 +20,8 @@ import com.researchassistant.retrieval.repository.DocumentRetrievalRepository;
 import com.researchassistant.retrieval.repository.RetrievalCandidateRow;
 import com.researchassistant.retrieval.rerank.EvidenceReranker;
 
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +44,25 @@ public class HybridDocumentRetrievalService {
     private final RetrievalProperties retrievalProperties;
     private final EvidenceReranker reranker;
 
+    @Autowired
+    public HybridDocumentRetrievalService(
+            ProjectAuthorizationService projectAuthorizationService,
+            DocumentRepository documentRepository,
+            DocumentRetrievalRepository retrievalRepository,
+            ObjectProvider<DocumentEmbeddingProvider> embeddingProvider,
+            ObjectProvider<EmbeddingProperties> embeddingProperties,
+            RetrievalProperties retrievalProperties,
+            EvidenceReranker reranker
+    ) {
+        this.projectAuthorizationService = projectAuthorizationService;
+        this.documentRepository = documentRepository;
+        this.retrievalRepository = retrievalRepository;
+        this.embeddingProperties = embeddingProperties.getIfAvailable(() -> new EmbeddingProperties(false, "none", "", null, 64));
+        this.embeddingProvider = embeddingProvider.getIfAvailable(() -> new DisabledDocumentEmbeddingProvider(this.embeddingProperties));
+        this.retrievalProperties = retrievalProperties;
+        this.reranker = reranker;
+    }
+
     public HybridDocumentRetrievalService(
             ProjectAuthorizationService projectAuthorizationService,
             DocumentRepository documentRepository,
@@ -53,8 +75,8 @@ public class HybridDocumentRetrievalService {
         this.projectAuthorizationService = projectAuthorizationService;
         this.documentRepository = documentRepository;
         this.retrievalRepository = retrievalRepository;
-        this.embeddingProvider = embeddingProvider;
-        this.embeddingProperties = embeddingProperties;
+        this.embeddingProperties = embeddingProperties == null ? new EmbeddingProperties(false, "none", "", null, 64) : embeddingProperties;
+        this.embeddingProvider = embeddingProvider == null ? new DisabledDocumentEmbeddingProvider(this.embeddingProperties) : embeddingProvider;
         this.retrievalProperties = retrievalProperties;
         this.reranker = reranker;
     }

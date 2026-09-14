@@ -77,6 +77,12 @@ public class ResearchProject {
     @Column(name = "next_document_number", nullable = false)
     private long nextDocumentNumber = 1L;
 
+    @Column(name = "next_participant_number", nullable = false)
+    private long nextParticipantNumber = 1L;
+
+    @Column(name = "next_session_number", nullable = false)
+    private long nextSessionNumber = 1L;
+
     @Version
     @Column(name = "version")
     private Long version;
@@ -102,6 +108,12 @@ public class ResearchProject {
         }
         if (nextDocumentNumber < 1L) {
             nextDocumentNumber = 1L;
+        }
+        if (nextParticipantNumber < 1L) {
+            nextParticipantNumber = 1L;
+        }
+        if (nextSessionNumber < 1L) {
+            nextSessionNumber = 1L;
         }
     }
 

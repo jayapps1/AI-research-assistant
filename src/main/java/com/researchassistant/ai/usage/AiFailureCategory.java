@@ -1,0 +1,13 @@
+package com.researchassistant.ai.usage;
+
+public enum AiFailureCategory {
+    AUTHENTICATION,
+    RATE_LIMITED,
+    PROVIDER_UNAVAILABLE,
+    TIMEOUT,
+    INVALID_REQUEST,
+    POLICY_REJECTED,
+    OUTPUT_VALIDATION_FAILED,
+    CITATION_VERIFICATION_FAILED,
+    UNKNOWN
+}

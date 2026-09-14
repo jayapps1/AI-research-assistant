@@ -27,6 +27,17 @@ spring:
   cache:
     type: simple
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL_ENABLED:false}
+      database: ${REDIS_DATABASE:0}
+      repositories:
+        enabled: false
+
   ai:
     model:
       chat: none
@@ -43,7 +54,36 @@ spring:
 server:
   port: 8096
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+
 app:
+  cache:
+    provider: ${CACHE_PROVIDER:simple}
+    key-prefix: ${REDIS_KEY_PREFIX:research-assistant:v1:}
+    project-metadata-ttl: ${CACHE_PROJECT_METADATA_TTL:PT5M}
+    document-metadata-ttl: ${CACHE_DOCUMENT_METADATA_TTL:PT5M}
+    literature-summary-ttl: ${CACHE_LITERATURE_SUMMARY_TTL:PT5M}
+    research-design-validation-ttl: ${CACHE_RESEARCH_DESIGN_VALIDATION_TTL:PT1M}
+  backup:
+    enabled: ${BACKUP_ENABLED:false}
+    root-directory: ${BACKUP_ROOT_DIR:./data/backups}
+    retention:
+      daily: ${BACKUP_RETENTION_DAILY:7}
+      weekly: ${BACKUP_RETENTION_WEEKLY:4}
+      monthly: ${BACKUP_RETENTION_MONTHLY:12}
+    verification:
+      required: ${BACKUP_VERIFICATION_REQUIRED:true}
+      freshness-grace: ${BACKUP_FRESHNESS_GRACE:PT6H}
+    target:
+      rpo-minutes: ${BACKUP_TARGET_RPO_MINUTES:1440}
+      rto-minutes: ${BACKUP_TARGET_RTO_MINUTES:240}
   security:
     jwt:
       secret: ${JWT_SECRET}
@@ -65,13 +105,31 @@ app:
       minimum-characters: ${DOCUMENT_CHUNK_MINIMUM_CHARACTERS:200}
     processing:
       auto-process-after-upload: ${DOCUMENT_AUTO_PROCESS_AFTER_UPLOAD:false}
+  collaboration:
+    invitation-ttl: ${PROJECT_INVITATION_TTL:P7D}
   ai:
-    embeddings:
-      enabled: ${AI_EMBEDDINGS_ENABLED:false}
-      provider: ${AI_EMBEDDINGS_PROVIDER:none}
-      model: ${AI_EMBEDDINGS_MODEL:}
-      dimensions: ${AI_EMBEDDINGS_DIMENSIONS:}
-      batch-size: ${AI_EMBEDDINGS_BATCH_SIZE:32}
+    generation:
+      enabled: ${AI_GENERATION_ENABLED:false}
+      provider: ${AI_GENERATION_PROVIDER:none}
+      model: ${AI_GENERATION_MODEL:}
+      temperature: ${AI_GENERATION_TEMPERATURE:0.2}
+      max-output-tokens: ${AI_GENERATION_MAX_OUTPUT_TOKENS:4096}
+      timeout: ${AI_GENERATION_TIMEOUT:PT60S}
+    embedding:
+      enabled: ${AI_EMBEDDING_ENABLED:${AI_EMBEDDINGS_ENABLED:false}}
+      provider: ${AI_EMBEDDING_PROVIDER:${AI_EMBEDDINGS_PROVIDER:none}}
+      model: ${AI_EMBEDDING_MODEL:${AI_EMBEDDINGS_MODEL:}}
+      dimensions: ${AI_EMBEDDING_DIMENSIONS:${AI_EMBEDDINGS_DIMENSIONS:}}
+      batch-size: ${AI_EMBEDDING_BATCH_SIZE:${AI_EMBEDDINGS_BATCH_SIZE:64}}
+      timeout: ${AI_EMBEDDING_TIMEOUT:PT60S}
+    retrieval:
+      lexical-enabled: true
+      semantic-enabled: ${AI_SEMANTIC_RETRIEVAL_ENABLED:false}
+    privacy:
+      external-research-content-enabled: ${AI_EXTERNAL_RESEARCH_CONTENT_ENABLED:false}
+  integrity:
+    similarity:
+      provider: ${SIMILARITY_PROVIDER:none}
   retrieval:
     lexical-candidates: ${RETRIEVAL_LEXICAL_CANDIDATES:40}
     semantic-candidates: ${RETRIEVAL_SEMANTIC_CANDIDATES:40}

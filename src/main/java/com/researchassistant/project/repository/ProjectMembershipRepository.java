@@ -30,6 +30,17 @@ public interface ProjectMembershipRepository
             ProjectMembershipStatus status
     );
 
+    Optional<ProjectMembership> findByIdAndProjectIdAndStatus(
+            UUID id,
+            UUID projectId,
+            ProjectMembershipStatus status
+    );
+
+    List<ProjectMembership> findAllByProjectIdAndStatus(
+            UUID projectId,
+            ProjectMembershipStatus status
+    );
+
     boolean existsByProjectIdAndUserIdAndStatus(
             UUID projectId,
             UUID userId,

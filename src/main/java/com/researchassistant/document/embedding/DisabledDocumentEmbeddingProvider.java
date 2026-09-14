@@ -1,10 +1,12 @@
 package com.researchassistant.document.embedding;
 
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 
 import java.util.List;
 
 @Component
+@ConditionalOnMissingBean(DocumentEmbeddingProvider.class)
 public class DisabledDocumentEmbeddingProvider
         implements DocumentEmbeddingProvider {
 

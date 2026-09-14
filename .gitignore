@@ -1,6 +1,11 @@
 HELP.md
 target/
 data/
+data/documents/
+data/backups/
+restore-work/
+*.dump
+*.backup
 .env
 *.log
 ~$*

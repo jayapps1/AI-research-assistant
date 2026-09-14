@@ -8,12 +8,14 @@ import com.researchassistant.document.entity.EmbeddingStatus;
 import com.researchassistant.document.repository.DocumentChunkEmbeddingRepository;
 import com.researchassistant.document.repository.DocumentChunkRepository;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class DocumentEmbeddingService {
@@ -26,13 +28,13 @@ public class DocumentEmbeddingService {
     public DocumentEmbeddingService(
             DocumentChunkRepository chunkRepository,
             DocumentChunkEmbeddingRepository embeddingRepository,
-            DocumentEmbeddingProvider provider,
-            EmbeddingProperties properties
+            ObjectProvider<DocumentEmbeddingProvider> provider,
+            ObjectProvider<EmbeddingProperties> properties
     ) {
         this.chunkRepository = chunkRepository;
         this.embeddingRepository = embeddingRepository;
-        this.provider = provider;
-        this.properties = properties;
+        this.properties = properties.getIfAvailable(() -> new EmbeddingProperties(false, "none", "", null, 64));
+        this.provider = provider.getIfAvailable(() -> new DisabledDocumentEmbeddingProvider(this.properties));
     }
 
     public boolean enabledAndAvailable() {
@@ -77,12 +79,20 @@ public class DocumentEmbeddingService {
                                     provider.model()
                             )
                             .orElseGet(DocumentChunkEmbedding::new);
+                    
+                    if (embedding.getId() != null && 
+                        embedding.getChunkChecksumSha256() != null &&
+                        !embedding.getChunkChecksumSha256().equals(chunk.getContentChecksumSha256())) {
+                        embedding.setStatus(EmbeddingStatus.STALE);
+                    } else {
+                        embedding.setStatus(EmbeddingStatus.COMPLETED);
+                    }
+                    
                     embedding.setChunk(chunk);
                     embedding.setProvider(provider.provider());
                     embedding.setModel(provider.model());
                     embedding.setDimensions(vector.dimensions());
                     embedding.setChunkChecksumSha256(chunk.getContentChecksumSha256());
-                    embedding.setStatus(EmbeddingStatus.COMPLETED);
                     embedding.setVectorValues(vector.values());
                     embedding.setEmbeddedAt(OffsetDateTime.now());
                     embeddings.add(embedding);
@@ -104,6 +114,23 @@ public class DocumentEmbeddingService {
             }
             throw exception;
         }
+    }
+
+    @Transactional
+    public int markStaleEmbeddingsForVersion(UUID versionId) {
+        List<DocumentChunk> chunks = chunkRepository.findAllByDocumentVersionIdOrderByChunkNumber(versionId);
+        int count = 0;
+        for (DocumentChunk chunk : chunks) {
+            List<DocumentChunkEmbedding> embeddings = embeddingRepository.findAllByChunkId(chunk.getId());
+            for (DocumentChunkEmbedding embedding : embeddings) {
+                if (!embedding.getChunkChecksumSha256().equals(chunk.getContentChecksumSha256())) {
+                    embedding.setStatus(EmbeddingStatus.STALE);
+                    embeddingRepository.save(embedding);
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     private String shortMessage(Exception exception) {

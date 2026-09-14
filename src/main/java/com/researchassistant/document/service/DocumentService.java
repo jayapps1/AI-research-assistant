@@ -1,5 +1,6 @@
 package com.researchassistant.document.service;
 
+import com.researchassistant.cache.CacheInvalidationService;
 import com.researchassistant.document.config.DocumentProperties;
 import com.researchassistant.document.dto.DocumentProcessingJobResponse;
 import com.researchassistant.document.dto.DocumentResponse;
@@ -78,6 +79,7 @@ public class DocumentService {
     private final DocumentProperties properties;
     private final SecurityAuditService auditService;
     private final DocumentProcessingPipelineService processingPipelineService;
+    private final CacheInvalidationService cacheInvalidationService;
 
     public DocumentService(
             DocumentRepository documentRepository,
@@ -89,7 +91,8 @@ public class DocumentService {
             DocumentStorageService storageService,
             DocumentProperties properties,
             SecurityAuditService auditService,
-            DocumentProcessingPipelineService processingPipelineService
+            DocumentProcessingPipelineService processingPipelineService,
+            CacheInvalidationService cacheInvalidationService
     ) {
         this.documentRepository = documentRepository;
         this.versionRepository = versionRepository;
@@ -101,6 +104,7 @@ public class DocumentService {
         this.properties = properties;
         this.auditService = auditService;
         this.processingPipelineService = processingPipelineService;
+        this.cacheInvalidationService = cacheInvalidationService;
     }
 
     public DocumentResponse uploadDocument(
@@ -149,6 +153,10 @@ public class DocumentService {
         }
 
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_CREATED);
+        cacheInvalidationService.evictDocumentMetadata(
+                savedDocument.getId(),
+                projectId
+        );
 
         return toDocumentResponse(savedDocument);
     }
@@ -194,6 +202,10 @@ public class DocumentService {
         }
 
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_VERSION_UPLOADED);
+        cacheInvalidationService.evictDocumentMetadata(
+                lockedDocument.getId(),
+                lockedDocument.getProject().getId()
+        );
 
         return toDocumentResponse(lockedDocument);
     }
@@ -273,6 +285,10 @@ public class DocumentService {
         document.setArchivedAt(OffsetDateTime.now());
 
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_ARCHIVED);
+        cacheInvalidationService.evictDocumentMetadata(
+                document.getId(),
+                document.getProject().getId()
+        );
 
         return toDocumentResponse(document);
     }
@@ -293,6 +309,10 @@ public class DocumentService {
         document.setArchivedAt(null);
 
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_RESTORED);
+        cacheInvalidationService.evictDocumentMetadata(
+                document.getId(),
+                document.getProject().getId()
+        );
 
         return toDocumentResponse(document);
     }
@@ -328,6 +348,10 @@ public class DocumentService {
         );
 
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_PROCESSING_RETRIED);
+        cacheInvalidationService.evictDocumentMetadata(
+                context.document().getId(),
+                context.document().getProject().getId()
+        );
 
         return toJobResponse(job);
     }
@@ -349,6 +373,10 @@ public class DocumentService {
         context.document().setStatus(DocumentStatus.PROCESSING);
         processingPipelineService.processVersion(version);
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_PROCESSING_RETRIED);
+        cacheInvalidationService.evictDocumentMetadata(
+                context.document().getId(),
+                context.document().getProject().getId()
+        );
         return toDocumentResponse(context.document());
     }
 

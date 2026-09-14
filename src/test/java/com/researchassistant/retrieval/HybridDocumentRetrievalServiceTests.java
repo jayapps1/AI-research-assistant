@@ -120,7 +120,7 @@ class HybridDocumentRetrievalServiceTests {
             DocumentRetrievalRepository retrievalRepository
     ) {
         EmbeddingProperties embeddingProperties =
-                new EmbeddingProperties(false, "none", "", "", 32);
+                new EmbeddingProperties(false, "none", "", "", 32, java.time.Duration.ofSeconds(60));
         return new HybridDocumentRetrievalService(
                 authorizationService,
                 documentRepository,

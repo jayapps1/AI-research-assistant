@@ -16,5 +16,7 @@ public interface DocumentChunkEmbeddingRepository
             String model
     );
 
+    java.util.List<DocumentChunkEmbedding> findAllByChunkId(UUID chunkId);
+
     void deleteByChunkDocumentVersionId(UUID versionId);
 }

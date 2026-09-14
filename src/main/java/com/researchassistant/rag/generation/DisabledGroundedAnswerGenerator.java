@@ -1,8 +1,10 @@
 package com.researchassistant.rag.generation;
 
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 
 @Component
+@ConditionalOnMissingBean(GroundedAnswerGenerator.class)
 public class DisabledGroundedAnswerGenerator implements GroundedAnswerGenerator {
 
     @Override

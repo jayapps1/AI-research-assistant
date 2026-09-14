@@ -23,6 +23,7 @@ import com.researchassistant.rag.exception.RagCapabilityUnavailableException;
 import com.researchassistant.rag.exception.RagVerificationException;
 import com.researchassistant.rag.generation.GeneratedAnswerDraft;
 import com.researchassistant.rag.generation.GeneratedCitation;
+import com.researchassistant.rag.generation.DisabledGroundedAnswerGenerator;
 import com.researchassistant.rag.generation.GroundedAnswerGenerator;
 import com.researchassistant.rag.repository.AnswerCitationRepository;
 import com.researchassistant.rag.repository.GroundedAnswerRepository;
@@ -37,6 +38,7 @@ import com.researchassistant.retrieval.service.HybridDocumentRetrievalService;
 
 import com.researchassistant.identity.entity.User;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -73,7 +75,7 @@ public class RagQueryService {
             RetrievalScopeService scopeService,
             HybridDocumentRetrievalService retrievalService,
             EvidenceBundleService evidenceBundleService,
-            GroundedAnswerGenerator answerGenerator,
+            ObjectProvider<GroundedAnswerGenerator> answerGenerator,
             CitationVerificationService citationVerificationService,
             RagQueryRepository queryRepository,
             RagQueryDocumentRepository queryDocumentRepository,
@@ -88,7 +90,7 @@ public class RagQueryService {
         this.scopeService = scopeService;
         this.retrievalService = retrievalService;
         this.evidenceBundleService = evidenceBundleService;
-        this.answerGenerator = answerGenerator;
+        this.answerGenerator = answerGenerator.getIfAvailable(DisabledGroundedAnswerGenerator::new);
         this.citationVerificationService = citationVerificationService;
         this.queryRepository = queryRepository;
         this.queryDocumentRepository = queryDocumentRepository;

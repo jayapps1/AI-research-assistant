@@ -3,6 +3,7 @@ package com.researchassistant.common.error;
 import com.researchassistant.common.exception.AuthenticationFailedException;
 import com.researchassistant.common.exception.DuplicateResourceException;
 import com.researchassistant.common.exception.ResourceNotFoundException;
+import com.researchassistant.collaboration.exception.ArtifactVersionConflictException;
 import com.researchassistant.document.exception.DocumentAccessDeniedException;
 import com.researchassistant.document.exception.DocumentStorageException;
 import com.researchassistant.document.exception.DocumentUploadException;
@@ -10,6 +11,7 @@ import com.researchassistant.document.exception.InvalidDocumentOperationExceptio
 import com.researchassistant.document.exception.UnsupportedDocumentTypeException;
 import com.researchassistant.project.exception.InvalidProjectOperationException;
 import com.researchassistant.project.exception.ProjectAccessDeniedException;
+import com.researchassistant.methodology.exception.MethodologyValidationException;
 import com.researchassistant.rag.exception.RagAccessDeniedException;
 import com.researchassistant.rag.exception.RagCapabilityUnavailableException;
 import com.researchassistant.rag.exception.RagVerificationException;
@@ -254,9 +256,91 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(com.researchassistant.ai.exception.AiRateLimitExceededException.class)
+    public ResponseEntity<ApiErrorResponse> handleAiRateLimitExceeded(
+            com.researchassistant.ai.exception.AiRateLimitExceededException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.TOO_MANY_REQUESTS,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(com.researchassistant.ai.exception.AiPolicyViolationException.class)
+    public ResponseEntity<ApiErrorResponse> handleAiPolicyViolation(
+            com.researchassistant.ai.exception.AiPolicyViolationException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.FORBIDDEN,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
     @ExceptionHandler(RagVerificationException.class)
     public ResponseEntity<ApiErrorResponse> handleRagVerification(
             RagVerificationException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(MethodologyValidationException.class)
+    public ResponseEntity<ApiErrorResponse> handleMethodologyValidation(
+            MethodologyValidationException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(ArtifactVersionConflictException.class)
+    public ResponseEntity<ApiErrorResponse> handleArtifactVersionConflict(
+            ArtifactVersionConflictException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of(
+                        "artifactId", exception.artifactId().toString(),
+                        "expectedVersion", String.valueOf(exception.expectedVersion()),
+                        "currentVersion", String.valueOf(exception.currentVersion())
+                )
+        );
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiErrorResponse> handleIllegalArgument(
+            IllegalArgumentException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiErrorResponse> handleIllegalState(
+            IllegalStateException exception,
             HttpServletRequest request
     ) {
         return buildResponse(
