@@ -21,6 +21,7 @@ import com.researchassistant.document.exception.UnsupportedDocumentTypeException
 import com.researchassistant.document.repository.DocumentProcessingJobRepository;
 import com.researchassistant.document.repository.DocumentRepository;
 import com.researchassistant.document.repository.DocumentVersionRepository;
+import com.researchassistant.document.processing.DocumentProcessingPipelineService;
 import com.researchassistant.document.storage.DocumentStorageObject;
 import com.researchassistant.document.storage.DocumentStorageService;
 import com.researchassistant.document.storage.StoredDocumentObject;
@@ -76,6 +77,7 @@ public class DocumentService {
     private final DocumentStorageService storageService;
     private final DocumentProperties properties;
     private final SecurityAuditService auditService;
+    private final DocumentProcessingPipelineService processingPipelineService;
 
     public DocumentService(
             DocumentRepository documentRepository,
@@ -86,7 +88,8 @@ public class DocumentService {
             DocumentAuthorizationService documentAuthorizationService,
             DocumentStorageService storageService,
             DocumentProperties properties,
-            SecurityAuditService auditService
+            SecurityAuditService auditService,
+            DocumentProcessingPipelineService processingPipelineService
     ) {
         this.documentRepository = documentRepository;
         this.versionRepository = versionRepository;
@@ -97,6 +100,7 @@ public class DocumentService {
         this.storageService = storageService;
         this.properties = properties;
         this.auditService = auditService;
+        this.processingPipelineService = processingPipelineService;
     }
 
     public DocumentResponse uploadDocument(
@@ -140,6 +144,9 @@ public class DocumentService {
         savedDocument.setCurrentVersion(version);
         savedDocument.setStatus(DocumentStatus.PROCESSING);
         createQueuedIngestionJob(version, 1);
+        if (properties.processing().autoProcessAfterUpload()) {
+            processingPipelineService.processVersion(version);
+        }
 
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_CREATED);
 
@@ -182,6 +189,9 @@ public class DocumentService {
         lockedDocument.setStatus(DocumentStatus.PROCESSING);
         lockedDocument.setArchivedAt(null);
         createQueuedIngestionJob(version, 1);
+        if (properties.processing().autoProcessAfterUpload()) {
+            processingPipelineService.processVersion(version);
+        }
 
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_VERSION_UPLOADED);
 
@@ -320,6 +330,26 @@ public class DocumentService {
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_PROCESSING_RETRIED);
 
         return toJobResponse(job);
+    }
+
+    public DocumentResponse reprocessCurrentVersion(
+            UUID documentId,
+            User user
+    ) {
+        DocumentAuthorizationContext context =
+                documentAuthorizationService.requireDocumentEditor(
+                        documentId,
+                        user
+                );
+        DocumentVersion version = context.document().getCurrentVersion();
+        if (version == null) {
+            throw new DocumentVersionNotFoundException();
+        }
+        version.setStatus(DocumentVersionStatus.PROCESSING);
+        context.document().setStatus(DocumentStatus.PROCESSING);
+        processingPipelineService.processVersion(version);
+        auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_PROCESSING_RETRIED);
+        return toDocumentResponse(context.document());
     }
 
     @Transactional(readOnly = true)

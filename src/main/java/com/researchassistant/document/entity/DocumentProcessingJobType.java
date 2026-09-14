@@ -1,5 +1,9 @@
 package com.researchassistant.document.entity;
 
 public enum DocumentProcessingJobType {
-    INGESTION
+    INGESTION,
+    TEXT_EXTRACTION,
+    CHUNKING,
+    EMBEDDING,
+    INDEXING
 }

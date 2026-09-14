@@ -172,6 +172,15 @@ public class DocumentController {
         return documentService.retryProcessing(documentId, user);
     }
 
+    @PostMapping("/documents/{documentId}/processing/reprocess")
+    public DocumentResponse reprocessCurrentVersion(
+            Authentication authentication,
+            @PathVariable UUID documentId
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return documentService.reprocessCurrentVersion(documentId, user);
+    }
+
     private Pageable pageable(int page, int size) {
         int safePage = Math.max(0, page);
         int safeSize = size <= 0

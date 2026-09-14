@@ -10,6 +10,9 @@ import com.researchassistant.document.exception.InvalidDocumentOperationExceptio
 import com.researchassistant.document.exception.UnsupportedDocumentTypeException;
 import com.researchassistant.project.exception.InvalidProjectOperationException;
 import com.researchassistant.project.exception.ProjectAccessDeniedException;
+import com.researchassistant.rag.exception.RagAccessDeniedException;
+import com.researchassistant.rag.exception.RagCapabilityUnavailableException;
+import com.researchassistant.rag.exception.RagVerificationException;
 import com.researchassistant.workspace.exception.InvalidWorkspaceOperationException;
 import com.researchassistant.workspace.exception.WorkspaceAccessDeniedException;
 
@@ -220,6 +223,45 @@ public class GlobalExceptionHandler {
         return buildResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "Document storage failed.",
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(RagAccessDeniedException.class)
+    public ResponseEntity<ApiErrorResponse> handleRagAccessDenied(
+            RagAccessDeniedException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.NOT_FOUND,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(RagCapabilityUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleRagCapabilityUnavailable(
+            RagCapabilityUnavailableException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(RagVerificationException.class)
+    public ResponseEntity<ApiErrorResponse> handleRagVerification(
+            RagVerificationException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
                 request.getRequestURI(),
                 Map.of()
         );

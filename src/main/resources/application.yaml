@@ -59,3 +59,36 @@ app:
     storage:
       type: local
       local-directory: ${DOCUMENT_STORAGE_DIR:./data/documents}
+    chunking:
+      target-characters: ${DOCUMENT_CHUNK_TARGET_CHARACTERS:3000}
+      overlap-characters: ${DOCUMENT_CHUNK_OVERLAP_CHARACTERS:300}
+      minimum-characters: ${DOCUMENT_CHUNK_MINIMUM_CHARACTERS:200}
+    processing:
+      auto-process-after-upload: ${DOCUMENT_AUTO_PROCESS_AFTER_UPLOAD:false}
+  ai:
+    embeddings:
+      enabled: ${AI_EMBEDDINGS_ENABLED:false}
+      provider: ${AI_EMBEDDINGS_PROVIDER:none}
+      model: ${AI_EMBEDDINGS_MODEL:}
+      dimensions: ${AI_EMBEDDINGS_DIMENSIONS:}
+      batch-size: ${AI_EMBEDDINGS_BATCH_SIZE:32}
+  retrieval:
+    lexical-candidates: ${RETRIEVAL_LEXICAL_CANDIDATES:40}
+    semantic-candidates: ${RETRIEVAL_SEMANTIC_CANDIDATES:40}
+    fusion-candidates: ${RETRIEVAL_FUSION_CANDIDATES:60}
+    rerank-candidates: ${RETRIEVAL_RERANK_CANDIDATES:30}
+    final-limit: ${RETRIEVAL_FINAL_LIMIT:10}
+    max-limit: ${RETRIEVAL_MAX_LIMIT:50}
+    rrf-k: ${RETRIEVAL_RRF_K:60}
+  rag:
+    evidence:
+      max-items: ${RAG_EVIDENCE_MAX_ITEMS:12}
+      max-total-characters: ${RAG_EVIDENCE_MAX_TOTAL_CHARACTERS:30000}
+      max-item-characters: ${RAG_EVIDENCE_MAX_ITEM_CHARACTERS:6000}
+      minimum-items: ${RAG_EVIDENCE_MINIMUM_ITEMS:1}
+    generation:
+      enabled: ${AI_GENERATION_ENABLED:false}
+      provider: ${AI_GENERATION_PROVIDER:none}
+      model: ${AI_GENERATION_MODEL:}
+    conversation:
+      context-turns: ${RAG_CONVERSATION_CONTEXT_TURNS:6}

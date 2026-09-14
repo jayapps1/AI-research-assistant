@@ -274,6 +274,28 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
     </dependency>
+    <!-- =====================================================
+             DOCUMENT TEXT EXTRACTION
+
+             PDFBox extracts embedded PDF text page-by-page.
+             Apache POI XWPF extracts DOCX paragraph text without
+             pretending DOCX has reliable physical page numbers.
+             ===================================================== -->
+    <dependency>
+      <groupId>org.apache.pdfbox</groupId>
+      <artifactId>pdfbox</artifactId>
+      <version>3.0.5</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.poi</groupId>
+      <artifactId>poi-ooxml</artifactId>
+      <version>5.4.1</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.poi</groupId>
+      <artifactId>poi-scratchpad</artifactId>
+      <version>5.4.1</version>
+    </dependency>
   </dependencies>
   <!-- =========================================================
          SPRING AI DEPENDENCY MANAGEMENT
