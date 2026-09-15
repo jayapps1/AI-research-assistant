@@ -30,6 +30,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.slf4j.MDC;
 
 /**
  * Central exception handler for REST API requests.
@@ -338,6 +339,38 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(com.researchassistant.usage.QuotaExceededException.class)
+    public ResponseEntity<ApiErrorResponse> handleQuotaExceeded(
+            com.researchassistant.usage.QuotaExceededException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.TOO_MANY_REQUESTS,
+                "QUOTA_EXCEEDED",
+                request.getRequestURI(),
+                Map.of(
+                        "feature", exception.feature().name(),
+                        "limit", String.valueOf(exception.limit()),
+                        "used", String.valueOf(exception.used()),
+                        "remaining", String.valueOf(exception.remaining()),
+                        "resetAt", exception.resetAt().toString()
+                )
+        );
+    }
+
+    @ExceptionHandler(com.researchassistant.subscription.FeatureNotEntitledException.class)
+    public ResponseEntity<ApiErrorResponse> handleFeatureNotEntitled(
+            com.researchassistant.subscription.FeatureNotEntitledException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.FORBIDDEN,
+                "Feature is not enabled for the current subscription.",
+                request.getRequestURI(),
+                Map.of("feature", exception.feature().name())
+        );
+    }
+
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ApiErrorResponse> handleIllegalState(
             IllegalStateException exception,
@@ -397,10 +430,16 @@ public class GlobalExceptionHandler {
     ) {
 
         ApiErrorResponse body = new ApiErrorResponse(
+                "about:blank",
+                status.getReasonPhrase(),
                 OffsetDateTime.now(),
+                MDC.get("requestId"),
                 status.value(),
                 status.getReasonPhrase(),
+                status.name(),
                 message,
+                message,
+                path,
                 path,
                 validationErrors
         );

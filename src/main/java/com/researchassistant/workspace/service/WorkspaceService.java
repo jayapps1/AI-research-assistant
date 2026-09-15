@@ -7,6 +7,7 @@ import com.researchassistant.identity.entity.User;
 import com.researchassistant.identity.repository.UserRepository;
 import com.researchassistant.security.audit.SecurityAuditEventType;
 import com.researchassistant.security.audit.SecurityAuditService;
+import com.researchassistant.subscription.EntitlementService;
 import com.researchassistant.workspace.dto.AddWorkspaceMemberRequest;
 import com.researchassistant.workspace.dto.ChangeWorkspaceMemberRoleRequest;
 import com.researchassistant.workspace.dto.CreateWorkspaceRequest;
@@ -42,6 +43,7 @@ public class WorkspaceService {
     private final WorkspaceAuthorizationService authorizationService;
     private final SecurityAuditService auditService;
     private final CacheInvalidationService cacheInvalidationService;
+    private final EntitlementService entitlementService;
 
     public WorkspaceService(
             WorkspaceRepository workspaceRepository,
@@ -49,7 +51,8 @@ public class WorkspaceService {
             UserRepository userRepository,
             WorkspaceAuthorizationService authorizationService,
             SecurityAuditService auditService,
-            CacheInvalidationService cacheInvalidationService
+            CacheInvalidationService cacheInvalidationService,
+            EntitlementService entitlementService
     ) {
         this.workspaceRepository = workspaceRepository;
         this.membershipRepository = membershipRepository;
@@ -57,6 +60,7 @@ public class WorkspaceService {
         this.authorizationService = authorizationService;
         this.auditService = auditService;
         this.cacheInvalidationService = cacheInvalidationService;
+        this.entitlementService = entitlementService;
     }
 
     public WorkspaceResponse createWorkspace(
@@ -78,6 +82,7 @@ public class WorkspaceService {
         membership.setStatus(WorkspaceMembershipStatus.ACTIVE);
         membership.setJoinedAt(OffsetDateTime.now());
         membershipRepository.save(membership);
+        entitlementService.ensureFreeSubscription(savedWorkspace.getId());
 
         auditService.record(currentUser.getId(), SecurityAuditEventType.WORKSPACE_CREATED);
 

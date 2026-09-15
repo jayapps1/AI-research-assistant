@@ -62,8 +62,23 @@ management:
   endpoint:
     health:
       show-details: when_authorized
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
 
 app:
+  api:
+    allowed-origins: ${API_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+    max-page-size: ${API_MAX_PAGE_SIZE:100}
+    hsts-enabled: ${API_HSTS_ENABLED:false}
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:false}
+    general-per-minute: ${RATE_LIMIT_GENERAL_PER_MINUTE:600}
+    sensitive-per-minute: ${RATE_LIMIT_SENSITIVE_PER_MINUTE:120}
   cache:
     provider: ${CACHE_PROVIDER:simple}
     key-prefix: ${REDIS_KEY_PREFIX:research-assistant:v1:}
@@ -150,3 +165,30 @@ app:
       model: ${AI_GENERATION_MODEL:}
     conversation:
       context-turns: ${RAG_CONVERSATION_CONTEXT_TURNS:6}
+  payment:
+    paystack:
+      enabled: ${PAYSTACK_ENABLED:false}
+      mode: ${PAYSTACK_MODE:test}
+      secret-key: ${PAYSTACK_SECRET_KEY:}
+      public-key: ${PAYSTACK_PUBLIC_KEY:}
+      callback-base-url: ${PAYSTACK_CALLBACK_BASE_URL:}
+      live-enabled: ${PAYSTACK_LIVE_ENABLED:false}
+      connect-timeout: ${PAYSTACK_CONNECT_TIMEOUT:PT10S}
+      read-timeout: ${PAYSTACK_READ_TIMEOUT:PT30S}
+      max-attempts-per-intent: ${PAYMENT_MAX_ATTEMPTS_PER_INTENT:5}
+      retry-cooldown: ${PAYMENT_RETRY_COOLDOWN:PT15S}
+      intent-ttl: ${PAYMENT_INTENT_TTL:PT24H}
+      attempt-ttl: ${PAYMENT_ATTEMPT_TTL:PT30M}
+  notifications:
+    email:
+      enabled: ${EMAIL_ENABLED:false}
+      from-address: ${EMAIL_FROM_ADDRESS:}
+      from-name: ${EMAIL_FROM_NAME:AI Research Assistant}
+    arkesel:
+      enabled: ${ARKESEL_ENABLED:false}
+      api-key: ${ARKESEL_API_KEY:}
+      sender-id: ${ARKESEL_SENDER_ID:}
+    firebase:
+      enabled: ${FIREBASE_ENABLED:false}
+      project-id: ${FIREBASE_PROJECT_ID:}
+      access-token: ${FIREBASE_ACCESS_TOKEN:}

@@ -22,6 +22,9 @@ import com.researchassistant.project.repository.ProjectMembershipRepository;
 import com.researchassistant.project.repository.ResearchProjectRepository;
 import com.researchassistant.security.audit.SecurityAuditEventType;
 import com.researchassistant.security.audit.SecurityAuditService;
+import com.researchassistant.subscription.PlanFeature;
+import com.researchassistant.usage.QuotaService;
+import com.researchassistant.usage.UsageMetricType;
 import com.researchassistant.workspace.entity.Workspace;
 import com.researchassistant.workspace.entity.WorkspaceMembership;
 import com.researchassistant.workspace.entity.WorkspaceMembershipStatus;
@@ -50,6 +53,7 @@ public class ResearchProjectService {
     private final ProjectAuthorizationService authorizationService;
     private final SecurityAuditService auditService;
     private final CacheInvalidationService cacheInvalidationService;
+    private final QuotaService quotaService;
 
     public ResearchProjectService(
             ResearchProjectRepository projectRepository,
@@ -59,7 +63,8 @@ public class ResearchProjectService {
             WorkspaceAuthorizationService workspaceAuthorizationService,
             ProjectAuthorizationService authorizationService,
             SecurityAuditService auditService,
-            CacheInvalidationService cacheInvalidationService
+            CacheInvalidationService cacheInvalidationService,
+            QuotaService quotaService
     ) {
         this.projectRepository = projectRepository;
         this.membershipRepository = membershipRepository;
@@ -69,6 +74,7 @@ public class ResearchProjectService {
         this.authorizationService = authorizationService;
         this.auditService = auditService;
         this.cacheInvalidationService = cacheInvalidationService;
+        this.quotaService = quotaService;
     }
 
     public ResearchProjectResponse createProject(
@@ -89,6 +95,7 @@ public class ResearchProjectService {
                 );
 
         Workspace workspace = workspaceMembership.getWorkspace();
+        quotaService.requireWithinQuota(workspaceId, PlanFeature.PROJECT_CREATION, UsageMetricType.PROJECT_COUNT, 1L);
 
         ResearchProject project = new ResearchProject();
         project.setWorkspace(workspace);
@@ -328,6 +335,8 @@ public class ResearchProjectService {
                 authorizationService.isWorkspaceAdmin(
                         context.workspaceMembership()
                 );
+        quotaService.requireWithinQuota(context.project().getWorkspace().getId(), PlanFeature.COLLABORATORS_PER_PROJECT,
+                UsageMetricType.COLLABORATOR_COUNT, 1L, projectId);
 
         if (request.role() == ProjectRole.LEAD && !workspaceAdmin) {
             throw new InvalidProjectOperationException(

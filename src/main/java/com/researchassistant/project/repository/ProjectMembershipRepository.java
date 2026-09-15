@@ -59,6 +59,8 @@ public interface ProjectMembershipRepository
             ProjectMembershipStatus status
     );
 
+    long countByProjectIdAndStatus(UUID projectId, ProjectMembershipStatus status);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select m

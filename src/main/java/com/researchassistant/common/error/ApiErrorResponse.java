@@ -18,10 +18,16 @@ import java.util.Map;
  * @param validationErrors field-level validation failures
  */
 public record ApiErrorResponse(
+        String type,
+        String title,
         OffsetDateTime timestamp,
+        String requestId,
         int status,
         String error,
+        String errorCode,
         String message,
+        String detail,
+        String instance,
         String path,
         Map<String, String> validationErrors
 ) {

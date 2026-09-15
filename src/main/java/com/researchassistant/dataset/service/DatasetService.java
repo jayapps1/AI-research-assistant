@@ -4,6 +4,8 @@ import com.researchassistant.common.exception.ResourceNotFoundException;
 import com.researchassistant.dataset.dto.DatasetDtos.*;
 import com.researchassistant.dataset.model.*;
 import com.researchassistant.dataset.repository.DatasetVariableRepository;
+import com.researchassistant.dataset.repository.DatasetRecordRepository;
+import com.researchassistant.dataset.repository.DatasetValueRepository;
 import com.researchassistant.dataset.repository.ResearchDatasetRepository;
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.project.entity.ResearchProject;
@@ -13,19 +15,27 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class DatasetService {
     private final ResearchDatasetRepository datasetRepository;
     private final DatasetVariableRepository variableRepository;
+    private final DatasetRecordRepository recordRepository;
+    private final DatasetValueRepository valueRepository;
     private final DatasetValidationService validationService;
     private final ProjectAuthorizationService authorizationService;
 
     public DatasetService(ResearchDatasetRepository datasetRepository, DatasetVariableRepository variableRepository,
+                          DatasetRecordRepository recordRepository, DatasetValueRepository valueRepository,
                           DatasetValidationService validationService, ProjectAuthorizationService authorizationService) {
         this.datasetRepository = datasetRepository;
         this.variableRepository = variableRepository;
+        this.recordRepository = recordRepository;
+        this.valueRepository = valueRepository;
         this.validationService = validationService;
         this.authorizationService = authorizationService;
     }
@@ -64,6 +74,22 @@ public class DatasetService {
         variable.setMissingValueCode(request.missingValueCode());
         variable.setDisplayOrder(request.displayOrder() == null ? variableRepository.findAllByDatasetIdOrderByDisplayOrderAsc(datasetId).size() + 1 : request.displayOrder());
         return VariableResponse.from(variableRepository.save(variable));
+    }
+
+    @Transactional(readOnly = true)
+    public List<VariableResponse> variables(UUID datasetId, User user) {
+        loadForView(datasetId, user);
+        return variableRepository.findAllByDatasetIdOrderByDisplayOrderAsc(datasetId).stream().map(VariableResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Page<DatasetRecordResponse> records(UUID datasetId, User user, Pageable pageable) {
+        loadForView(datasetId, user);
+        Page<DatasetRecord> records = recordRepository.findAllByDatasetId(datasetId, pageable);
+        List<UUID> recordIds = records.getContent().stream().map(DatasetRecord::getId).toList();
+        Map<UUID, List<DatasetValue>> valuesByRecord = valueRepository.findAllByRecordIdIn(recordIds).stream()
+                .collect(Collectors.groupingBy(value -> value.getRecord().getId()));
+        return records.map(record -> DatasetRecordResponse.from(record, valuesByRecord.getOrDefault(record.getId(), List.of())));
     }
 
     @Transactional

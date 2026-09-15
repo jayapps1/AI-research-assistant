@@ -11,6 +11,9 @@ import com.researchassistant.reference.entity.ReferenceEntry;
 import com.researchassistant.reference.service.CitationFormattingService;
 import com.researchassistant.security.audit.SecurityAuditEventType;
 import com.researchassistant.security.audit.SecurityAuditService;
+import com.researchassistant.subscription.PlanFeature;
+import com.researchassistant.usage.QuotaService;
+import com.researchassistant.usage.UsageMetricType;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -39,11 +42,13 @@ public class ReportExportService {
     private final DocumentStorageService storageService;
     private final ProjectAuthorizationService authorizationService;
     private final SecurityAuditService auditService;
+    private final QuotaService quotaService;
 
     public ReportExportService(ReportExportJobRepository exportJobRepository, ResearchReportRepository reportRepository,
             ResearchReportChapterRepository chapterRepository, ResearchReportSectionRepository sectionRepository,
             ResearchReportCitationRepository citationRepository, CitationFormattingService citationFormattingService,
-            DocumentStorageService storageService, ProjectAuthorizationService authorizationService, SecurityAuditService auditService) {
+            DocumentStorageService storageService, ProjectAuthorizationService authorizationService, SecurityAuditService auditService,
+            QuotaService quotaService) {
         this.exportJobRepository = exportJobRepository;
         this.reportRepository = reportRepository;
         this.chapterRepository = chapterRepository;
@@ -53,6 +58,7 @@ public class ReportExportService {
         this.storageService = storageService;
         this.authorizationService = authorizationService;
         this.auditService = auditService;
+        this.quotaService = quotaService;
     }
 
     @Transactional
@@ -60,6 +66,9 @@ public class ReportExportService {
         ResearchReport report = reportRepository.findById(reportId).orElseThrow(() -> new ResourceNotFoundException("Report not found."));
         authorizationService.requireProjectEditor(report.getProject().getId(), user);
         if (format != ReportExportFormat.DOCX && format != ReportExportFormat.PDF) throw new IllegalArgumentException("Only DOCX and PDF exports are implemented.");
+        quotaService.requireWithinQuota(report.getProject().getWorkspace().getId(),
+                format == ReportExportFormat.PDF ? PlanFeature.REPORT_EXPORT_PDF : PlanFeature.REPORT_EXPORT_DOCX,
+                UsageMetricType.REPORT_EXPORT, 1L);
         ReportExportJob job = new ReportExportJob();
         job.setReport(report);
         job.setFormat(format);

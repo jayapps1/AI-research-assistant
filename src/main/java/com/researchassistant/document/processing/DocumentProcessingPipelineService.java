@@ -36,6 +36,9 @@ public class DocumentProcessingPipelineService {
 
     @Transactional
     public void processVersion(DocumentVersion version) {
+        if (version.isQuarantined()) {
+            throw new IllegalStateException("Quarantined documents cannot be processed.");
+        }
         DocumentProcessingJob extractionJob =
                 createJob(version, DocumentProcessingJobType.TEXT_EXTRACTION);
         extractionService.extract(version, extractionJob);

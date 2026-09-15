@@ -22,6 +22,10 @@ public interface ResearchProjectRepository
             Pageable pageable
     );
 
+    long countByWorkspaceId(UUID workspaceId);
+
+    long countByWorkspaceIdAndStatus(UUID workspaceId, com.researchassistant.project.entity.ResearchProjectStatus status);
+
     @Query("""
             select p
             from ResearchProject p

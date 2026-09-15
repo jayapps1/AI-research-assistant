@@ -7,6 +7,9 @@ import com.researchassistant.ai.usage.AiRequestStatus;
 import com.researchassistant.ai.usage.AiUsageRecordingService;
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.project.service.ProjectAuthorizationService;
+import com.researchassistant.subscription.PlanFeature;
+import com.researchassistant.usage.QuotaService;
+import com.researchassistant.usage.UsageMetricType;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +25,7 @@ public class ResearchAiOrchestrator {
     private final ResearchContextBuilder contextBuilder;
     private final AiResearchContentPolicyService policyService;
     private final AiUsageRecordingService usageRecordingService;
+    private final QuotaService quotaService;
 
     @Autowired
     public ResearchAiOrchestrator(
@@ -29,13 +33,15 @@ public class ResearchAiOrchestrator {
             ObjectProvider<AiGenerationProvider> generationProvider,
             ResearchContextBuilder contextBuilder,
             AiResearchContentPolicyService policyService,
-            AiUsageRecordingService usageRecordingService
+            AiUsageRecordingService usageRecordingService,
+            QuotaService quotaService
     ) {
         this.authorizationService = authorizationService;
         this.generationProvider = generationProvider.getIfAvailable(DisabledAiGenerationProvider::new);
         this.contextBuilder = contextBuilder;
         this.policyService = policyService;
         this.usageRecordingService = usageRecordingService;
+        this.quotaService = quotaService;
     }
 
     ResearchAiOrchestrator(
@@ -45,11 +51,23 @@ public class ResearchAiOrchestrator {
             AiResearchContentPolicyService policyService,
             AiUsageRecordingService usageRecordingService
     ) {
+        this(authorizationService, generationProvider, contextBuilder, policyService, usageRecordingService, null);
+    }
+
+    ResearchAiOrchestrator(
+            ProjectAuthorizationService authorizationService,
+            AiGenerationProvider generationProvider,
+            ResearchContextBuilder contextBuilder,
+            AiResearchContentPolicyService policyService,
+            AiUsageRecordingService usageRecordingService,
+            QuotaService quotaService
+    ) {
         this.authorizationService = authorizationService;
         this.generationProvider = generationProvider == null ? new DisabledAiGenerationProvider() : generationProvider;
         this.contextBuilder = contextBuilder;
         this.policyService = policyService;
         this.usageRecordingService = usageRecordingService;
+        this.quotaService = quotaService;
     }
 
     public <T> AiTaskResult<T> executeTask(
@@ -63,6 +81,9 @@ public class ResearchAiOrchestrator {
 
         if (requiresExternalContent(request.taskType())) {
             policyService.validateExternalContentTransmission();
+        }
+        if (quotaService != null) {
+            quotaService.requireWithinQuota(request.workspaceId(), PlanFeature.AI_GENERATION, UsageMetricType.AI_GENERATION_REQUEST, 1L);
         }
 
         if (!generationProvider.available()) {

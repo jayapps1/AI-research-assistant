@@ -1,0 +1,376 @@
+package com.researchassistant.billing;
+
+import com.researchassistant.audit.AuditEventService;
+import com.researchassistant.audit.AuditEventType;
+import com.researchassistant.billing.dto.BillingDtos.InitializePaymentResponse;
+import com.researchassistant.billing.dto.BillingDtos.PaymentAttemptInitializationResponse;
+import com.researchassistant.billing.dto.BillingDtos.PaymentAttemptSummary;
+import com.researchassistant.billing.dto.BillingDtos.PaymentIntentResponse;
+import com.researchassistant.common.exception.ResourceNotFoundException;
+import com.researchassistant.identity.entity.User;
+import com.researchassistant.notification.NotificationPriority;
+import com.researchassistant.notification.NotificationService;
+import com.researchassistant.notification.NotificationType;
+import com.researchassistant.subscription.*;
+import com.researchassistant.workspace.entity.Workspace;
+import com.researchassistant.workspace.repository.WorkspaceRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.security.SecureRandom;
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.HexFormat;
+import java.util.UUID;
+
+@Service
+@Transactional
+public class BillingService {
+    private final WorkspaceRepository workspaceRepository;
+    private final SubscriptionPlanRepository planRepository;
+    private final WorkspaceSubscriptionRepository subscriptionRepository;
+    private final PaymentTransactionRepository transactionRepository;
+    private final PaymentProvider paymentProvider;
+    private final SubscriptionChangeService subscriptionChangeService;
+    private final AuditEventService auditEventService;
+    private final BillingPaymentIntentRepository intentRepository;
+    private final PaymentAttemptRepository attemptRepository;
+    private final PaymentIdempotencyRecordRepository idempotencyRecordRepository;
+    private final PaymentProperties paymentProperties;
+    private final NotificationService notificationService;
+    private final SecureRandom random = new SecureRandom();
+
+    public BillingService(WorkspaceRepository workspaceRepository, SubscriptionPlanRepository planRepository,
+                          WorkspaceSubscriptionRepository subscriptionRepository, PaymentTransactionRepository transactionRepository,
+                          PaymentProvider paymentProvider, SubscriptionChangeService subscriptionChangeService,
+                          AuditEventService auditEventService, BillingPaymentIntentRepository intentRepository,
+                          PaymentAttemptRepository attemptRepository, PaymentIdempotencyRecordRepository idempotencyRecordRepository,
+                          PaymentProperties paymentProperties, NotificationService notificationService) {
+        this.workspaceRepository = workspaceRepository;
+        this.planRepository = planRepository;
+        this.subscriptionRepository = subscriptionRepository;
+        this.transactionRepository = transactionRepository;
+        this.paymentProvider = paymentProvider;
+        this.subscriptionChangeService = subscriptionChangeService;
+        this.auditEventService = auditEventService;
+        this.intentRepository = intentRepository;
+        this.attemptRepository = attemptRepository;
+        this.idempotencyRecordRepository = idempotencyRecordRepository;
+        this.paymentProperties = paymentProperties;
+        this.notificationService = notificationService;
+    }
+
+    public InitializePaymentResponse initialize(UUID workspaceId, User user, String planCode, BillingInterval interval) {
+        PaymentAttemptInitializationResponse response = initializeIntent(workspaceId, user, planCode, interval, null);
+        return new InitializePaymentResponse(response.paymentIntentId(), response.reference(), response.authorizationUrl(), null);
+    }
+
+    public PaymentAttemptInitializationResponse initializeIntent(UUID workspaceId, User user, String planCode, BillingInterval interval, String idempotencyKey) {
+        PaymentAttemptInitializationResponse idempotent = existingIdempotentResponse("INITIALIZE", idempotencyKey);
+        if (idempotent != null) return idempotent;
+        Workspace workspace = workspaceRepository.findById(workspaceId)
+                .orElseThrow(() -> new ResourceNotFoundException("Workspace not found."));
+        SubscriptionPlan plan = planRepository.findByCodeIgnoreCase(planCode)
+                .orElseThrow(() -> new ResourceNotFoundException("Subscription plan not found."));
+        if (plan.getPrice().signum() <= 0 || interval == BillingInterval.NONE) {
+            WorkspaceSubscription subscription = subscriptionChangeService.activatePlan(workspaceId, plan.getCode(), BillingInterval.NONE, null, user.getId(), "FREE_ACTIVATED", SubscriptionAccessSource.FREE_DEFAULT);
+            return new PaymentAttemptInitializationResponse(subscription.getId(), null, 0, null, "FREE", PaymentAttemptStatus.SUCCESS);
+        }
+        BillingPaymentIntent intent = new BillingPaymentIntent();
+        intent.setWorkspace(workspace);
+        intent.setInitiatedBy(user);
+        intent.setPlan(plan);
+        intent.setBillingInterval(interval);
+        intent.setExpectedAmount(plan.getPrice());
+        intent.setCurrency(plan.getCurrency());
+        intent.setStatus(PaymentIntentStatus.OPEN);
+        intent.setExpiresAt(OffsetDateTime.now().plus(paymentProperties.intentTtl()));
+        intent = intentRepository.saveAndFlush(intent);
+        PaymentAttemptInitializationResponse response = initializeAttempt(intent, user, false);
+        saveIdempotent("INITIALIZE", idempotencyKey, user, response);
+        return response;
+    }
+
+    public PaymentAttemptInitializationResponse retry(UUID paymentIntentId, User user, String idempotencyKey) {
+        PaymentAttemptInitializationResponse idempotent = existingIdempotentResponse("RETRY:" + paymentIntentId, idempotencyKey);
+        if (idempotent != null) return idempotent;
+        BillingPaymentIntent intent = intentRepository.findByIdForUpdate(paymentIntentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment intent not found."));
+        if (!intent.getInitiatedBy().getId().equals(user.getId())) {
+            throw new IllegalStateException("Only the initiating user may retry this payment.");
+        }
+        if (intent.getStatus() == PaymentIntentStatus.PAID) throw new IllegalStateException("Payment intent is already paid.");
+        if (intent.getExpiresAt() != null && !intent.getExpiresAt().isAfter(OffsetDateTime.now())) {
+            intent.setStatus(PaymentIntentStatus.EXPIRED);
+            throw new IllegalStateException("Payment intent has expired. Create a new payment intent for current pricing.");
+        }
+        PaymentAttempt latest = attemptRepository.findFirstByPaymentIntentIdOrderByAttemptNumberDesc(paymentIntentId)
+                .orElseThrow(() -> new IllegalStateException("Payment intent has no attempt to retry."));
+        if (!isRetryable(latest)) throw new IllegalStateException("Latest payment attempt is still active or not retryable.");
+        if (latest.getCompletedAt() != null && latest.getCompletedAt().plus(paymentProperties.retryCooldown()).isAfter(OffsetDateTime.now())) {
+            throw new IllegalStateException("Retry cooldown is still active.");
+        }
+        if (attemptRepository.countByPaymentIntentId(paymentIntentId) >= paymentProperties.maxAttemptsPerIntent()) {
+            throw new IllegalStateException("Maximum payment attempts reached for this intent.");
+        }
+        PaymentAttemptInitializationResponse response = initializeAttempt(intent, user, true);
+        saveIdempotent("RETRY:" + paymentIntentId, idempotencyKey, user, response);
+        return response;
+    }
+
+    public PaymentTransaction verify(UUID transactionId, User actor) {
+        return transactionRepository.findById(transactionId)
+                .map(transaction -> verifyLegacyReference(transaction.getInternalReference(), actor == null ? null : actor.getId()))
+                .orElseThrow(() -> new ResourceNotFoundException("Payment transaction not found."));
+    }
+
+    public PaymentTransaction verifyReference(String reference, UUID actorId) {
+        return verifyLegacyReference(reference, actorId);
+    }
+
+    public PaymentAttempt verifyAttemptReference(String reference, UUID actorId) {
+        PaymentAttempt attempt = attemptRepository.findByInternalReference(reference)
+                .or(() -> attemptRepository.findByProviderAndEnvironmentAndProviderReference(PaymentProviderType.PAYSTACK, paymentProvider.environment(), reference))
+                .orElseThrow(() -> new ResourceNotFoundException("Payment attempt not found."));
+        return verifyAttempt(attempt.getId(), actorId);
+    }
+
+    public PaymentAttempt verifyAttempt(UUID attemptId, UUID actorId) {
+        PaymentAttempt attempt = attemptRepository.findById(attemptId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment attempt not found."));
+        if (attempt.getStatus() == PaymentAttemptStatus.SUCCESS && attempt.getProviderVerifiedAt() != null) return attempt;
+        PaystackVerificationResponse response = paymentProvider.verify(attempt.getInternalReference());
+        PaystackVerificationData data = response == null ? null : response.data();
+        attempt.setProviderVerifiedAt(OffsetDateTime.now());
+        if (data == null) {
+            attempt.setStatus(PaymentAttemptStatus.VERIFICATION_FAILED);
+            attempt.setFailureCode("VERIFICATION_FAILED");
+            attempt.setFailureMessageSafe(PaymentFailureCategory.PROVIDER_UNAVAILABLE.name());
+            auditEventService.record(actorId, "USER", attempt.getPaymentIntent().getWorkspace(), null, AuditEventType.PAYMENT_ATTEMPT_FAILED,
+                    "PaymentAttempt", attempt.getId(), "{}");
+            return attempt;
+        }
+        attempt.setProviderStatus(data.status());
+        if (!"success".equalsIgnoreCase(data.status())) {
+            if ("pending".equalsIgnoreCase(data.status()) || "ongoing".equalsIgnoreCase(data.status()) || "processing".equalsIgnoreCase(data.status())) {
+                attempt.setStatus(PaymentAttemptStatus.PENDING);
+                attempt.getPaymentIntent().setStatus(PaymentIntentStatus.PAYMENT_PENDING);
+            } else {
+                attempt.setStatus(PaymentAttemptStatus.FAILED);
+                attempt.setCompletedAt(OffsetDateTime.now());
+                attempt.setFailureCode("PAYMENT_NOT_SUCCESSFUL");
+                attempt.setFailureMessageSafe(PaymentFailureCategory.PAYMENT_DECLINED.name());
+                notifyPayment(attempt, NotificationType.PAYMENT_RETRY_AVAILABLE, "Payment retry available", "Your payment was not completed. You may try again.");
+            }
+            return attempt;
+        }
+        long expected = paymentProvider.toSmallestUnit(attempt.getExpectedAmount());
+        if (!attempt.getInternalReference().equals(data.reference())
+                || data.amount() == null || data.amount() != expected
+                || !attempt.getCurrency().equalsIgnoreCase(data.currency())
+                || !attemptMetadataMatches(attempt, data)) {
+            attempt.setStatus(PaymentAttemptStatus.VERIFICATION_FAILED);
+            attempt.setCompletedAt(OffsetDateTime.now());
+            attempt.setFailureCode("VERIFICATION_MISMATCH");
+            attempt.setFailureMessageSafe(PaymentFailureCategory.VERIFICATION_FAILED.name());
+            auditEventService.record(actorId, "USER", attempt.getPaymentIntent().getWorkspace(), null, AuditEventType.PAYMENT_ATTEMPT_FAILED,
+                    "PaymentAttempt", attempt.getId(), "{}");
+            return attempt;
+        }
+        settleSuccessfulAttempt(attempt, actorId);
+        return attempt;
+    }
+
+    @Transactional(readOnly = true)
+    public PaymentAttempt getAttempt(UUID attemptId) {
+        return attemptRepository.findById(attemptId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment attempt not found."));
+    }
+
+    private PaymentTransaction verifyLegacyReference(String reference, UUID actorId) {
+        PaymentTransaction transaction = transactionRepository.findByInternalReference(reference)
+                .orElseGet(() -> transactionRepository.findByProviderAndEnvironmentAndProviderReference(PaymentProviderType.PAYSTACK, paymentProvider.environment(), reference)
+                        .orElseThrow(() -> new ResourceNotFoundException("Payment transaction not found.")));
+        if (transaction.getStatus() == PaymentTransactionStatus.SUCCESS) {
+            return transaction;
+        }
+        PaystackVerificationResponse response = paymentProvider.verify(transaction.getInternalReference());
+        PaystackVerificationData data = response == null ? null : response.data();
+        long expected = paymentProvider.toSmallestUnit(transaction.getAmount());
+        if (data == null || !"success".equalsIgnoreCase(data.status())
+                || !transaction.getInternalReference().equals(data.reference())
+                || data.amount() == null || data.amount() != expected
+                || !transaction.getCurrency().equalsIgnoreCase(data.currency())
+                || !metadataMatches(transaction, data)) {
+            transaction.setStatus(PaymentTransactionStatus.VERIFICATION_FAILED);
+            transaction.setFailureCode("VERIFICATION_MISMATCH");
+            auditEventService.record(actorId, "USER", transaction.getWorkspace(), null, AuditEventType.PAYMENT_FAILED,
+                    "PaymentTransaction", transaction.getId(), "{}");
+            return transaction;
+        }
+        OffsetDateTime now = OffsetDateTime.now();
+        transaction.setStatus(PaymentTransactionStatus.SUCCESS);
+        transaction.setVerifiedAt(now);
+        transaction.setCompletedAt(now);
+        subscriptionChangeService.activatePlan(transaction.getWorkspace().getId(), transaction.getPlanCode(),
+                transaction.getBillingInterval(), transaction.getProviderReference(), actorId, "PAYMENT_SUCCESS", SubscriptionAccessSource.PAID);
+        auditEventService.record(actorId, "USER", transaction.getWorkspace(), null, AuditEventType.PAYMENT_SUCCESS,
+                "PaymentTransaction", transaction.getId(), "{\"environment\":\"TEST\"}");
+        return transaction;
+    }
+
+    @Transactional(readOnly = true)
+    public PaymentIntentResponse getIntent(UUID intentId) {
+        BillingPaymentIntent intent = intentRepository.findById(intentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment intent not found."));
+        List<PaymentAttemptSummary> attempts = attemptRepository.findAllByPaymentIntentIdOrderByAttemptNumberAsc(intentId)
+                .stream()
+                .map(a -> new PaymentAttemptSummary(a.getAttemptNumber(), a.getStatus(), safeFailure(a), a.getCreatedAt(), a.getCompletedAt()))
+                .toList();
+        return new PaymentIntentResponse(intent.getId(), intent.getWorkspace().getId(), intent.getStatus(), intent.getPlan().getCode(), intent.getBillingInterval(),
+                intent.getExpectedAmount(), intent.getCurrency(), attempts);
+    }
+
+    private boolean metadataMatches(PaymentTransaction transaction, PaystackVerificationData data) {
+        if (data.metadata() == null || data.metadata().isNull() || data.metadata().isMissingNode()) {
+            return false;
+        }
+        return transaction.getId().toString().equals(data.metadata().path("internalPaymentId").asText())
+                && transaction.getWorkspace().getId().toString().equals(data.metadata().path("workspaceId").asText())
+                && transaction.getPlanCode().equalsIgnoreCase(data.metadata().path("planCode").asText())
+                && transaction.getBillingInterval().name().equalsIgnoreCase(data.metadata().path("billingInterval").asText());
+    }
+
+    private boolean attemptMetadataMatches(PaymentAttempt attempt, PaystackVerificationData data) {
+        if (data.metadata() == null || data.metadata().isNull() || data.metadata().isMissingNode()) return false;
+        BillingPaymentIntent intent = attempt.getPaymentIntent();
+        return intent.getId().toString().equals(data.metadata().path("internalPaymentIntentId").asText())
+                && attempt.getId().toString().equals(data.metadata().path("internalPaymentAttemptId").asText())
+                && intent.getWorkspace().getId().toString().equals(data.metadata().path("workspaceId").asText())
+                && intent.getPlan().getCode().equalsIgnoreCase(data.metadata().path("planCode").asText())
+                && intent.getBillingInterval().name().equalsIgnoreCase(data.metadata().path("billingInterval").asText());
+    }
+
+    private PaymentAttemptInitializationResponse initializeAttempt(BillingPaymentIntent intent, User user, boolean retry) {
+        int attemptNumber = intent.getNextAttemptNumber();
+        intent.setNextAttemptNumber(attemptNumber + 1);
+        PaymentAttempt attempt = new PaymentAttempt();
+        attempt.setPaymentIntent(intent);
+        attempt.setEnvironment(paymentProvider.environment());
+        attempt.setInternalReference(generateReference());
+        attempt.setExpectedAmount(intent.getExpectedAmount());
+        attempt.setCurrency(intent.getCurrency());
+        attempt.setAttemptNumber(attemptNumber);
+        attempt.setStatus(PaymentAttemptStatus.CREATED);
+        attempt.setExpiresAt(OffsetDateTime.now().plus(paymentProperties.attemptTtl()));
+        attempt = attemptRepository.saveAndFlush(attempt);
+        PaystackInitializeResponse response = paymentProvider.initialize(attempt, intent.getPlan());
+        if (response == null || !response.status() || response.data() == null) {
+            attempt.setStatus(PaymentAttemptStatus.FAILED);
+            attempt.setCompletedAt(OffsetDateTime.now());
+            attempt.setFailureCode("INITIALIZE_FAILED");
+            attempt.setFailureMessageSafe(PaymentFailureCategory.PROVIDER_UNAVAILABLE.name());
+            notifyPayment(attempt, NotificationType.PAYMENT_FAILED, "Payment failed", "Payment initialization failed.");
+            throw new IllegalStateException("Paystack initialization failed.");
+        }
+        attempt.setProviderReference(response.data().reference());
+        attempt.setAuthorizationUrl(response.data().authorizationUrl());
+        attempt.setAccessCode(response.data().accessCode());
+        attempt.setInitializedAt(OffsetDateTime.now());
+        attempt.setStatus(PaymentAttemptStatus.PENDING);
+        intent.setStatus(PaymentIntentStatus.PAYMENT_PENDING);
+        auditEventService.record(user.getId(), "USER", intent.getWorkspace(), null,
+                retry ? AuditEventType.PAYMENT_RETRY_INITIALIZED : AuditEventType.PAYMENT_INITIALIZED,
+                "PaymentAttempt", attempt.getId(), "{\"environment\":\"TEST\"}");
+        return new PaymentAttemptInitializationResponse(intent.getId(), attempt.getId(), attempt.getAttemptNumber(),
+                attempt.getAuthorizationUrl(), attempt.getInternalReference(), attempt.getStatus());
+    }
+
+    private void settleSuccessfulAttempt(PaymentAttempt attempt, UUID actorId) {
+        BillingPaymentIntent intent = intentRepository.findByIdForUpdate(attempt.getPaymentIntent().getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Payment intent not found."));
+        attempt.setStatus(PaymentAttemptStatus.SUCCESS);
+        attempt.setCompletedAt(OffsetDateTime.now());
+        auditEventService.record(actorId, "USER", intent.getWorkspace(), null, AuditEventType.PAYMENT_ATTEMPT_SUCCEEDED,
+                "PaymentAttempt", attempt.getId(), "{}");
+        long existingSuccesses = attemptRepository.countByPaymentIntentIdAndStatus(intent.getId(), PaymentAttemptStatus.SUCCESS);
+        if (intent.getStatus() != PaymentIntentStatus.PAID) {
+            intent.setStatus(PaymentIntentStatus.PAID);
+            intent.setSettledAt(OffsetDateTime.now());
+            subscriptionChangeService.activatePlan(intent.getWorkspace().getId(), intent.getPlan().getCode(),
+                    intent.getBillingInterval(), attempt.getProviderReference(), actorId, "PAYMENT_SUCCESS", SubscriptionAccessSource.PAID);
+            notifyPayment(attempt, NotificationType.PAYMENT_SUCCESS, "Payment succeeded", "Your subscription payment succeeded.");
+        } else if (existingSuccesses > 0) {
+            attempt.setRequiresReview(true);
+            intent.setStatus(PaymentIntentStatus.REQUIRES_REVIEW);
+            auditEventService.record(actorId, "USER", intent.getWorkspace(), null, AuditEventType.PAYMENT_DUPLICATE_SUCCESS_DETECTED,
+                    "PaymentAttempt", attempt.getId(), "{}");
+        }
+    }
+
+    private boolean isRetryable(PaymentAttempt attempt) {
+        return switch (attempt.getStatus()) {
+            case FAILED, ABANDONED, CANCELLED, EXPIRED, VERIFICATION_FAILED -> true;
+            default -> false;
+        };
+    }
+
+    private PaymentFailureCategory safeFailure(PaymentAttempt attempt) {
+        if (attempt.getFailureMessageSafe() == null) return null;
+        try {
+            return PaymentFailureCategory.valueOf(attempt.getFailureMessageSafe());
+        } catch (IllegalArgumentException ignored) {
+            return PaymentFailureCategory.UNKNOWN;
+        }
+    }
+
+    private PaymentAttemptInitializationResponse existingIdempotentResponse(String scope, String key) {
+        if (key == null || key.isBlank()) return null;
+        return idempotencyRecordRepository.findByScopeAndIdempotencyKey(scope, normalizeIdempotencyKey(key))
+                .flatMap(record -> record.getPaymentAttemptId() == null ? java.util.Optional.<PaymentAttempt>empty() : attemptRepository.findById(record.getPaymentAttemptId()))
+                .map(attempt -> new PaymentAttemptInitializationResponse(attempt.getPaymentIntent().getId(), attempt.getId(), attempt.getAttemptNumber(),
+                        attempt.getAuthorizationUrl(), attempt.getInternalReference(), attempt.getStatus()))
+                .orElse(null);
+    }
+
+    private void saveIdempotent(String scope, String key, User user, PaymentAttemptInitializationResponse response) {
+        if (key == null || key.isBlank() || response.paymentAttemptId() == null) return;
+        PaymentIdempotencyRecord record = new PaymentIdempotencyRecord();
+        record.setScope(scope);
+        record.setIdempotencyKey(normalizeIdempotencyKey(key));
+        record.setUser(user);
+        record.setPaymentIntentId(response.paymentIntentId());
+        record.setPaymentAttemptId(response.paymentAttemptId());
+        idempotencyRecordRepository.save(record);
+    }
+
+    private String normalizeIdempotencyKey(String key) {
+        String normalized = key.trim();
+        if (!normalized.matches("[A-Za-z0-9._:-]{1,180}")) throw new IllegalArgumentException("Invalid Idempotency-Key.");
+        return normalized;
+    }
+
+    private void notifyPayment(PaymentAttempt attempt, NotificationType type, String title, String message) {
+        notificationService.create(attempt.getPaymentIntent().getInitiatedBy(), attempt.getPaymentIntent().getWorkspace(), null,
+                type, title, message, null, NotificationPriority.NORMAL);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<PaymentTransaction> transactions(UUID workspaceId, Pageable pageable) {
+        return transactionRepository.findAllByWorkspaceIdOrderByCreatedAtDesc(workspaceId, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public WorkspaceSubscription subscription(UUID workspaceId) {
+        return subscriptionRepository.findCurrentEffective(workspaceId, OffsetDateTime.now())
+                .orElseThrow(() -> new ResourceNotFoundException("Active subscription not found."));
+    }
+
+    private String generateReference() {
+        byte[] bytes = new byte[24];
+        random.nextBytes(bytes);
+        return "RA-" + HexFormat.of().formatHex(bytes).toUpperCase();
+    }
+}

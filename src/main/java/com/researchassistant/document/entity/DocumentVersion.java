@@ -1,6 +1,7 @@
 package com.researchassistant.document.entity;
 
 import com.researchassistant.identity.entity.User;
+import com.researchassistant.document.security.FileScanStatus;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -77,6 +78,13 @@ public class DocumentVersion {
     private String checksumSha256;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "scan_status", nullable = false, length = 30)
+    private FileScanStatus scanStatus = FileScanStatus.NOT_SCANNED;
+
+    @Column(name = "quarantined", nullable = false)
+    private boolean quarantined;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 40)
     private DocumentVersionStatus status = DocumentVersionStatus.UPLOADING;
 
@@ -104,6 +112,9 @@ public class DocumentVersion {
         }
         if (status == null) {
             status = DocumentVersionStatus.UPLOADING;
+        }
+        if (scanStatus == null) {
+            scanStatus = FileScanStatus.NOT_SCANNED;
         }
     }
 }

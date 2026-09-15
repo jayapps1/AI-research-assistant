@@ -51,7 +51,9 @@ public class ReportExportController {
         try (java.io.InputStream input = object.inputStream()) {
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType(job.getMimeType()))
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + job.getFilename() + "\"")
+                    .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                            .filename(job.getFilename().replaceAll("[\\r\\n\"]", "_"))
+                            .build().toString())
                     .body(input.readAllBytes());
         }
     }

@@ -25,6 +25,13 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, UUID> {
 
     long countByWorkspaceIdAndCreatedAtAfter(UUID workspaceId, OffsetDateTime since);
 
+    long countByWorkspaceIdAndStatusAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+            UUID workspaceId,
+            AiRequestStatus status,
+            OffsetDateTime start,
+            OffsetDateTime end
+    );
+
     long countByUserIdAndStatusAndCreatedAtAfter(UUID userId, AiRequestStatus status, OffsetDateTime since);
 
     @Query("""
@@ -52,6 +59,21 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, UUID> {
     default long sumTotalTokensByWorkspaceIdSince(UUID workspaceId, OffsetDateTime since) {
         return sumTotalTokensByWorkspaceIdSinceAndStatus(workspaceId, since, AiRequestStatus.COMPLETED);
     }
+
+    @Query("""
+        SELECT COALESCE(SUM(r.totalTokens), 0)
+        FROM AiRequest r
+        WHERE r.workspace.id = :workspaceId
+          AND r.createdAt >= :start
+          AND r.createdAt < :end
+          AND r.status = :status
+        """)
+    long sumTotalTokensByWorkspaceIdBetweenAndStatus(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("start") OffsetDateTime start,
+            @Param("end") OffsetDateTime end,
+            @Param("status") AiRequestStatus status
+    );
 
     @Query("""
         SELECT COALESCE(SUM(r.totalTokens), 0)

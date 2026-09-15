@@ -46,6 +46,19 @@ public class DatasetController {
         return datasetService.addVariable(datasetId, user(authentication), request);
     }
 
+    @GetMapping("/datasets/{datasetId}/variables")
+    public java.util.List<VariableResponse> variables(Authentication authentication, @PathVariable UUID datasetId) {
+        return datasetService.variables(datasetId, user(authentication));
+    }
+
+    @GetMapping("/datasets/{datasetId}/records")
+    public PageResponse<DatasetRecordResponse> records(Authentication authentication, @PathVariable UUID datasetId,
+                                                       @RequestParam(defaultValue = "0") int page,
+                                                       @RequestParam(defaultValue = "25") int size) {
+        return PageResponse.from(datasetService.records(datasetId, user(authentication),
+                PageRequest.of(Math.max(0, page), Math.min(Math.max(1, size), 100))));
+    }
+
     @PostMapping("/projects/{projectId}/datasets/import")
     @ResponseStatus(HttpStatus.CREATED)
     public ImportStartResponse startImport(Authentication authentication, @PathVariable UUID projectId, @RequestParam("file") MultipartFile file) {

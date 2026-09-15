@@ -4,6 +4,7 @@ import com.researchassistant.dataset.model.*;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -20,9 +21,25 @@ public final class DatasetDtos {
         }
     }
     public record VariableResponse(UUID id, String variableName, String label, DatasetVariable.VariableType type,
-            DatasetVariable.MeasurementLevel measurementLevel, boolean nullable, int displayOrder) {
+            DatasetVariable.MeasurementLevel measurementLevel, boolean nullable, String unit, String missingValueCode,
+            UUID sourceInstrumentItemId, int displayOrder) {
         public static VariableResponse from(DatasetVariable v) {
-            return new VariableResponse(v.getId(), v.getVariableName(), v.getLabel(), v.getType(), v.getMeasurementLevel(), v.isNullable(), v.getDisplayOrder());
+            return new VariableResponse(v.getId(), v.getVariableName(), v.getLabel(), v.getType(), v.getMeasurementLevel(),
+                    v.isNullable(), v.getUnit(), v.getMissingValueCode(), v.getSourceInstrumentItemId(), v.getDisplayOrder());
+        }
+    }
+    public record DatasetValueResponse(UUID variableId, String variableName, DatasetVariable.VariableType type,
+            boolean missing, DatasetValue.MissingReason missingReason, String value) {
+        public static DatasetValueResponse from(DatasetValue value) {
+            return new DatasetValueResponse(value.getVariable().getId(), value.getVariable().getVariableName(),
+                    value.getVariable().getType(), value.isMissing(), value.getMissingReason(), displayValue(value));
+        }
+    }
+    public record DatasetRecordResponse(UUID id, long rowNumber, String externalRecordId, OffsetDateTime createdAt,
+            List<DatasetValueResponse> values) {
+        public static DatasetRecordResponse from(DatasetRecord record, List<DatasetValue> values) {
+            return new DatasetRecordResponse(record.getId(), record.getRowNumber(), record.getExternalRecordId(),
+                    record.getCreatedAt(), values.stream().map(DatasetValueResponse::from).toList());
         }
     }
     public record ImportStartResponse(UUID importJobId, UUID datasetId, DatasetImportJob.Status status) {}
@@ -42,4 +59,17 @@ public final class DatasetDtos {
             Map<String, Long> missingValuesByVariable, Map<String, Map<String, Long>> categoryCounts,
             Map<String, NumericRange> numericRanges) {}
     public record NumericRange(String min, String max) {}
+
+    private static String displayValue(DatasetValue value) {
+        if (value.isMissing()) return null;
+        if (value.getStringValue() != null) return value.getStringValue();
+        if (value.getIntegerValue() != null) return value.getIntegerValue().toString();
+        if (value.getDecimalValue() != null) return value.getDecimalValue().toPlainString();
+        if (value.getBooleanValue() != null) return value.getBooleanValue().toString();
+        if (value.getDateValue() != null) return value.getDateValue().toString();
+        if (value.getDateTimeValue() != null) return value.getDateTimeValue().toString();
+        if (value.getTextValue() != null) return value.getTextValue();
+        if (value.getCategoryCode() != null) return value.getCategoryCode();
+        return null;
+    }
 }
