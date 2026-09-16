@@ -33,6 +33,20 @@ const SecuritySettingsPage = lazy(() => import('./pages/OperationsPages').then((
 const NotificationSettingsPage = lazy(() => import('./pages/OperationsPages').then((m) => ({ default: m.NotificationSettingsPage })));
 const AdminPage = lazy(() => import('./pages/OperationsPages').then((m) => ({ default: m.AdminPage })));
 
+// Public Website Layout & Pages
+const PublicLayout = lazy(() => import('./layouts/public/PublicLayout').then((m) => ({ default: m.PublicLayout })));
+const HomePage = lazy(() => import('./pages/public/HomePage').then((m) => ({ default: m.HomePage })));
+const ServicesPage = lazy(() => import('./pages/public/ServicesPage').then((m) => ({ default: m.ServicesPage })));
+const PricingPage = lazy(() => import('./pages/public/PricingPage').then((m) => ({ default: m.PricingPage })));
+const AboutPage = lazy(() => import('./pages/public/AboutPage').then((m) => ({ default: m.AboutPage })));
+const FaqPage = lazy(() => import('./pages/public/FaqPage').then((m) => ({ default: m.FaqPage })));
+const ContactPage = lazy(() => import('./pages/public/ContactPage').then((m) => ({ default: m.ContactPage })));
+const PrivacyPolicyPage = lazy(() => import('./pages/public/LegalPages').then((m) => ({ default: m.PrivacyPolicyPage })));
+const TermsOfServicePage = lazy(() => import('./pages/public/LegalPages').then((m) => ({ default: m.TermsOfServicePage })));
+const AdminPublicSitePage = lazy(() => import('./pages/admin/AdminPublicSitePage').then((m) => ({ default: m.AdminPublicSitePage })));
+const AdminContactInboxPage = lazy(() => import('./pages/admin/AdminContactInboxPage').then((m) => ({ default: m.AdminContactInboxPage })));
+const AdminLayout = lazy(() => import('./layouts/admin/AdminLayout').then((m) => ({ default: m.AdminLayout })));
+
 export default function App() {
   return (
     <div className="app-root">
@@ -40,14 +54,29 @@ export default function App() {
       <RouteErrorBoundary>
         <Suspense fallback={<PageLoading label="Loading page" />}>
           <Routes>
+          {/* Public Website Routes (Independent Shell with Header, Footer, Zero App Sidebar) */}
+          <Route element={<PublicLayout />}>
+            <Route index element={<HomePage />} />
+            <Route path="services" element={<ServicesPage />} />
+            <Route path="pricing" element={<PricingPage />} />
+            <Route path="about" element={<AboutPage />} />
+            <Route path="faq" element={<FaqPage />} />
+            <Route path="contact" element={<ContactPage />} />
+            <Route path="privacy" element={<PrivacyPolicyPage />} />
+            <Route path="terms" element={<TermsOfServicePage />} />
+          </Route>
+
+          {/* Authentication Routes */}
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/login" element={<LoginPage />} />
           <Route path="/auth/totp" element={<TotpPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+
+          {/* Authenticated Application Routes (Hosted inside AppShell with Sidebar) */}
           <Route element={<ProtectedRoute />}>
             <Route element={<AppShell />}>
-              <Route index element={<HomeDashboard />} />
               <Route path="app" element={<HomeDashboard />} />
               <Route path="app/workspaces" element={<WorkspacePage />} />
               <Route path="app/workspaces/:workspaceId/projects" element={<ProjectsPage />} />
@@ -93,8 +122,24 @@ export default function App() {
               <Route path="notifications" element={<NotificationsPage />} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="settings" element={<ProfilePage />} />
-              <Route element={<AdminRoute />}>
+            </Route>
+
+            {/* System Admin Routes (Hosted inside dedicated AdminLayout) */}
+            <Route element={<AdminRoute />}>
+              <Route element={<AdminLayout />}>
                 <Route path="admin" element={<AdminPage />} />
+                <Route path="admin/users" element={<AdminPage />} />
+                <Route path="admin/workspaces" element={<AdminPage />} />
+                <Route path="admin/projects" element={<AdminPage />} />
+                <Route path="admin/plans" element={<AdminPage />} />
+                <Route path="admin/payments" element={<AdminPage />} />
+                <Route path="admin/complimentary-access" element={<AdminPage />} />
+                <Route path="admin/ai-usage" element={<AdminPage />} />
+                <Route path="admin/jobs" element={<AdminPage />} />
+                <Route path="admin/audit" element={<AdminPage />} />
+                <Route path="admin/health" element={<AdminPage />} />
+                <Route path="admin/public-site" element={<AdminPublicSitePage />} />
+                <Route path="admin/contact-submissions" element={<AdminContactInboxPage />} />
               </Route>
             </Route>
           </Route>

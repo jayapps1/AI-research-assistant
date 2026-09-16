@@ -1,0 +1,16 @@
+User-agent: *
+Allow: /
+Allow: /services
+Allow: /pricing
+Allow: /about
+Allow: /faq
+Allow: /contact
+Allow: /privacy
+Allow: /terms
+
+Disallow: /app/
+Disallow: /admin/
+Disallow: /auth/
+Disallow: /api/
+
+Sitemap: https://researchassistant.ai/sitemap.xml

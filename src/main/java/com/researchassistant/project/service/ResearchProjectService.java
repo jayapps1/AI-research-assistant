@@ -82,7 +82,7 @@ public class ResearchProjectService {
             User currentUser,
             CreateResearchProjectRequest request
     ) {
-        if (!workspaceId.equals(request.workspaceId())) {
+        if (request.workspaceId() != null && !workspaceId.equals(request.workspaceId())) {
             throw new InvalidProjectOperationException(
                     "Request workspace does not match path workspace."
             );
@@ -129,6 +129,8 @@ public class ResearchProjectService {
     public Page<ResearchProjectResponse> listWorkspaceProjects(
             UUID workspaceId,
             User currentUser,
+            String query,
+            ResearchProjectStatus status,
             Pageable pageable
     ) {
         WorkspaceMembership workspaceMembership =
@@ -137,17 +139,76 @@ public class ResearchProjectService {
                         currentUser
                 );
 
-        Page<ResearchProject> projects =
-                authorizationService.isWorkspaceAdmin(workspaceMembership)
-                        ? projectRepository.findAllByWorkspaceId(
-                        workspaceId,
-                        pageable
-                )
-                        : projectRepository.findAuthorizedMemberProjects(
-                        workspaceId,
-                        currentUser.getId(),
-                        pageable
-                );
+        String trimmedQuery = (query != null && !query.isBlank()) ? query.trim() : null;
+        boolean isAdmin = authorizationService.isWorkspaceAdmin(workspaceMembership);
+        Page<ResearchProject> projects;
+
+        if (trimmedQuery != null) {
+            String pattern = "%" + trimmedQuery.toLowerCase() + "%";
+            projects = isAdmin
+                    ? projectRepository.findAllByWorkspaceIdWithPattern(workspaceId, status, pattern, pageable)
+                    : projectRepository.findAuthorizedMemberProjectsWithPattern(workspaceId, currentUser.getId(), status, pattern, pageable);
+        } else if (status != null) {
+            projects = isAdmin
+                    ? projectRepository.findAllByWorkspaceIdAndStatus(workspaceId, status, pageable)
+                    : projectRepository.findAuthorizedMemberProjectsByStatus(workspaceId, currentUser.getId(), status, pageable);
+        } else {
+            projects = isAdmin
+                    ? projectRepository.findAllByWorkspaceId(workspaceId, pageable)
+                    : projectRepository.findAuthorizedMemberProjects(workspaceId, currentUser.getId(), pageable);
+        }
+
+        return projects.map(project -> toProjectResponse(
+                project,
+                membershipRepository
+                        .findByProjectIdAndUserIdAndStatus(
+                                project.getId(),
+                                currentUser.getId(),
+                                ProjectMembershipStatus.ACTIVE
+                        )
+                        .orElse(null)
+        ));
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ResearchProjectResponse> listWorkspaceProjects(
+            UUID workspaceId,
+            User currentUser,
+            Pageable pageable
+    ) {
+        return listWorkspaceProjects(workspaceId, currentUser, null, null, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ResearchProjectResponse> listMyProjects(
+            User currentUser,
+            String query,
+            ResearchProjectStatus status,
+            Pageable pageable
+    ) {
+        String trimmedQuery = (query != null && !query.isBlank()) ? query.trim() : null;
+        Page<ResearchProject> projects;
+
+        if (trimmedQuery != null) {
+            String pattern = "%" + trimmedQuery.toLowerCase() + "%";
+            projects = projectRepository.findAllAuthorizedProjectsForUserWithPattern(
+                    currentUser.getId(),
+                    status,
+                    pattern,
+                    pageable
+            );
+        } else if (status != null) {
+            projects = projectRepository.findAllAuthorizedProjectsForUserByStatus(
+                    currentUser.getId(),
+                    status,
+                    pageable
+            );
+        } else {
+            projects = projectRepository.findAllAuthorizedProjectsForUser(
+                    currentUser.getId(),
+                    pageable
+            );
+        }
 
         return projects.map(project -> toProjectResponse(
                 project,

@@ -72,8 +72,21 @@ export function mapApiError(error: AxiosError<ApiErrorResponse>): ApiClientError
 
 function friendlyMessage(status?: number, payload?: ApiErrorResponse) {
   const code = payload?.errorCode;
-  const message = payload?.message ?? payload?.detail;
-  if (status === 401) return 'Your session has expired. Sign in again to continue.';
+  const rawMessage = payload?.message ?? payload?.detail;
+  const isStackTrace = rawMessage && /stack trace|exception|\bat\b\s+[a-z0-9_$.]+|\bjava\./i.test(rawMessage);
+  const message = isStackTrace ? undefined : rawMessage;
+
+  if (status === 401) {
+    if (
+      message === 'Invalid credentials.' ||
+      message?.toLowerCase().includes('inactive') ||
+      message?.toLowerCase().includes('suspended') ||
+      message?.toLowerCase().includes('authenticator')
+    ) {
+      return message;
+    }
+    return 'Your session has expired. Sign in again to continue.';
+  }
   if (status === 403) return message ?? 'You do not have permission to perform this action.';
   if (status === 404) return message ?? 'The requested item could not be found.';
   if (status === 409 && message?.includes('expectedVersion')) return 'This item has been changed by another collaborator.';

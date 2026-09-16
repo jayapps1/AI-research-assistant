@@ -58,6 +58,7 @@ public class InMemoryRateLimitFilter extends OncePerRequestFilter {
         if (path.contains("/documents")) return "upload";
         if (path.contains("/exports")) return "export";
         if (path.contains("/ai") || path.contains("/rag")) return "ai";
+        if (path.contains("/public/contact")) return "contact";
         return "general";
     }
 

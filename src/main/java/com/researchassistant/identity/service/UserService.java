@@ -1,5 +1,7 @@
 package com.researchassistant.identity.service;
 
+import com.researchassistant.admin.SystemUserRole;
+import com.researchassistant.admin.SystemUserRoleRepository;
 import com.researchassistant.common.exception.DuplicateResourceException;
 import com.researchassistant.common.exception.ResourceNotFoundException;
 import com.researchassistant.identity.dto.CreateUserRequest;
@@ -28,6 +30,8 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final SystemUserRoleRepository systemUserRoleRepository;
+    private final com.researchassistant.workspace.service.PersonalWorkspaceService personalWorkspaceService;
 
     /**
      * Creates the service with its required dependencies.
@@ -37,10 +41,14 @@ public class UserService {
      */
     public UserService(
             UserRepository userRepository,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            SystemUserRoleRepository systemUserRoleRepository,
+            com.researchassistant.workspace.service.PersonalWorkspaceService personalWorkspaceService
     ) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.systemUserRoleRepository = systemUserRoleRepository;
+        this.personalWorkspaceService = personalWorkspaceService;
     }
 
 
@@ -92,6 +100,8 @@ public class UserService {
 
         User savedUser = userRepository.save(user);
 
+        personalWorkspaceService.ensurePersonalWorkspace(savedUser);
+
         return toResponse(savedUser);
     }
 
@@ -130,9 +140,15 @@ public class UserService {
                 user.getEmail(),
                 user.getFirstName(),
                 user.getLastName(),
+                user.getPhoneNumber(),
                 user.getStatus(),
                 user.isEmailVerified(),
                 user.getLocale(),
+                systemUserRoleRepository.findAllByUserId(user.getId())
+                        .stream()
+                        .map(SystemUserRole::getRole)
+                        .map(Enum::name)
+                        .toList(),
                 user.getCreatedAt(),
                 user.getUpdatedAt()
         );

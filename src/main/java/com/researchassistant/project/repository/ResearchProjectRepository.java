@@ -44,6 +44,156 @@ public interface ResearchProjectRepository
             Pageable pageable
     );
 
+    Page<ResearchProject> findAllByWorkspaceIdAndStatus(
+            UUID workspaceId,
+            com.researchassistant.project.entity.ResearchProjectStatus status,
+            Pageable pageable
+    );
+
+    @Query("""
+            select p
+            from ResearchProject p
+            where p.workspace.id = :workspaceId
+              and p.status = :status
+              and exists (
+                  select m.id
+                  from ProjectMembership m
+                  where m.project = p
+                    and m.user.id = :userId
+                    and m.status = com.researchassistant.project.entity.ProjectMembershipStatus.ACTIVE
+              )
+            """)
+    Page<ResearchProject> findAuthorizedMemberProjectsByStatus(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("userId") UUID userId,
+            @Param("status") com.researchassistant.project.entity.ResearchProjectStatus status,
+            Pageable pageable
+    );
+
+    @Query("""
+            select p
+            from ResearchProject p
+            where p.workspace.id = :workspaceId
+              and (:status is null or p.status = :status)
+              and (lower(p.title) like :pattern or lower(p.description) like :pattern)
+            """)
+    Page<ResearchProject> findAllByWorkspaceIdWithPattern(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("status") com.researchassistant.project.entity.ResearchProjectStatus status,
+            @Param("pattern") String pattern,
+            Pageable pageable
+    );
+
+    @Query("""
+            select p
+            from ResearchProject p
+            where p.workspace.id = :workspaceId
+              and (:status is null or p.status = :status)
+              and (lower(p.title) like :pattern or lower(p.description) like :pattern)
+              and exists (
+                  select m.id
+                  from ProjectMembership m
+                  where m.project = p
+                    and m.user.id = :userId
+                    and m.status = com.researchassistant.project.entity.ProjectMembershipStatus.ACTIVE
+              )
+            """)
+    Page<ResearchProject> findAuthorizedMemberProjectsWithPattern(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("userId") UUID userId,
+            @Param("status") com.researchassistant.project.entity.ResearchProjectStatus status,
+            @Param("pattern") String pattern,
+            Pageable pageable
+    );
+
+    @Query("""
+            select p
+            from ResearchProject p
+            where exists (
+                select m.id
+                from ProjectMembership m
+                where m.project = p
+                  and m.user.id = :userId
+                  and m.status = com.researchassistant.project.entity.ProjectMembershipStatus.ACTIVE
+            )
+            order by p.updatedAt desc
+            """)
+    Page<ResearchProject> findAllAuthorizedProjectsForUser(
+            @Param("userId") UUID userId,
+            Pageable pageable
+    );
+
+    @Query("""
+            select p
+            from ResearchProject p
+            where exists (
+                select m.id
+                from ProjectMembership m
+                where m.project = p
+                  and m.user.id = :userId
+                  and m.status = com.researchassistant.project.entity.ProjectMembershipStatus.ACTIVE
+            )
+            and p.status = :status
+            order by p.updatedAt desc
+            """)
+    Page<ResearchProject> findAllAuthorizedProjectsForUserByStatus(
+            @Param("userId") UUID userId,
+            @Param("status") com.researchassistant.project.entity.ResearchProjectStatus status,
+            Pageable pageable
+    );
+
+    @Query("""
+            select p
+            from ResearchProject p
+            where exists (
+                select m.id
+                from ProjectMembership m
+                where m.project = p
+                  and m.user.id = :userId
+                  and m.status = com.researchassistant.project.entity.ProjectMembershipStatus.ACTIVE
+            )
+            and (:status is null or p.status = :status)
+            and (lower(p.title) like :pattern or lower(p.description) like :pattern)
+            order by p.updatedAt desc
+            """)
+    Page<ResearchProject> findAllAuthorizedProjectsForUserWithPattern(
+            @Param("userId") UUID userId,
+            @Param("status") com.researchassistant.project.entity.ResearchProjectStatus status,
+            @Param("pattern") String pattern,
+            Pageable pageable
+    );
+
+    @Query("""
+            select p
+            from ResearchProject p
+            where exists (
+                select m.id
+                from ProjectMembership m
+                where m.project = p
+                  and m.user.id = :userId
+                  and m.status = com.researchassistant.project.entity.ProjectMembershipStatus.ACTIVE
+            )
+            order by p.updatedAt desc
+            """)
+    java.util.List<ResearchProject> findRecentAuthorizedProjectsForUser(
+            @Param("userId") UUID userId,
+            Pageable pageable
+    );
+
+    @Query("""
+            select count(p)
+            from ResearchProject p
+            where exists (
+                select m.id
+                from ProjectMembership m
+                where m.project = p
+                  and m.user.id = :userId
+                  and m.status = com.researchassistant.project.entity.ProjectMembershipStatus.ACTIVE
+            )
+            and p.status <> com.researchassistant.project.entity.ResearchProjectStatus.ARCHIVED
+            """)
+    long countActiveProjectsForUser(@Param("userId") UUID userId);
+
     /**
      * Locks a project row for future document-number allocation.
      *

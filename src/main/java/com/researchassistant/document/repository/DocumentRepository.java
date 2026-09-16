@@ -44,6 +44,42 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
             Pageable pageable
     );
 
+    long countByProjectId(UUID projectId);
+    long countByProjectIdAndStatus(UUID projectId, DocumentStatus status);
+
+    @Query("""
+            select d
+            from Document d
+            where exists (
+                select m.id
+                from ProjectMembership m
+                where m.project = d.project
+                  and m.user.id = :userId
+                  and m.status = com.researchassistant.project.entity.ProjectMembershipStatus.ACTIVE
+            )
+            and (:status is null or d.status = :status)
+            order by d.updatedAt desc
+            """)
+    Page<Document> findAllAuthorizedDocumentsForUser(
+            @Param("userId") UUID userId,
+            @Param("status") DocumentStatus status,
+            Pageable pageable
+    );
+
+    @Query("""
+            select count(d)
+            from Document d
+            where exists (
+                select m.id
+                from ProjectMembership m
+                where m.project = d.project
+                  and m.user.id = :userId
+                  and m.status = com.researchassistant.project.entity.ProjectMembershipStatus.ACTIVE
+            )
+            and d.status <> com.researchassistant.document.entity.DocumentStatus.ARCHIVED
+            """)
+    long countActiveDocumentsForUser(@Param("userId") UUID userId);
+
     /**
      * Locks a document row before allocating the next immutable
      * version number. Version numbers must not be derived from row

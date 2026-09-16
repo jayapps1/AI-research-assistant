@@ -55,6 +55,15 @@ export interface AuthTokenResponse {
   user?: User;
 }
 
+export interface LoginChallengeResponse {
+  status: 'TOTP_REQUIRED';
+  challengeId: string;
+  authenticationMethod: 'PASSWORD_AND_TOTP';
+  expiresIn: number;
+}
+
+export type LoginResponse = AuthTokenResponse | LoginChallengeResponse;
+
 export interface Workspace {
   id: UUID;
   name: string;
@@ -100,6 +109,7 @@ export interface DocumentItem {
   title?: string;
   version?: number;
   currentVersion?: number;
+  status?: string;
   processingStatus?: string;
   semanticIndexStatus?: string;
   uploadedBy?: string;
@@ -252,3 +262,132 @@ export interface ValidationIssue {
   message?: string;
   rejectedValueSnapshot?: string;
 }
+
+export interface AiUsageSummary {
+  requestsToday: number;
+  requestsThisMonth: number;
+  tokensThisMonth: number;
+  requestLimit: number | null;
+  tokenLimit: number | null;
+  isUnlimited: boolean;
+  resetDate?: string;
+}
+
+export interface UserTaskSummary {
+  id: UUID;
+  projectId: UUID;
+  projectTitle: string;
+  title: string;
+  status: string;
+  priority: string;
+  dueDate?: string;
+  overdue: boolean;
+  updatedAt?: string;
+}
+
+export interface UserActivitySummary {
+  id: UUID;
+  projectId: UUID;
+  projectTitle: string;
+  type: string;
+  summary: string;
+  actorName: string;
+  occurredAt: string;
+}
+
+export interface UserDashboardResponse {
+  greeting: string;
+  currentWorkspace: Workspace;
+  activeProjectCount: number;
+  openTaskCount: number;
+  documentCount: number;
+  unreadNotifications: number;
+  aiUsage: AiUsageSummary;
+  recentProjects: ResearchProject[];
+  recentTasks: UserTaskSummary[];
+  recentActivities: UserActivitySummary[];
+}
+
+export interface WorkspaceDashboardResponse {
+  workspace: Workspace;
+  currentUserRole: string;
+  memberCount: number;
+  projectCount: number;
+  activeProjectCount: number;
+  documentCount: number;
+  storageBytes: number;
+  aiRequestsThisMonth: number;
+  planCode?: string;
+  recentProjects: ResearchProject[];
+}
+
+export interface DocumentMetricsSummary {
+  total: number;
+  ready: number;
+  processing: number;
+  failed: number;
+}
+
+export interface TaskMetricsSummary {
+  total: number;
+  todo: number;
+  inProgress: number;
+  inReview: number;
+  completed: number;
+  overdue: number;
+}
+
+export interface ResearchProgressSummary {
+  completedStages: number;
+  totalStages: number;
+  percentComplete: number;
+  nextIncompleteStage?: string;
+  nextStageUrl?: string;
+}
+
+export interface ProjectDashboardResponse {
+  project: ResearchProject;
+  currentUserRole: string;
+  memberCount: number;
+  documents: DocumentMetricsSummary;
+  tasks: TaskMetricsSummary;
+  researchProgress: ResearchProgressSummary;
+  recentActivities: UserActivitySummary[];
+}
+
+export interface ResearchStageDto {
+  number: number;
+  key: string;
+  name: string;
+  status: 'NOT_STARTED' | 'DRAFT' | 'ACTIVE' | 'IN_PROGRESS' | 'COMPLETE' | string;
+  description: string;
+  itemCount: number;
+  actionUrl: string;
+  lastUpdated?: string;
+}
+
+export interface ResearchProgressResponse {
+  projectId: UUID;
+  projectTitle: string;
+  completedStages: number;
+  totalStages: number;
+  percentComplete: number;
+  nextIncompleteStage?: string;
+  nextStageUrl?: string;
+  stages: ResearchStageDto[];
+}
+
+export interface MyTasksResponse {
+  openCount: number;
+  inProgressCount: number;
+  inReviewCount: number;
+  overdueCount: number;
+}
+
+export interface MyDocumentsResponse {
+  totalCount: number;
+  readyCount: number;
+  processingCount: number;
+  failedCount: number;
+}
+

@@ -1,6 +1,7 @@
 package com.researchassistant.identity.controller;
 
 import com.researchassistant.identity.dto.AuthTokenResponse;
+import com.researchassistant.identity.dto.CompleteTotpLoginChallengeRequest;
 import com.researchassistant.identity.dto.CompletePasswordResetRequest;
 import com.researchassistant.identity.dto.CreateUserRequest;
 import com.researchassistant.identity.dto.ForgotPasswordRequest;
@@ -99,11 +100,20 @@ public class AuthController {
      * @return access JWT and opaque refresh token
      */
     @PostMapping("/login")
-    public AuthTokenResponse login(
+    public Object login(
             @Valid @RequestBody LoginRequest request,
             HttpServletRequest httpRequest
     ) {
         return authService.login(request, httpRequest);
+    }
+
+
+    @PostMapping("/login/totp-challenge")
+    public AuthTokenResponse completeTotpLoginChallenge(
+            @Valid @RequestBody CompleteTotpLoginChallengeRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        return authService.completeTotpLoginChallenge(request, httpRequest);
     }
 
 

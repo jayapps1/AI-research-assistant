@@ -38,7 +38,12 @@ public class CacheConfiguration {
                         AppCacheNames.DOCUMENT_METADATA,
                         AppCacheNames.LITERATURE_SUMMARY,
                         AppCacheNames.RESEARCH_DESIGN_VALIDATION,
-                        AppCacheNames.FORMATTED_CITATIONS
+                        AppCacheNames.FORMATTED_CITATIONS,
+                        AppCacheNames.PUBLIC_SITE_SETTINGS,
+                        AppCacheNames.PUBLIC_PAGES,
+                        AppCacheNames.PUBLIC_SERVICES,
+                        AppCacheNames.PUBLIC_FAQS,
+                        AppCacheNames.PUBLIC_PRICING
                 );
         cacheManager.setAllowNullValues(false);
         return cacheManager;
@@ -86,7 +91,17 @@ public class CacheConfiguration {
                 AppCacheNames.RESEARCH_DESIGN_VALIDATION,
                 defaults.entryTtl(properties.researchDesignValidationTtl()),
                 AppCacheNames.FORMATTED_CITATIONS,
-                defaults.entryTtl(properties.literatureSummaryTtl())
+                defaults.entryTtl(properties.literatureSummaryTtl()),
+                AppCacheNames.PUBLIC_SITE_SETTINGS,
+                defaults.entryTtl(properties.projectMetadataTtl()),
+                AppCacheNames.PUBLIC_PAGES,
+                defaults.entryTtl(properties.projectMetadataTtl()),
+                AppCacheNames.PUBLIC_SERVICES,
+                defaults.entryTtl(properties.projectMetadataTtl()),
+                AppCacheNames.PUBLIC_FAQS,
+                defaults.entryTtl(properties.projectMetadataTtl()),
+                AppCacheNames.PUBLIC_PRICING,
+                defaults.entryTtl(properties.projectMetadataTtl())
         );
 
         return RedisCacheManager.builder(redisConnectionFactory)

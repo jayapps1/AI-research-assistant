@@ -107,6 +107,7 @@ public class SecurityConfig {
                                 .requestMatchers(
                                         "/api/v1/auth/register",
                                         "/api/v1/auth/login",
+                                        "/api/v1/auth/login/totp-challenge",
                                         "/api/v1/auth/refresh",
                                         "/api/v1/auth/password/forgot",
                                         "/api/v1/auth/password/verify-totp",
@@ -114,7 +115,8 @@ public class SecurityConfig {
                                         "/api/v1/auth/logout",
                                         "/api/v1/auth/password/reset",
                                         "/api/v1/billing/webhooks/paystack",
-                                        "/api/v1/billing/paystack/callback"
+                                        "/api/v1/billing/paystack/callback",
+                                        "/api/v1/public/**"
                                 ).permitAll()
 
                                 // ------------------------------------------------

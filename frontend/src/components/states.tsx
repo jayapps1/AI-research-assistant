@@ -14,13 +14,24 @@ export function InlineLoading({ label = 'Loading' }: { label?: string }) {
   return <span className="muted"><Loader2 size={14} aria-hidden /> {label}</span>;
 }
 
-export function EmptyState({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
+export function EmptyState({
+  title,
+  description,
+  action,
+  children,
+}: {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
   return (
     <div className="panel">
       <FileQuestion aria-hidden />
       <h2>{title}</h2>
       {description ? <p className="muted">{description}</p> : null}
       {action ? <div className="toolbar">{action}</div> : null}
+      {children}
     </div>
   );
 }

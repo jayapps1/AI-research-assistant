@@ -1,21 +1,163 @@
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
+import { Link } from 'react-router-dom';
 import { projectApi } from '../api/endpoints';
-import { Breadcrumbs, Button, Card, Field, Input, Textarea, Badge, Select } from '../components/ui';
+import { Breadcrumbs, Button, Card, Field, Input, Textarea, Badge, Select, Pagination } from '../components/ui';
 import { EmptyState, ErrorState, PageLoading } from '../components/states';
 import { useProjectId } from '../hooks/useProjectId';
 import { displayValue, pageContent } from '../utils/collections';
+import { paths } from '../routes/paths';
 
 export function TasksPage() {
   const projectId = useProjectId();
+  if (!projectId) {
+    return <GlobalTasksPage />;
+  }
+  return <ProjectTasksPage projectId={projectId} />;
+}
+
+function GlobalTasksPage() {
+  const [page, setPage] = useState(0);
+  const [status, setStatus] = useState('');
+  const [priority, setPriority] = useState('');
+
+  const tasksQuery = useQuery({
+    queryKey: ['my-tasks', { page, status, priority }],
+    queryFn: () =>
+      projectApi.allMyTasks(page, 20, {
+        status: status || undefined,
+        priority: priority || undefined,
+      }),
+  });
+
+  const tasks = pageContent(tasksQuery.data);
+
+  return (
+    <section className="page">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">My Tasks</h1>
+          <p className="muted">Tasks assigned to you across all authorized research projects.</p>
+        </div>
+      </div>
+
+      <Card style={{ marginBottom: 16, padding: '12px 16px' }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ width: 160 }}>
+            <Select
+              aria-label="Filter status"
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setPage(0);
+              }}
+            >
+              <option value="">All Statuses</option>
+              <option value="TODO">To Do</option>
+              <option value="IN_PROGRESS">In Progress</option>
+              <option value="IN_REVIEW">In Review</option>
+              <option value="COMPLETED">Completed</option>
+            </Select>
+          </div>
+          <div style={{ width: 160 }}>
+            <Select
+              aria-label="Filter priority"
+              value={priority}
+              onChange={(e) => {
+                setPriority(e.target.value);
+                setPage(0);
+              }}
+            >
+              <option value="">All Priorities</option>
+              <option value="LOW">Low</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="HIGH">High</option>
+              <option value="URGENT">Urgent</option>
+            </Select>
+          </div>
+        </div>
+      </Card>
+
+      {tasksQuery.isLoading ? (
+        <PageLoading label="Loading tasks..." />
+      ) : tasksQuery.isError ? (
+        <ErrorState error={tasksQuery.error} onRetry={() => tasksQuery.refetch()} />
+      ) : tasks.length > 0 ? (
+        <Card>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Task Title</th>
+                  <th>Project</th>
+                  <th>Priority</th>
+                  <th>Status</th>
+                  <th>Due Date</th>
+                  <th style={{ textAlign: 'right' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tasks.map((task) => (
+                  <tr key={task.id}>
+                    <td style={{ fontWeight: 600 }}>{task.title}</td>
+                    <td>
+                      <Link to={paths.project(task.projectId)} style={{ color: 'var(--text)', textDecoration: 'none' }}>
+                        {task.projectTitle}
+                      </Link>
+                    </td>
+                    <td>
+                      <Badge tone={task.priority === 'URGENT' ? 'danger' : task.priority === 'HIGH' ? 'warning' : 'info'}>
+                        {task.priority}
+                      </Badge>
+                    </td>
+                    <td>
+                      <Badge tone={task.status === 'COMPLETED' ? 'success' : task.status === 'IN_PROGRESS' ? 'warning' : 'info'}>
+                        {task.status}
+                      </Badge>
+                    </td>
+                    <td className="muted" style={{ fontSize: '0.85rem' }}>
+                      {task.overdue ? <span style={{ color: 'var(--danger-text, #ef4444)', fontWeight: 600 }}>Overdue ({task.dueDate})</span> : task.dueDate || '—'}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <Button asChild variant="secondary" style={{ fontSize: '0.8rem', padding: '4px 8px' }}>
+                        <Link to={`/app/projects/${task.projectId}/tasks`}>Open Project Tasks</Link>
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination
+            page={tasksQuery.data?.page ?? page}
+            totalPages={tasksQuery.data?.totalPages ?? 1}
+            onPageChange={setPage}
+          />
+        </Card>
+      ) : (
+        <EmptyState
+          title="No tasks assigned to you"
+          description="Tasks assigned to you by research project leads or collaborators will appear here."
+        />
+      )}
+    </section>
+  );
+}
+
+function ProjectTasksPage({ projectId }: { projectId: string }) {
   const client = useQueryClient();
-  const form = useForm<{ title: string; description: string; priority: string; dueDate: string }>({ defaultValues: { title: '', description: '', priority: 'MEDIUM', dueDate: '' } });
+  const form = useForm<{ title: string; description: string; priority: string; dueDate: string }>({
+    defaultValues: { title: '', description: '', priority: 'MEDIUM', dueDate: '' },
+  });
   const tasks = useQuery({ queryKey: ['tasks', projectId], queryFn: () => projectApi.tasks(projectId), enabled: Boolean(projectId) });
   const create = useMutation({
     mutationFn: (values: { title: string; description: string; priority: string; dueDate: string }) =>
       projectApi.createTask(projectId, { ...values, dueDate: values.dueDate || undefined }),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: ['tasks', projectId] });
+      client.invalidateQueries({ queryKey: ['project-dashboard', projectId] });
+      client.invalidateQueries({ queryKey: ['dashboard'] });
       form.reset();
     },
   });
@@ -36,13 +178,14 @@ export function TasksPage() {
           </form>
         </Card>
         <Card>
-          <h2>My and project tasks</h2>
+          <h2>Project Tasks</h2>
           {tasks.isLoading ? <PageLoading /> : tasks.isError ? <ErrorState error={tasks.error} /> : <TaskBoard rows={pageContent(tasks.data as never)} />}
         </Card>
       </div>
     </CollaborationShell>
   );
 }
+
 
 export function MembersPage() {
   const projectId = useProjectId();

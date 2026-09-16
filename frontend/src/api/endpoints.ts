@@ -9,25 +9,33 @@ import type {
   DatasetSummary,
   DatasetVariableItem,
   DocumentItem,
+  LoginResponse,
   NotificationItem,
   PageResponse,
   PaymentAttemptInitialization,
+  ProjectDashboardResponse,
   ProjectMember,
   RagAnswer,
   RagConversation,
   RecoveryCodesResponse,
+  ResearchProgressResponse,
   ResearchProject,
   TotpEnrollmentResponse,
   User,
+  UserDashboardResponse,
+  UserTaskSummary,
   ValidationIssue,
   Workspace,
+  WorkspaceDashboardResponse,
 } from '../types/api';
 
 export const authApi = {
   register: (body: { email: string; password: string; firstName?: string; lastName?: string; locale?: string }) =>
     api.post<User>('/auth/register', body).then((r) => r.data),
   login: (body: { email: string; password?: string; totpCode?: string; authenticationMethod?: 'PASSWORD' | 'TOTP' | 'PASSWORD_AND_TOTP' }) =>
-    api.post<AuthTokenResponse>('/auth/login', body).then((r) => r.data),
+    api.post<LoginResponse>('/auth/login', body).then((r) => r.data),
+  completeTotpLoginChallenge: (body: { challengeId: string; totpCode: string }) =>
+    api.post<AuthTokenResponse>('/auth/login/totp-challenge', body).then((r) => r.data),
   logout: (refreshToken: string) => api.post('/auth/logout', { refreshToken }).then((r) => r.data),
   logoutAll: () => api.post('/auth/logout-all').then((r) => r.data),
   forgotPassword: (email: string) => api.post('/auth/password/forgot', { email }).then((r) => r.data),
@@ -46,12 +54,16 @@ export const authApi = {
 export const workspaceApi = {
   list: () => api.get<Workspace[]>('/workspaces').then((r) => r.data),
   create: (body: { name: string; type: string }) => api.post<Workspace>('/workspaces', body).then((r) => r.data),
+  ensurePersonal: () => api.post<Workspace>('/workspaces/personal/ensure').then((r) => r.data),
+  getPersonal: () => api.get<Workspace>('/workspaces/personal').then((r) => r.data),
   members: (workspaceId: string) => api.get<ProjectMember[]>(`/workspaces/${workspaceId}/members`).then((r) => r.data),
 };
 
 export const projectApi = {
   list: (workspaceId: string, page = 0, size = 20, filters?: { q?: string; status?: string }) =>
     api.get<PageResponse<ResearchProject>>(`/workspaces/${workspaceId}/projects`, { params: { page, size, ...filters } }).then((r) => r.data),
+  mine: (page = 0, size = 20, filters?: { q?: string; status?: string }) =>
+    api.get<PageResponse<ResearchProject>>('/projects/mine', { params: { page, size, ...filters } }).then((r) => r.data),
   create: (workspaceId: string, body: { title: string; description?: string }) =>
     api.post<ResearchProject>(`/workspaces/${workspaceId}/projects`, { ...body, workspaceId }).then((r) => r.data),
   get: (projectId: string) => api.get<ResearchProject>(`/projects/${projectId}`).then((r) => r.data),
@@ -65,6 +77,8 @@ export const projectApi = {
   createTask: (projectId: string, body: Record<string, unknown>) => api.post(`/projects/${projectId}/tasks`, body).then((r) => r.data),
   tasks: (projectId: string) => api.get<PageResponse<Record<string, unknown>> | Record<string, unknown>[]>(`/projects/${projectId}/tasks`).then((r) => r.data),
   myTasks: (projectId: string) => api.get<PageResponse<Record<string, unknown>> | Record<string, unknown>[]>(`/projects/${projectId}/tasks/mine`).then((r) => r.data),
+  allMyTasks: (page = 0, size = 20, filters?: { status?: string; priority?: string; projectId?: string }) =>
+    api.get<PageResponse<UserTaskSummary>>('/tasks/mine', { params: { page, size, ...filters } }).then((r) => r.data),
   comments: (projectId: string) => api.get<Record<string, unknown>[]>(`/projects/${projectId}/comments`).then((r) => r.data),
   createComment: (projectId: string, body: Record<string, unknown>) => api.post(`/projects/${projectId}/comments`, body).then((r) => r.data),
   reviews: (projectId: string) => api.get<Record<string, unknown>[]>(`/projects/${projectId}/reviews`).then((r) => r.data),
@@ -76,6 +90,8 @@ export const projectApi = {
 export const documentApi = {
   list: (projectId: string, page = 0, size = 20, filters?: { status?: string; type?: string }) =>
     api.get<PageResponse<DocumentItem>>(`/projects/${projectId}/documents`, { params: { page, size, ...filters } }).then((r) => r.data),
+  mine: (page = 0, size = 20, filters?: { status?: string }) =>
+    api.get<PageResponse<DocumentItem>>('/documents/mine', { params: { page, size, ...filters } }).then((r) => r.data),
   upload: (projectId: string, file: File, title?: string) => {
     const body = new FormData();
     body.append('file', file);
@@ -209,3 +225,14 @@ export const adminApi = {
   complimentaryAccess: () => api.get<PageResponse<Record<string, unknown>>>('/admin/complimentary-access').then((r) => r.data),
   grantComplimentaryAccess: (body: Record<string, unknown>) => api.post('/admin/complimentary-access', body).then((r) => r.data),
 };
+
+export const dashboardApi = {
+  userDashboard: () => api.get<UserDashboardResponse>('/dashboard').then((r) => r.data),
+  workspaceDashboard: (workspaceId: string) =>
+    api.get<WorkspaceDashboardResponse>(`/workspaces/${workspaceId}/dashboard`).then((r) => r.data),
+  projectDashboard: (projectId: string) =>
+    api.get<ProjectDashboardResponse>(`/projects/${projectId}/dashboard`).then((r) => r.data),
+  researchProgress: (projectId: string) =>
+    api.get<ResearchProgressResponse>(`/projects/${projectId}/research-progress`).then((r) => r.data),
+};
+

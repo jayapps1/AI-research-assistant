@@ -7,7 +7,6 @@ import jakarta.validation.constraints.Size;
 import java.util.UUID;
 
 public record CreateResearchProjectRequest(
-        @NotNull(message = "Workspace ID is required")
         UUID workspaceId,
 
         @NotBlank(message = "Project title is required")
@@ -17,4 +16,7 @@ public record CreateResearchProjectRequest(
         @Size(max = 5000, message = "Project description must not exceed 5000 characters")
         String description
 ) {
+    public CreateResearchProjectRequest(String title, String description) {
+        this(null, title, description);
+    }
 }

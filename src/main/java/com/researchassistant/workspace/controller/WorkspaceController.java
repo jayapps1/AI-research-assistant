@@ -62,6 +62,22 @@ public class WorkspaceController {
         return workspaceService.listWorkspaces(user);
     }
 
+    @PostMapping("/personal/ensure")
+    public WorkspaceResponse ensurePersonalWorkspace(
+            Authentication authentication
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return workspaceService.ensurePersonalWorkspace(user);
+    }
+
+    @GetMapping("/personal")
+    public WorkspaceResponse getPersonalWorkspace(
+            Authentication authentication
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return workspaceService.ensurePersonalWorkspace(user);
+    }
+
     @GetMapping("/{workspaceId}")
     public WorkspaceResponse getWorkspace(
             Authentication authentication,

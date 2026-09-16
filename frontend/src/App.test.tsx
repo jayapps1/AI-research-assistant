@@ -17,6 +17,6 @@ describe('protected routing', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    expect(await screen.findByText(/sign in to your research workspace/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /welcome back/i })).toBeInTheDocument();
   });
 });

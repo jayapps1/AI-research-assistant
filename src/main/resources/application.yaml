@@ -71,8 +71,14 @@ management:
       enabled: true
 
 app:
+  seed:
+    super-admin:
+      enabled: ${SUPERADMIN_SEED_ENABLED:false}
+      email: ${SUPERADMIN_EMAIL:nanagyachie@gmail.com}
+      phone: ${SUPERADMIN_PHONE:0542011738}
+      password: ${SUPERADMIN_PASSWORD:}
   api:
-    allowed-origins: ${API_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+    allowed-origins: ${API_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:5175}
     max-page-size: ${API_MAX_PAGE_SIZE:100}
     hsts-enabled: ${API_HSTS_ENABLED:false}
   rate-limit:

@@ -64,6 +64,8 @@ public class ResearchProjectController {
     public PageResponse<ResearchProjectResponse> listWorkspaceProjects(
             Authentication authentication,
             @PathVariable UUID workspaceId,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) com.researchassistant.project.entity.ResearchProjectStatus status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
@@ -71,6 +73,25 @@ public class ResearchProjectController {
         return PageResponse.from(projectService.listWorkspaceProjects(
                 workspaceId,
                 user,
+                q,
+                status,
+                pageable(page, size)
+        ));
+    }
+
+    @GetMapping("/projects/mine")
+    public PageResponse<ResearchProjectResponse> listMyProjects(
+            Authentication authentication,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) com.researchassistant.project.entity.ResearchProjectStatus status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return PageResponse.from(projectService.listMyProjects(
+                user,
+                q,
+                status,
                 pageable(page, size)
         ));
     }

@@ -124,6 +124,24 @@ public class ProjectCollaborationController {
         return tasks.mine(projectId, user(authentication));
     }
 
+    @GetMapping("/tasks/mine")
+    public PageResponse<ProjectTaskResponse> allMyTasks(
+            Authentication authentication,
+            @RequestParam(required = false) ProjectTaskStatus status,
+            @RequestParam(required = false) ProjectTaskPriority priority,
+            @RequestParam(required = false) UUID projectId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return PageResponse.from(tasks.listAllMyTasks(
+                user(authentication),
+                status,
+                priority,
+                projectId,
+                PageRequest.of(Math.max(0, page), Math.min(Math.max(1, size), MAX_PAGE_SIZE))
+        ));
+    }
+
     @GetMapping("/project-tasks/{taskId}")
     public ProjectTaskResponse getTask(Authentication authentication, @PathVariable UUID taskId) {
         return tasks.get(taskId, user(authentication));

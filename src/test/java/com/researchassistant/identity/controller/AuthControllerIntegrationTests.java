@@ -1,8 +1,10 @@
 package com.researchassistant.identity.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.researchassistant.identity.dto.AuthTokenResponse;
 import com.researchassistant.identity.dto.CreateUserRequest;
+import com.researchassistant.identity.dto.LoginChallengeResponse;
 import com.researchassistant.identity.dto.PasswordResetAuthorizationResponse;
 import com.researchassistant.identity.dto.RecoveryCodesResponse;
 import com.researchassistant.identity.dto.TotpEnrollmentCompleteResponse;
@@ -60,7 +62,8 @@ class AuthControllerIntegrationTests {
     @Autowired
     private MockMvc mockMvc;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper()
+            .registerModule(new JavaTimeModule());
 
     @Autowired
     private UserService userService;
@@ -303,6 +306,165 @@ class AuthControllerIntegrationTests {
     }
 
     @Test
+    void passwordStepReturnsTotpChallengeForEnrolledAccount()
+            throws Exception {
+
+        UserResponse userResponse = createUser();
+        User user = userRepository.findByEmailIgnoreCase(userResponse.email())
+                .orElseThrow();
+        createVerifiedTotpCredential(user, null);
+
+        LoginChallengeResponse response =
+                passwordLoginChallenge(userResponse.email(), PASSWORD);
+
+        assertThat(response.status()).isEqualTo("TOTP_REQUIRED");
+        assertThat(response.authenticationMethod())
+                .isEqualTo("PASSWORD_AND_TOTP");
+        assertThat(response.challengeId()).isNotBlank();
+        assertThat(response.expiresIn()).isEqualTo(300);
+    }
+
+    @Test
+    void validTotpChallengeCompletesAuthentication()
+            throws Exception {
+
+        UserResponse userResponse = createUser();
+        User user = userRepository.findByEmailIgnoreCase(userResponse.email())
+                .orElseThrow();
+        createVerifiedTotpCredential(user, null);
+        LoginChallengeResponse challenge =
+                passwordLoginChallenge(userResponse.email(), PASSWORD);
+
+        AuthTokenResponse response = completeTotpChallenge(
+                challenge.challengeId(),
+                currentTotpCode(TOTP_SECRET)
+        );
+
+        assertThat(response.accessToken()).isNotBlank();
+        assertThat(response.refreshToken()).isNotBlank();
+    }
+
+    @Test
+    void invalidTotpChallengeCodeFails() throws Exception {
+
+        UserResponse userResponse = createUser();
+        User user = userRepository.findByEmailIgnoreCase(userResponse.email())
+                .orElseThrow();
+        createVerifiedTotpCredential(user, null);
+        LoginChallengeResponse challenge =
+                passwordLoginChallenge(userResponse.email(), PASSWORD);
+
+        mockMvc.perform(post("/api/v1/auth/login/totp-challenge")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "challengeId", challenge.challengeId(),
+                                "totpCode", "000000"
+                        ))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message")
+                        .value("Invalid credentials."));
+    }
+
+    @Test
+    void unknownTotpChallengeFailsSafely() throws Exception {
+
+        mockMvc.perform(post("/api/v1/auth/login/totp-challenge")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "challengeId", UUID.randomUUID().toString(),
+                                "totpCode", "000000"
+                        ))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message")
+                        .value("Invalid credentials."));
+    }
+
+    @Test
+    void inactiveUserTotpLoginFails() throws Exception {
+        UserResponse userResponse = createUser();
+        User user = userRepository.findByEmailIgnoreCase(userResponse.email())
+                .orElseThrow();
+        createVerifiedTotpCredential(user, null);
+        user.setStatus(com.researchassistant.identity.entity.UserStatus.INACTIVE);
+        userRepository.save(user);
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", userResponse.email(),
+                                "authenticationMethod", "TOTP",
+                                "totpCode", currentTotpCode(TOTP_SECRET)
+                        ))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid credentials."));
+    }
+
+    @Test
+    void totpLoginRateLimitAppliesAfterMaxFailedAttempts() throws Exception {
+        UserResponse userResponse = createUser();
+        User user = userRepository.findByEmailIgnoreCase(userResponse.email())
+                .orElseThrow();
+        createVerifiedTotpCredential(user, null);
+
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of(
+                                    "email", userResponse.email(),
+                                    "authenticationMethod", "TOTP",
+                                    "totpCode", "000000"
+                            ))))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", userResponse.email(),
+                                "authenticationMethod", "TOTP",
+                                "totpCode", currentTotpCode(TOTP_SECRET)
+                        ))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid credentials."));
+    }
+
+    @Test
+    void consumedOrExpiredTotpChallengeCannotBeReused() throws Exception {
+        UserResponse userResponse = createUser();
+        User user = userRepository.findByEmailIgnoreCase(userResponse.email())
+                .orElseThrow();
+        createVerifiedTotpCredential(user, null);
+        LoginChallengeResponse challenge =
+                passwordLoginChallenge(userResponse.email(), PASSWORD);
+
+        completeTotpChallenge(challenge.challengeId(), currentTotpCode(TOTP_SECRET));
+
+        mockMvc.perform(post("/api/v1/auth/login/totp-challenge")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "challengeId", challenge.challengeId(),
+                                "totpCode", currentTotpCode(TOTP_SECRET)
+                        ))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid credentials."));
+    }
+
+    @Test
+    void passwordLoginWithoutTotpCredentialDoesNotRequireChallenge() throws Exception {
+        UserResponse userResponse = createUser();
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", userResponse.email(),
+                                "password", PASSWORD
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.status").doesNotExist());
+    }
+
+    @Test
     void forgotPasswordReturnsGenericMessageForUnknownAccount()
             throws Exception {
 
@@ -369,12 +531,16 @@ class AuthControllerIntegrationTests {
                 .orElseThrow();
         createVerifiedTotpCredential(user, null);
         AuthTokenResponse loginResponse =
-                login(userResponse.email(), PASSWORD);
+                loginWithPasswordAndTotp(
+                        userResponse.email(),
+                        PASSWORD,
+                        currentTotpCode(TOTP_SECRET)
+                );
 
         PasswordResetAuthorizationResponse authorization =
                 verifyPasswordRecoveryTotp(
                         userResponse.email(),
-                        currentTotpCode(TOTP_SECRET)
+                        nextTotpCode(TOTP_SECRET)
                 );
 
         mockMvc.perform(post("/api/v1/auth/password/reset")
@@ -403,10 +569,13 @@ class AuthControllerIntegrationTests {
                         ))))
                 .andExpect(status().isUnauthorized());
 
-        AuthTokenResponse newLoginResponse =
-                login(userResponse.email(), "new-password-12345");
+        LoginChallengeResponse newLoginChallenge =
+                passwordLoginChallenge(
+                        userResponse.email(),
+                        "new-password-12345"
+                );
 
-        assertThat(newLoginResponse.accessToken()).isNotBlank();
+        assertThat(newLoginChallenge.challengeId()).isNotBlank();
     }
 
     @Test
@@ -480,9 +649,11 @@ class AuthControllerIntegrationTests {
                 user.email(),
                 user.firstName(),
                 user.lastName(),
+                user.phoneNumber(),
                 user.status(),
                 user.emailVerified(),
                 user.locale(),
+                user.systemRoles(),
                 user.createdAt(),
                 user.updatedAt()
         ).toString()).doesNotContain(enrollment.secret());
@@ -797,6 +968,51 @@ class AuthControllerIntegrationTests {
                                 "password", password,
                                 "totpCode", totpCode
                         ))))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        return objectMapper.readValue(responseJson, AuthTokenResponse.class);
+    }
+
+    private LoginChallengeResponse passwordLoginChallenge(
+            String email,
+            String password
+    ) throws Exception {
+
+        String responseJson = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", email,
+                                "password", password
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("TOTP_REQUIRED"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        return objectMapper.readValue(
+                responseJson,
+                LoginChallengeResponse.class
+        );
+    }
+
+    private AuthTokenResponse completeTotpChallenge(
+            String challengeId,
+            String totpCode
+    ) throws Exception {
+
+        String responseJson = mockMvc.perform(
+                        post("/api/v1/auth/login/totp-challenge")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(objectMapper.writeValueAsString(
+                                        Map.of(
+                                                "challengeId", challengeId,
+                                                "totpCode", totpCode
+                                        )
+                                )))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()

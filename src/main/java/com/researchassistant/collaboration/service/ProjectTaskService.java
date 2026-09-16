@@ -89,6 +89,18 @@ public class ProjectTaskService {
     }
 
     @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<ProjectTaskResponse> listAllMyTasks(
+            User actor,
+            ProjectTaskStatus status,
+            ProjectTaskPriority priority,
+            UUID projectId,
+            org.springframework.data.domain.Pageable pageable
+    ) {
+        return taskRepository.findAllMyTasks(actor.getId(), status, priority, projectId, pageable)
+                .map(this::toResponse);
+    }
+
+    @Transactional(readOnly = true)
     public ProjectTaskResponse get(UUID taskId, User actor) {
         ProjectTask task = taskRepository.findById(taskId).orElseThrow(() -> new ResourceNotFoundException("Task not found."));
         authorizationService.requireProjectViewer(task.getProject().getId(), actor);

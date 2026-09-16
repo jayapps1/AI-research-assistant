@@ -1,11 +1,16 @@
 package com.researchassistant.identity.service;
 
+import com.researchassistant.admin.SystemUserRole;
+import com.researchassistant.admin.SystemUserRoleRepository;
 import com.researchassistant.common.exception.AuthenticationFailedException;
 import com.researchassistant.identity.dto.AuthTokenResponse;
+import com.researchassistant.identity.dto.CompleteTotpLoginChallengeRequest;
 import com.researchassistant.identity.dto.GenericMessageResponse;
+import com.researchassistant.identity.dto.LoginChallengeResponse;
 import com.researchassistant.identity.dto.LoginRequest;
 import com.researchassistant.identity.dto.LogoutRequest;
 import com.researchassistant.identity.dto.RefreshTokenRequest;
+import com.researchassistant.identity.dto.UserResponse;
 import com.researchassistant.identity.entity.AuthenticationMethod;
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.identity.entity.UserStatus;
@@ -30,6 +35,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Locale;
+import java.util.UUID;
 
 /**
  * Coordinates public authentication workflows.
@@ -46,6 +52,8 @@ public class AuthService {
     private final RefreshTokenService refreshTokenService;
     private final TotpService totpService;
     private final SecurityAuditService securityAuditService;
+    private final TotpLoginChallengeService totpLoginChallengeService;
+    private final SystemUserRoleRepository systemUserRoleRepository;
 
     public AuthService(
             AuthenticationManager authenticationManager,
@@ -53,7 +61,9 @@ public class AuthService {
             JwtTokenService jwtTokenService,
             RefreshTokenService refreshTokenService,
             TotpService totpService,
-            SecurityAuditService securityAuditService
+            SecurityAuditService securityAuditService,
+            TotpLoginChallengeService totpLoginChallengeService,
+            SystemUserRoleRepository systemUserRoleRepository
     ) {
         this.authenticationManager = authenticationManager;
         this.userRepository = userRepository;
@@ -61,6 +71,8 @@ public class AuthService {
         this.refreshTokenService = refreshTokenService;
         this.totpService = totpService;
         this.securityAuditService = securityAuditService;
+        this.totpLoginChallengeService = totpLoginChallengeService;
+        this.systemUserRoleRepository = systemUserRoleRepository;
     }
 
     /**
@@ -68,20 +80,47 @@ public class AuthService {
      * plus a rotating opaque refresh token.
      */
     @Transactional
-    public AuthTokenResponse login(
+    public Object login(
             LoginRequest request,
             HttpServletRequest httpRequest
     ) {
 
         User user = authenticate(request);
 
-        IssuedAccessToken accessToken =
-                jwtTokenService.issueAccessToken(user);
+        if (request.requestedAuthenticationMethod() == AuthenticationMethod.PASSWORD
+                && totpService.hasEnabledCredential(user)) {
+            TotpLoginChallengeService.CreatedChallenge challenge =
+                    totpLoginChallengeService.create(user);
+            return new LoginChallengeResponse(
+                    "TOTP_REQUIRED",
+                    challenge.challengeId(),
+                    AuthenticationMethod.PASSWORD_AND_TOTP.name(),
+                    challenge.expiresInSeconds()
+            );
+        }
 
-        IssuedRefreshToken refreshToken =
-                refreshTokenService.createRefreshToken(user, httpRequest);
+        return issueTokenPair(user, httpRequest);
+    }
 
-        return tokenResponse(accessToken, refreshToken.tokenValue());
+    @Transactional
+    public AuthTokenResponse completeTotpLoginChallenge(
+            CompleteTotpLoginChallengeRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        UUID userId = totpLoginChallengeService.consume(request.challengeId());
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AuthenticationFailedException(INVALID_LOGIN));
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new AuthenticationFailedException(INVALID_LOGIN);
+        }
+        totpService.verifyLoginCode(user, request.totpCode());
+        return issueTokenPair(user, httpRequest);
+    }
+
+    private AuthTokenResponse issueTokenPair(User user, HttpServletRequest httpRequest) {
+        IssuedAccessToken accessToken = jwtTokenService.issueAccessToken(user);
+        IssuedRefreshToken refreshToken = refreshTokenService.createRefreshToken(user, httpRequest);
+        return tokenResponse(accessToken, refreshToken.tokenValue(), user);
     }
 
     private User authenticate(LoginRequest request) {
@@ -160,7 +199,8 @@ public class AuthService {
 
         return tokenResponse(
                 accessToken,
-                rotatedRefreshToken.refreshTokenValue()
+                rotatedRefreshToken.refreshTokenValue(),
+                rotatedRefreshToken.user()
         );
     }
 
@@ -218,14 +258,36 @@ public class AuthService {
 
     private AuthTokenResponse tokenResponse(
             IssuedAccessToken accessToken,
-            String refreshToken
+            String refreshToken,
+            User user
     ) {
 
         return new AuthTokenResponse(
                 accessToken.tokenValue(),
                 refreshToken,
                 "Bearer",
-                accessToken.expiresInSeconds()
+                accessToken.expiresInSeconds(),
+                userResponse(user)
+        );
+    }
+
+    private UserResponse userResponse(User user) {
+        return new UserResponse(
+                user.getId(),
+                user.getEmail(),
+                user.getFirstName(),
+                user.getLastName(),
+                user.getPhoneNumber(),
+                user.getStatus(),
+                user.isEmailVerified(),
+                user.getLocale(),
+                systemUserRoleRepository.findAllByUserId(user.getId())
+                        .stream()
+                        .map(SystemUserRole::getRole)
+                        .map(Enum::name)
+                        .toList(),
+                user.getCreatedAt(),
+                user.getUpdatedAt()
         );
     }
 }

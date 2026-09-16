@@ -44,6 +44,7 @@ public class WorkspaceService {
     private final SecurityAuditService auditService;
     private final CacheInvalidationService cacheInvalidationService;
     private final EntitlementService entitlementService;
+    private final PersonalWorkspaceService personalWorkspaceService;
 
     public WorkspaceService(
             WorkspaceRepository workspaceRepository,
@@ -52,7 +53,8 @@ public class WorkspaceService {
             WorkspaceAuthorizationService authorizationService,
             SecurityAuditService auditService,
             CacheInvalidationService cacheInvalidationService,
-            EntitlementService entitlementService
+            EntitlementService entitlementService,
+            PersonalWorkspaceService personalWorkspaceService
     ) {
         this.workspaceRepository = workspaceRepository;
         this.membershipRepository = membershipRepository;
@@ -61,6 +63,7 @@ public class WorkspaceService {
         this.auditService = auditService;
         this.cacheInvalidationService = cacheInvalidationService;
         this.entitlementService = entitlementService;
+        this.personalWorkspaceService = personalWorkspaceService;
     }
 
     public WorkspaceResponse createWorkspace(
@@ -89,13 +92,22 @@ public class WorkspaceService {
         return toWorkspaceResponse(savedWorkspace, membership);
     }
 
-    @Transactional(readOnly = true)
     public List<WorkspaceResponse> listWorkspaces(User currentUser) {
-        return membershipRepository
+        List<WorkspaceMembership> memberships = membershipRepository
                 .findAllByUserIdAndStatus(
                         currentUser.getId(),
                         WorkspaceMembershipStatus.ACTIVE
-                )
+                );
+
+        if (memberships.isEmpty()) {
+            personalWorkspaceService.ensurePersonalWorkspace(currentUser);
+            memberships = membershipRepository.findAllByUserIdAndStatus(
+                    currentUser.getId(),
+                    WorkspaceMembershipStatus.ACTIVE
+            );
+        }
+
+        return memberships
                 .stream()
                 .map(membership ->
                         toWorkspaceResponse(
@@ -104,6 +116,10 @@ public class WorkspaceService {
                         )
                 )
                 .toList();
+    }
+
+    public WorkspaceResponse ensurePersonalWorkspace(User currentUser) {
+        return personalWorkspaceService.ensurePersonalWorkspaceResponse(currentUser);
     }
 
     @Transactional(readOnly = true)

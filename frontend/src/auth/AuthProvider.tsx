@@ -1,13 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { authApi } from '../api/endpoints';
 import { clearTokens, getRefreshToken, setTokens } from '../api/tokens';
-import type { User } from '../types/api';
+import type { AuthTokenResponse, LoginChallengeResponse, LoginResponse, User } from '../types/api';
+import { TotpChallengeRequired } from './errors';
 
 type AuthStatus = 'loading' | 'authenticated' | 'anonymous';
 
 interface LoginInput {
   email: string;
-  password: string;
+  password?: string;
   totpCode?: string;
   authenticationMethod?: 'PASSWORD' | 'TOTP' | 'PASSWORD_AND_TOTP';
 }
@@ -17,6 +18,7 @@ interface AuthContextValue {
   status: AuthStatus;
   isAuthenticated: boolean;
   login: (input: LoginInput) => Promise<void>;
+  completeTotpChallenge: (input: { challengeId: string; totpCode: string }) => Promise<void>;
   register: (input: { email: string; password: string; firstName?: string; lastName?: string; locale?: string }) => Promise<void>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
@@ -50,10 +52,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: input.email,
         password: input.password,
         totpCode: input.totpCode,
-        authenticationMethod: input.totpCode ? 'PASSWORD_AND_TOTP' : input.authenticationMethod ?? 'PASSWORD',
+        authenticationMethod: input.authenticationMethod ?? 'PASSWORD',
       });
+      if (isLoginChallenge(response)) {
+        throw new TotpChallengeRequired(response.challengeId, response.expiresIn);
+      }
+      const tokenResponse = response as AuthTokenResponse;
+      setTokens({ accessToken: tokenResponse.accessToken, refreshToken: tokenResponse.refreshToken });
+      persistUser(tokenResponse.user ?? { id: input.email, email: input.email, roles: [] });
+      setStatus('authenticated');
+    },
+    [persistUser],
+  );
+
+  const completeTotpChallenge = useCallback(
+    async (input: { challengeId: string; totpCode: string }) => {
+      const response = await authApi.completeTotpLoginChallenge(input);
       setTokens({ accessToken: response.accessToken, refreshToken: response.refreshToken });
-      persistUser(response.user ?? { id: input.email, email: input.email, roles: [] });
+      persistUser(response.user ?? null);
       setStatus('authenticated');
     },
     [persistUser],
@@ -94,8 +110,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ user, status, isAuthenticated: status === 'authenticated', login, register, logout, logoutAll, hasCapability }),
-    [hasCapability, login, logout, logoutAll, register, status, user],
+    () => ({ user, status, isAuthenticated: status === 'authenticated', login, completeTotpChallenge, register, logout, logoutAll, hasCapability }),
+    [completeTotpChallenge, hasCapability, login, logout, logoutAll, register, status, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -105,6 +121,10 @@ export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) throw new Error('useAuth must be used within AuthProvider');
   return context;
+}
+
+function isLoginChallenge(response: LoginResponse): response is LoginChallengeResponse {
+  return 'challengeId' in response && response.status === 'TOTP_REQUIRED';
 }
 
 function restoreUser() {

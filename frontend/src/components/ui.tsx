@@ -42,12 +42,25 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea className="textarea" {...props} />;
 }
 
-export function Badge({ children, tone }: { children: ReactNode; tone?: 'success' | 'warning' | 'danger' | 'info' }) {
-  return <span className={clsx('badge', tone)}>{children}</span>;
+export function Badge({ children, tone, className }: { children: ReactNode; tone?: 'success' | 'warning' | 'danger' | 'info'; className?: string }) {
+  return <span className={clsx('badge', tone, className)}>{children}</span>;
 }
 
-export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <section className={clsx('card', className)}>{children}</section>;
+export function Card({
+  children,
+  className,
+  style,
+  ...props
+}: {
+  children: ReactNode;
+  className?: string;
+  style?: import('react').CSSProperties;
+} & import('react').HTMLAttributes<HTMLElement>) {
+  return (
+    <section className={clsx('card', className)} style={style} {...props}>
+      {children}
+    </section>
+  );
 }
 
 export function Breadcrumbs({ items }: { items: string[] }) {
@@ -116,3 +129,43 @@ export function Drawer({ title, open, onClose, children }: { title: string; open
     </div>
   );
 }
+
+export function Modal({
+  title,
+  open,
+  onClose,
+  children,
+}: {
+  title: string;
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <div
+        className="modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <h3 style={{ margin: 0 }}>{title}</h3>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={onClose}
+            aria-label="Close"
+            style={{ padding: '4px 10px', fontSize: '0.9rem', lineHeight: 1 }}
+          >
+            ✕
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+

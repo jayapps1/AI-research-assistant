@@ -1,10 +1,9 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { adminApi, analysisApi, authApi, billingApi, notificationApi, reportApi } from '../api/endpoints';
+import { analysisApi, notificationApi, reportApi } from '../api/endpoints';
 import { Breadcrumbs, Button, Card, Field, Input, Textarea, Badge, Select } from '../components/ui';
 import { EmptyState, ErrorState } from '../components/states';
 import { useAuth } from '../auth/AuthProvider';
-import { useWorkspace } from '../features/workspaces/WorkspaceProvider';
 import { useProjectId } from '../hooks/useProjectId';
 import { displayValue, pageContent } from '../utils/collections';
 
@@ -126,20 +125,7 @@ export function ReferencesPage() {
   );
 }
 
-export function BillingPage() {
-  const { selectedWorkspaceId: workspaceId } = useWorkspace();
-  const subscription = useQuery({ queryKey: ['billing', workspaceId, 'subscription'], queryFn: () => billingApi.subscription(workspaceId), enabled: Boolean(workspaceId) });
-  const transactions = useQuery({ queryKey: ['billing', workspaceId, 'transactions'], queryFn: () => billingApi.transactions(workspaceId), enabled: Boolean(workspaceId) });
-  const initialize = useMutation({ mutationFn: (body: { planCode: string; billingInterval: string }) => billingApi.initialize(workspaceId, body) });
-  const retry = useMutation({ mutationFn: (paymentIntentId: string) => billingApi.retry(paymentIntentId) });
-  return <section className="page"><h1 className="page-title">Billing</h1>{!workspaceId ? <EmptyState title="Open billing from a workspace" /> : null}<div className="grid cols-2"><Card><h2>Current access</h2><PlanState data={subscription.data} /><QuotaUsage data={subscription.data} /></Card><Card><h2>Available plans</h2><BillingCheckoutForm onSubmit={(values) => initialize.mutate(values)} loading={initialize.isPending} />{initialize.data ? <CheckoutResult data={initialize.data} /> : null}</Card><Card><h2>Payment history</h2><RecordRows rows={transactions.data ?? []} /><div className="alert info">Pending Mobile Money: Waiting for Mobile Money approval. Use Refresh Status until the backend reports a retryable failed, expired, or abandoned state.</div><Field label="Retry payment intent ID"><Input id="retryIntent" /></Field><Button type="button" variant="secondary" onClick={() => retry.mutate((document.getElementById('retryIntent') as HTMLInputElement)?.value)}>Pay Again</Button>{retry.data ? <CheckoutResult data={retry.data} /> : null}</Card></div></section>;
-}
-
-function PlanState({ data }: { data?: Record<string, unknown> }) {
-  const access = String(data?.accessType ?? data?.grantType ?? data?.subscriptionType ?? '');
-  const complimentary = ['COMPLIMENTARY', 'DEVELOPER_ACCESS', 'PROMOTIONAL'].includes(access);
-  return <div>{complimentary ? <Badge tone="success">{access.replaceAll('_', ' ')}</Badge> : <Badge>{displayValue(data?.status, 'No active plan')}</Badge>}<p className="muted">{complimentary ? 'No billing required.' : 'Paid status is displayed only when backend reports a verified subscription.'}</p></div>;
-}
+export { BillingPage } from './BillingPage';
 
 export function NotificationsPage() {
   const notifications = useQuery({ queryKey: ['notifications'], queryFn: notificationApi.list });
@@ -153,47 +139,13 @@ export function ProfilePage() {
   return <section className="page"><h1 className="page-title">Profile</h1><div className="grid cols-2"><Card><h2>Profile information</h2><p>{displayName}</p><p className="muted">{auth.user?.email}</p><Badge>{auth.user?.status ?? 'Authenticated'}</Badge></Card><Card><h2>Settings</h2><p><a href="/app/settings/security">Security settings</a></p><p><a href="/app/settings/notifications">Notification preferences</a></p></Card></div></section>;
 }
 
-export function SecuritySettingsPage() {
-  const auth = useAuth();
-  const [totpCode, setTotpCode] = useState('');
-  const [password, setPassword] = useState('');
-  const enroll = useMutation({ mutationFn: authApi.startTotpEnrollment });
-  const confirm = useMutation({ mutationFn: () => authApi.confirmTotpEnrollment(totpCode) });
-  const disable = useMutation({ mutationFn: () => authApi.disableTotp({ password, totpCode }) });
-  return (
-    <section className="page">
-      <h1 className="page-title">Security settings</h1>
-      <div className="grid cols-2">
-        <Card>
-          <h2>TOTP enrollment</h2>
-          <Button type="button" onClick={() => enroll.mutate()}>Start enrollment</Button>
-          {enroll.data ? <div className="panel"><p><strong>{enroll.data.issuer}</strong> · {enroll.data.accountName}</p><p className="muted">Provisioning URI is shown only during enrollment.</p><code>{enroll.data.provisioningUri}</code></div> : null}
-          <Field label="6-digit code"><Input value={totpCode} maxLength={6} inputMode="numeric" onChange={(event) => setTotpCode(event.target.value)} /></Field>
-          <Button type="button" variant="secondary" onClick={() => confirm.mutate()} disabled={confirm.isPending}>Confirm enrollment</Button>
-          {confirm.data ? <div className="alert warning"><strong>Recovery codes are shown now only.</strong><p>{confirm.data.recoveryCodes.join(' ')}</p></div> : null}
-        </Card>
-        <Card>
-          <h2>Sessions and sensitive actions</h2>
-          <Field label="Password for step-up"><Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></Field>
-          <div className="toolbar"><Button type="button" variant="secondary" onClick={auth.logoutAll}>Logout all sessions</Button><Button type="button" variant="danger" onClick={() => disable.mutate()}>Disable TOTP</Button></div>
-          <p className="muted">TOTP secrets and recovery codes are not persisted long-term in the browser.</p>
-        </Card>
-      </div>
-    </section>
-  );
-}
+export { SecuritySettingsPage } from './SecuritySettingsPage';
 
 export function NotificationSettingsPage() {
   return <section className="page"><h1 className="page-title">Notification settings</h1><div className="grid cols-2"><Card><h2>Channels</h2>{['In-app', 'Email', 'SMS', 'Push'].map((channel) => <label key={channel} className="field"><span className="label">{channel}</span><input type="checkbox" /></label>)}</Card><Card><h2>Types</h2><p className="muted">Preferences are shown for backend-supported notification types. Unsupported channels remain disabled by backend policy.</p></Card></div></section>;
 }
 
-export function AdminPage() {
-  const dashboard = useQuery({ queryKey: ['admin', 'dashboard'], queryFn: adminApi.dashboard });
-  const operations = useQuery({ queryKey: ['admin', 'operations'], queryFn: adminApi.operations });
-  const users = useQuery({ queryKey: ['admin', 'users'], queryFn: adminApi.users });
-  const grant = useMutation({ mutationFn: adminApi.grantComplimentaryAccess });
-  return <section className="page"><h1 className="page-title">System administration</h1><div className="grid cols-2"><Card><h2>Dashboard</h2><RecordRows rows={dashboard.data ? [dashboard.data] : []} /></Card><Card><h2>Operations</h2><RecordRows rows={operations.data ? [operations.data] : []} /></Card><Card><h2>Users</h2><RecordRows rows={pageContent(users.data)} /></Card><Card><h2>Complimentary access</h2><form className="form"><Field label="Workspace/User"><Input /></Field><Field label="Plan"><Input /></Field><Field label="Grant type"><select className="select"><option>DEVELOPER_ACCESS</option><option>COMPLIMENTARY</option><option>PROMOTIONAL</option></select></Field><Field label="Reason"><Textarea /></Field><Button type="button" onClick={() => grant.mutate({})}>Grant</Button></form><p className="muted">Paid subscriptions and complimentary grants are always visually distinct.</p></Card></div></section>;
-}
+export { AdminDashboardPage as AdminPage } from './admin/AdminDashboardPage';
 
 function RecordRows({ rows }: { rows: Record<string, unknown>[] }) {
   if (!rows.length) return <EmptyState title="No backend records returned" />;
@@ -232,19 +184,3 @@ function ExportJob({ data }: { data?: Record<string, unknown> }) {
   return <div className="panel"><Badge tone={status === 'COMPLETED' ? 'success' : status === 'FAILED' ? 'danger' : 'warning'}>{displayValue(data.format)} {status}</Badge><p className="muted">Revision {displayValue(data.reportRevisionNumber)} | Size {displayValue(data.fileSizeBytes)}</p>{status === 'COMPLETED' && id ? <a className="button secondary" href={reportApi.exportDownloadUrl(id)}>Download</a> : null}</div>;
 }
 
-function BillingCheckoutForm({ onSubmit, loading }: { onSubmit: (values: { planCode: string; billingInterval: string }) => void; loading?: boolean }) {
-  const [planCode, setPlanCode] = useState('');
-  const [billingInterval, setBillingInterval] = useState('MONTHLY');
-  return <form className="form" onSubmit={(event) => { event.preventDefault(); onSubmit({ planCode, billingInterval }); }}><Field label="Plan code"><Input value={planCode} onChange={(event) => setPlanCode(event.target.value)} /></Field><Field label="Billing interval"><Select value={billingInterval} onChange={(event) => setBillingInterval(event.target.value)}><option>MONTHLY</option><option>YEARLY</option></Select></Field><Button type="submit" disabled={!planCode || loading}>Start Paystack TEST checkout</Button><Badge tone="warning">TEST PAYMENT</Badge></form>;
-}
-
-function CheckoutResult({ data }: { data: { authorizationUrl?: string } }) {
-  const url = String(data.authorizationUrl ?? '');
-  const trusted = /^https:\/\/(checkout|standard)\.paystack\.com\//.test(url);
-  return <div className="alert info">Backend created a new payment attempt. {trusted ? <a href={url} rel="noopener noreferrer">Open Paystack TEST checkout</a> : 'Authorization URL is not displayed because it did not match the expected Paystack host.'}</div>;
-}
-
-function QuotaUsage({ data }: { data?: Record<string, unknown> }) {
-  const rows = ['aiRequests', 'aiTokens', 'projects', 'storage', 'collaborators', 'exports'];
-  return <div className="grid">{rows.map((key) => <p key={key}><strong>{key}</strong>: {String(data?.[key] ?? 'Backend scoped')}</p>)}</div>;
-}

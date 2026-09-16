@@ -612,6 +612,67 @@ class ResearchProjectControllerIntegrationTests {
                         .header("Authorization", "Bearer " + accessToken));
     }
 
+    @Test
+    void createProject_withoutWorkspaceIdInBody_succeedsAndDefaultsToPathWorkspace()
+            throws Exception {
+        UserResponse owner = createUser();
+        String ownerToken = login(owner.email()).accessToken();
+        WorkspaceResponse workspace = createWorkspace(ownerToken);
+
+        String title = "Path Only Project " + UUID.randomUUID();
+        String responseJson = mockMvc.perform(post(
+                        "/api/v1/workspaces/{workspaceId}/projects",
+                        workspace.id()
+                )
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "%s",
+                                  "description": "Created with path workspace only"
+                                }
+                                """.formatted(title)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.title").value(title))
+                .andExpect(jsonPath("$.workspaceId").value(workspace.id().toString()))
+                .andExpect(jsonPath("$.currentUserRole").value("LEAD"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        ResearchProjectResponse project = objectMapper.readValue(
+                responseJson,
+                ResearchProjectResponse.class
+        );
+
+        ResearchProject entity = projectRepository.findById(project.id()).orElseThrow();
+        assertThat(entity.getNextDocumentNumber()).isEqualTo(1L);
+        assertThat(entity.getStatus()).isEqualTo(ResearchProjectStatus.DRAFT);
+        assertThat(entity.getCreatedBy().getId()).isEqualTo(owner.id());
+
+        // Test GET /api/v1/projects/mine
+        mockMvc.perform(get("/api/v1/projects/mine")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(project.id().toString()))
+                .andExpect(jsonPath("$.content[0].title").value(title));
+
+        // Test filtered GET /api/v1/workspaces/{workspaceId}/projects with q and status
+        mockMvc.perform(get("/api/v1/workspaces/{workspaceId}/projects", workspace.id())
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .param("q", "Path Only")
+                        .param("status", "DRAFT"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(project.id().toString()));
+
+        // Filter that does not match
+        mockMvc.perform(get("/api/v1/workspaces/{workspaceId}/projects", workspace.id())
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .param("q", "NonExistentTerm"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
     private void setWorkspaceMembershipStatus(
             UUID workspaceId,
             UUID userId,

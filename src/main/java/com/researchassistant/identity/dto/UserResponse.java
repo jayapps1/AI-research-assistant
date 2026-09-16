@@ -3,6 +3,7 @@ package com.researchassistant.identity.dto;
 import com.researchassistant.identity.entity.UserStatus;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -26,10 +27,15 @@ public record UserResponse(
         String email,
         String firstName,
         String lastName,
+        String phoneNumber,
         UserStatus status,
         boolean emailVerified,
         String locale,
+        List<String> systemRoles,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt
 ) {
+    public UserResponse {
+        systemRoles = systemRoles == null ? List.of() : List.copyOf(systemRoles);
+    }
 }

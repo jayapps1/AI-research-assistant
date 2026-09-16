@@ -81,6 +81,21 @@ public class DocumentController {
         ));
     }
 
+    @GetMapping("/documents/mine")
+    public PageResponse<DocumentResponse> listMyDocuments(
+            Authentication authentication,
+            @RequestParam(required = false) DocumentStatus status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return PageResponse.from(documentService.listAllMyDocuments(
+                user,
+                status,
+                pageable(page, size)
+        ));
+    }
+
     @GetMapping("/documents/{documentId}")
     public DocumentResponse getDocument(
             Authentication authentication,

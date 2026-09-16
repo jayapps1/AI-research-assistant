@@ -104,6 +104,12 @@ public class User {
     )
     private String lastName;
 
+    @Column(
+            name = "phone_number",
+            length = 40
+    )
+    private String phoneNumber;
+
     /**
      * Current lifecycle state of the account.
      *

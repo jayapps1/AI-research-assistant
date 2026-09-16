@@ -1,6 +1,7 @@
 package com.researchassistant;
 
 import com.researchassistant.ai.config.AiProperties;
+import com.researchassistant.admin.SuperAdminSeedProperties;
 import com.researchassistant.cache.AppCacheProperties;
 import com.researchassistant.collaboration.service.CollaborationProperties;
 import com.researchassistant.document.config.DocumentProperties;
@@ -22,7 +23,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 		BackupProperties.class,
 		CollaborationProperties.class,
 		RagProperties.class,
-		RetrievalProperties.class
+		RetrievalProperties.class,
+		SuperAdminSeedProperties.class
 })
 public class ResearchAssistantApiApplication {
 

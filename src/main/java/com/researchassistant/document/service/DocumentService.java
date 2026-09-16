@@ -258,6 +258,16 @@ public class DocumentService {
     }
 
     @Transactional(readOnly = true)
+    public Page<DocumentResponse> listAllMyDocuments(
+            User user,
+            DocumentStatus status,
+            Pageable pageable
+    ) {
+        return documentRepository.findAllAuthorizedDocumentsForUser(user.getId(), status, pageable)
+                .map(this::toDocumentResponse);
+    }
+
+    @Transactional(readOnly = true)
     public DocumentResponse getDocument(UUID documentId, User user) {
         DocumentAuthorizationContext context =
                 documentAuthorizationService.requireDocumentViewer(
