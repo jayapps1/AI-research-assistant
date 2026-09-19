@@ -2,10 +2,43 @@ export type UUID = string;
 
 export interface PageResponse<T> {
   content: T[];
-  page: number;
+  page?: number;
+  number?: number;
   size: number;
   totalElements: number;
   totalPages: number;
+  first?: boolean;
+  last?: boolean;
+  empty?: boolean;
+}
+
+export interface PaymentTransaction {
+  id: UUID;
+  workspaceId: UUID;
+  reference: string;
+  internalReference?: string;
+  environment: 'TEST' | 'LIVE' | string;
+  status: 'SUCCESS' | 'FAILED' | 'PENDING' | 'INITIALIZED' | 'CANCELLED' | string;
+  amount: number;
+  currency: string;
+  planCode: string;
+  billingInterval: 'NONE' | 'MONTHLY' | 'YEARLY' | string;
+  createdAt: string;
+  paymentIntentId?: UUID;
+}
+
+export type PaymentTransactionPage = PageResponse<PaymentTransaction>;
+
+export interface PlanPriceBreakdown {
+  planCode: string;
+  billingInterval: string;
+  currency: string;
+  baseAmount: number;
+  processingRate: number;
+  processingAmount: number;
+  aiGenerationRate: number;
+  aiGenerationAmount: number;
+  totalAmount: number;
 }
 
 export interface ApiErrorResponse {
@@ -44,6 +77,30 @@ export interface User {
   roles?: string[];
   systemRoles?: string[];
   totpEnabled?: boolean;
+  avatarUrl?: string | null;
+  profileImage?: ProfileImageInfo | null;
+}
+
+export interface ProfileImageInfo {
+  id: UUID;
+  status: 'ACTIVE' | 'REPLACED' | 'DELETED';
+  contentType: string;
+  fileSizeBytes: number;
+  width?: number | null;
+  height?: number | null;
+  publicUrl?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserProfileResponse {
+  userId: UUID;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  fullName: string | null;
+  avatarUrl: string | null;
+  profileImage: ProfileImageInfo | null;
 }
 
 export interface AuthTokenResponse {
@@ -60,6 +117,7 @@ export interface LoginChallengeResponse {
   challengeId: string;
   authenticationMethod: 'PASSWORD_AND_TOTP';
   expiresIn: number;
+  email?: string;
 }
 
 export type LoginResponse = AuthTokenResponse | LoginChallengeResponse;
@@ -100,15 +158,31 @@ export interface ProjectMember {
   status?: string;
 }
 
+export interface DocumentVersionSummary {
+  versionId: string;
+  versionNumber: number;
+  originalFilename: string;
+  mimeType: string;
+  fileSizeBytes: number;
+  checksumSha256: string;
+  scanStatus: string;
+  quarantined: boolean;
+  status: string;
+  uploadedAt: string;
+}
+
 export interface DocumentItem {
   id: UUID;
+  projectId?: UUID;
   documentId?: UUID;
+  documentNumber?: number;
+  documentCode?: string;
   docCode?: string;
   filename?: string;
   originalFilename?: string;
   title?: string;
   version?: number;
-  currentVersion?: number;
+  currentVersion?: DocumentVersionSummary | null;
   status?: string;
   processingStatus?: string;
   semanticIndexStatus?: string;
@@ -390,4 +464,127 @@ export interface MyDocumentsResponse {
   processingCount: number;
   failedCount: number;
 }
+
+export type LimitMode = 'LIMITED' | 'UNLIMITED' | 'DISABLED';
+
+export interface AdminSubscriptionPlan {
+  id: UUID;
+  code: string;
+  name: string;
+  description?: string | null;
+  status: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED';
+  billingInterval: 'NONE' | 'MONTHLY' | 'YEARLY';
+  price: number;
+  yearlyPrice?: number | null;
+  currency: string;
+  publiclyAvailable: boolean;
+  featured: boolean;
+  displayOrder: number;
+  workspacesSubscribed: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSubscriptionPlanRequest {
+  code: string;
+  name: string;
+  description?: string;
+  status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED';
+  billingInterval: 'NONE' | 'MONTHLY' | 'YEARLY';
+  price: number;
+  yearlyPrice?: number | null;
+  currency: string;
+  publiclyAvailable?: boolean;
+  featured?: boolean;
+  displayOrder?: number;
+}
+
+export interface UpdateSubscriptionPlanRequest {
+  name?: string;
+  description?: string;
+  status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED';
+  billingInterval?: 'NONE' | 'MONTHLY' | 'YEARLY';
+  price?: number;
+  yearlyPrice?: number | null;
+  currency?: string;
+  publiclyAvailable?: boolean;
+  featured?: boolean;
+  displayOrder?: number;
+}
+
+export interface AdminPlanEntitlement {
+  feature: string;
+  enabled: boolean;
+  limitMode: LimitMode;
+  limitValue?: number | null;
+  limitUnit: string;
+  formattedValue?: string;
+}
+
+export interface AdminPaymentAttemptDetail {
+  id: UUID;
+  attemptNumber: number;
+  internalReference: string;
+  providerReference?: string | null;
+  status: string;
+  expectedAmount: number;
+  currency: string;
+  providerStatus?: string | null;
+  failureCode?: string | null;
+  failureMessageSafe?: string | null;
+  authorizationUrl?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
+  providerVerifiedAt?: string | null;
+}
+
+export interface AdminPaymentItem {
+  id: UUID;
+  workspaceId: UUID;
+  workspaceName: string;
+  userId: UUID;
+  userEmail: string;
+  userName: string;
+  planCode: string;
+  planName: string;
+  billingInterval: string;
+  amount: number;
+  currency: string;
+  environment: string;
+  intentStatus: string;
+  attemptCount: number;
+  latestAttemptStatus: string;
+  latestReference?: string | null;
+  latestProviderReference?: string | null;
+  latestProviderStatus?: string | null;
+  latestFailureCode?: string | null;
+  latestFailureMessage?: string | null;
+  createdAt: string;
+  settledAt?: string | null;
+  latestVerifiedAt?: string | null;
+  attempts: AdminPaymentAttemptDetail[];
+}
+
+export interface PaymentAttemptDetail {
+  paymentAttemptId: UUID;
+  paymentIntentId: UUID;
+  workspaceId: UUID;
+  planCode: string;
+  planName: string;
+  expectedAmount: number;
+  currency: string;
+  attemptNumber: number;
+  status: string;
+  providerStatus?: string | null;
+  internalReference: string;
+  providerReference?: string | null;
+  authorizationUrl?: string | null;
+  failureCode?: string | null;
+  failureMessageSafe?: string | null;
+  retryable: boolean;
+  createdAt: string;
+  completedAt?: string | null;
+  providerVerifiedAt?: string | null;
+}
+
 

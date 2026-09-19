@@ -45,12 +45,29 @@ export function AiAssistantPage() {
             {scopeType === 'SELECTED_DOCUMENTS' ? (
               <Field label="Documents">
                 <Select multiple value={selectedDocuments} onChange={(event) => setSelectedDocuments(Array.from(event.currentTarget.selectedOptions).map((option) => option.value))}>
-                  {pageContent(documents.data).map((doc) => <option key={doc.id} value={doc.id}>{doc.docCode ?? 'DOC'} · {doc.title ?? doc.filename}</option>)}
+                  {pageContent(documents.data).map((doc) => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.documentCode ?? doc.docCode ?? 'DOC'} · {doc.currentVersion?.originalFilename ?? doc.title ?? doc.filename ?? 'Untitled'}
+                      {doc.status !== 'READY' ? ` [${doc.status ?? 'PROCESSING'}]` : ''}
+                    </option>
+                  ))}
                 </Select>
               </Field>
             ) : null}
           </div>
-          {ask.error ? <ErrorState title="AI request failed" error={ask.error} /> : null}
+          {ask.error ? (() => {
+            const err = ask.error as any;
+            const message = err?.message || err?.response?.data?.message || '';
+            const status = err?.status || err?.response?.status;
+            const code = err?.code || err?.response?.data?.code;
+            if (message.includes('AI provider is not configured') || message.includes('Grounded answer generation is not enabled') || code === 'CAPABILITY_UNAVAILABLE') {
+              return <div className="alert warning">AI provider is not configured.</div>;
+            }
+            if (status === 429 || code === 'QUOTA_EXCEEDED') {
+              return <div className="alert warning">AI request quota exceeded for this billing period. Please upgrade your plan.</div>;
+            }
+            return <ErrorState title="AI request failed" error={ask.error} />;
+          })() : null}
           <QuestionForm disabled={!conversationId || ask.isPending} onAsk={(question) => ask.mutate(question)} />
           {ask.isPending ? <div className="alert info">Retrieving project evidence and generating a grounded answer...</div> : null}
           {answer ? <AnswerDisplay answer={answer} onCitationClick={setActiveCitation} /> : <EmptyState title="Ask a grounded question" description="The browser sends the request to Spring Boot; it never calls OpenAI directly." />}
@@ -62,7 +79,13 @@ export function AiAssistantPage() {
             <p><strong>{activeCitation.documentCode ?? activeCitation.docCode}</strong> · Version {activeCitation.versionNumber ?? 'current'} · Page {activeCitation.pageNumber ?? activeCitation.page ?? 'not provided'}</p>
             <p>{activeCitation.documentTitle}</p>
             <div className="panel">{activeCitation.supportingExcerpt ?? activeCitation.snippet ?? activeCitation.quote ?? 'No excerpt returned.'}</div>
-            <Button type="button" variant="secondary">Open Source</Button>
+            {activeCitation.documentId && (
+              <Button asChild variant="secondary">
+                <a href={documentApi.downloadUrl(activeCitation.documentId)} rel="noopener noreferrer">
+                  Open Source Document
+                </a>
+              </Button>
+            )}
           </div>
         ) : null}
       </Drawer>
@@ -78,7 +101,7 @@ function QuestionForm({ disabled, onAsk }: { disabled?: boolean; onAsk: (questio
 function AnswerDisplay({ answer, onCitationClick }: { answer: RagAnswer; onCitationClick: (citation: Citation) => void }) {
   const citations = answer.citations ?? answer.evidence ?? [];
   const insufficient = answer.status === 'INSUFFICIENT_EVIDENCE' || !answer.answer;
-  if (insufficient) return <div className="alert warning">Your current project sources do not provide enough evidence to answer this question. Select more documents, upload a source, or ask differently.</div>;
+  if (insufficient) return <div className="alert info">The available project sources do not contain enough evidence to answer this question.</div>;
   return <div className="grid"><Badge tone="success">{answer.status ?? 'COMPLETED'}</Badge><div className="panel"><p>{answer.answer}</p></div><h3>Evidence / citations</h3>{citations.map((citation, index) => <CitationCard key={citation.id ?? index} citation={citation} onClick={() => onCitationClick(citation)} />)}</div>;
 }
 

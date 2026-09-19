@@ -25,8 +25,10 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../app/ThemeProvider';
 import { useAuth } from '../auth/AuthProvider';
-import { Badge, Button, Select } from '../components/ui';
+import { Badge, Button } from '../components/ui';
+import { Avatar } from '../components/Avatar';
 import { NotificationBell } from '../features/notifications/NotificationBell';
+import { WorkspaceSwitcher } from '../features/workspaces/WorkspaceSwitcher';
 import { useWorkspace } from '../features/workspaces/WorkspaceProvider';
 import { paths } from '../routes/paths';
 
@@ -121,18 +123,7 @@ export function AppShell() {
         </div>
 
         <div className="toolbar">
-          <Select
-            className="select topbar-select"
-            aria-label="Select workspace"
-            value={workspace.selectedWorkspaceId}
-            onChange={(event) => workspace.setSelectedWorkspaceId(event.target.value)}
-          >
-            {workspace.workspaces.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name} · {item.currentUserRole ?? item.role ?? 'Member'}
-              </option>
-            ))}
-          </Select>
+          <WorkspaceSwitcher />
 
           <NotificationBell />
 
@@ -161,19 +152,32 @@ export function AppShell() {
               aria-expanded={avatarOpen}
               onClick={() => setAvatarOpen((v) => !v)}
             >
-              <span className="avatar-circle">{(userName[0] || 'U').toUpperCase()}</span>
+              <Avatar
+                src={auth.user?.avatarUrl || (auth.user?.id ? `/api/v1/users/${auth.user.id}/avatar` : undefined)}
+                name={userName}
+                email={auth.user?.email}
+                size={34}
+              />
             </button>
 
             {avatarOpen ? (
               <div className="avatar-dropdown-menu" role="menu">
-                <div className="dropdown-user-info">
-                  <strong>{userName}</strong>
-                  <span className="muted">{auth.user?.email}</span>
-                  {auth.hasCapability('admin') ? (
-                    <Badge tone="info" className="badge-sm">
-                      SYSTEM_ADMIN
-                    </Badge>
-                  ) : null}
+                <div className="dropdown-user-info" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '10px' }}>
+                  <Avatar
+                    src={auth.user?.avatarUrl || (auth.user?.id ? `/api/v1/users/${auth.user.id}/avatar` : undefined)}
+                    name={userName}
+                    email={auth.user?.email}
+                    size={40}
+                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                    <strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{userName}</strong>
+                    <span className="muted" style={{ fontSize: '0.8rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{auth.user?.email}</span>
+                    {auth.hasCapability('admin') ? (
+                      <Badge tone="info" className="badge-sm" style={{ marginTop: '4px', alignSelf: 'flex-start' }}>
+                        SYSTEM_ADMIN
+                      </Badge>
+                    ) : null}
+                  </div>
                 </div>
                 <hr className="dropdown-divider" />
                 <button

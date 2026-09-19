@@ -10,11 +10,14 @@ import com.researchassistant.operations.backup.BackupProperties;
 import com.researchassistant.rag.config.RagProperties;
 import com.researchassistant.retrieval.service.RetrievalProperties;
 
+import com.researchassistant.subscription.SubscriptionProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
+@EnableScheduling
 @EnableConfigurationProperties({
 		DocumentProperties.class,
 		AiProperties.class,
@@ -24,7 +27,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 		CollaborationProperties.class,
 		RagProperties.class,
 		RetrievalProperties.class,
-		SuperAdminSeedProperties.class
+		SuperAdminSeedProperties.class,
+		SubscriptionProperties.class
 })
 public class ResearchAssistantApiApplication {
 

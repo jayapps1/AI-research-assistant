@@ -347,6 +347,7 @@ public class GlobalExceptionHandler {
         return buildResponse(
                 HttpStatus.TOO_MANY_REQUESTS,
                 "QUOTA_EXCEEDED",
+                "QUOTA_EXCEEDED",
                 request.getRequestURI(),
                 Map.of(
                         "feature", exception.feature().name(),
@@ -393,37 +394,54 @@ public class GlobalExceptionHandler {
      * display validation feedback directly beside form inputs.</p>
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiErrorResponse> handleValidation(
+    public ResponseEntity<ApiErrorResponse> handleValidationErrors(
             MethodArgumentNotValidException exception,
             HttpServletRequest request
     ) {
 
-        Map<String, String> validationErrors =
-                new LinkedHashMap<>();
+        Map<String, String> errors = new LinkedHashMap<>();
 
-        for (FieldError fieldError
-                : exception.getBindingResult().getFieldErrors()) {
-
-            validationErrors.putIfAbsent(
-                    fieldError.getField(),
-                    fieldError.getDefaultMessage()
-            );
-        }
+        exception
+                .getBindingResult()
+                .getFieldErrors()
+                .forEach(error -> errors.put(
+                        error.getField(),
+                        error.getDefaultMessage()
+                ));
 
         return buildResponse(
                 HttpStatus.BAD_REQUEST,
                 "Request validation failed.",
                 request.getRequestURI(),
-                validationErrors
+                errors
         );
     }
 
 
     /**
-     * Builds the standard API error response.
+     * Fallback handler for unhandled runtime exceptions.
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiErrorResponse> handleGeneralException(
+            Exception exception,
+            HttpServletRequest request
+    ) {
+
+        return buildResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "An unexpected internal error occurred.",
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+
+    /**
+     * Builds the standard API error response with custom error code.
      */
     private ResponseEntity<ApiErrorResponse> buildResponse(
             HttpStatus status,
+            String errorCode,
             String message,
             String path,
             Map<String, String> validationErrors
@@ -436,7 +454,7 @@ public class GlobalExceptionHandler {
                 MDC.get("requestId"),
                 status.value(),
                 status.getReasonPhrase(),
-                status.name(),
+                errorCode != null ? errorCode : status.name(),
                 message,
                 message,
                 path,
@@ -447,5 +465,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(status)
                 .body(body);
+    }
+
+    /**
+     * Builds the standard API error response.
+     */
+    private ResponseEntity<ApiErrorResponse> buildResponse(
+            HttpStatus status,
+            String message,
+            String path,
+            Map<String, String> validationErrors
+    ) {
+        return buildResponse(status, status.name(), message, path, validationErrors);
     }
 }

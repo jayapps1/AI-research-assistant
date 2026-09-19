@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { dashboardApi, documentApi, researchApi } from '../api/endpoints';
 import { api, isConflictError } from '../api/client';
@@ -9,6 +9,7 @@ import { EmptyState, ErrorState, PageLoading } from '../components/states';
 import { useProjectId } from '../hooks/useProjectId';
 import { displayValue, pageContent } from '../utils/collections';
 import { paths } from '../routes/paths';
+import type { DocumentItem } from '../types/api';
 
 // =========================================================================
 // RESEARCH WORKFLOW PAGE (/app/projects/:projectId/research)
@@ -407,25 +408,32 @@ function GlobalDocumentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {docs.map((doc) => (
-                  <tr key={doc.id}>
-                    <td><strong>{doc.docCode ?? 'DOC-—'}</strong></td>
-                    <td>{doc.filename ?? doc.originalFilename ?? doc.title}</td>
-                    <td>v{doc.version ?? doc.currentVersion ?? 1}</td>
-                    <td>
-                      <Badge tone={doc.status === 'READY' ? 'success' : doc.status === 'FAILED' ? 'danger' : 'info'}>
-                        {doc.status ?? 'READY'}
-                      </Badge>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <Button asChild variant="secondary" style={{ fontSize: '0.8rem', padding: '4px 8px' }}>
-                        <a href={documentApi.downloadUrl(doc.id)} rel="noopener noreferrer">
-                          Download
-                        </a>
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                {docs.map((doc) => {
+                  const docCode = doc.documentCode ?? doc.docCode ?? (doc.documentNumber ? `DOC-${String(doc.documentNumber).padStart(3, '0')}` : 'DOC-—');
+                  const filename = doc.currentVersion?.originalFilename ?? doc.title ?? doc.filename ?? doc.originalFilename ?? 'Untitled';
+                  const versionText = doc.currentVersion ? `v${doc.currentVersion.versionNumber}` : doc.version ? `v${doc.version}` : 'No version available';
+                  const statusText = doc.currentVersion?.scanStatus === 'OCR_REQUIRED' ? 'OCR required' : (doc.currentVersion?.status ?? doc.status ?? 'READY');
+
+                  return (
+                    <tr key={doc.id}>
+                      <td><strong>{docCode}</strong></td>
+                      <td>{filename}</td>
+                      <td>{versionText}</td>
+                      <td>
+                        <Badge tone={statusText === 'READY' ? 'success' : statusText === 'FAILED' || statusText === 'OCR required' ? 'danger' : 'info'}>
+                          {statusText}
+                        </Badge>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <Button asChild variant="secondary" style={{ fontSize: '0.8rem', padding: '4px 8px' }}>
+                          <a href={documentApi.downloadUrl(doc.id)} rel="noopener noreferrer">
+                            Download
+                          </a>
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -445,11 +453,22 @@ function GlobalDocumentsPage() {
   );
 }
 
+interface UploadQueueItem {
+  id: string;
+  file: File;
+  status: 'QUEUED' | 'UPLOADING' | 'READY' | 'QUOTA_EXCEEDED' | 'FAILED';
+  errorMessage?: string | null;
+  documentCode?: string | null;
+}
+
 function ProjectDocumentsPage({ projectId }: { projectId: string }) {
+  const navigate = useNavigate();
   const [page, setPage] = useState(0);
   const [status, setStatus] = useState('');
-  const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState('');
+  const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
+  const [isUploadingQueue, setIsUploadingQueue] = useState(false);
+  const [versionDoc, setVersionDoc] = useState<DocumentItem | null>(null);
+  const [versionFile, setVersionFile] = useState<File | null>(null);
   const client = useQueryClient();
 
   const docs = useQuery({
@@ -458,19 +477,92 @@ function ProjectDocumentsPage({ projectId }: { projectId: string }) {
     enabled: Boolean(projectId),
   });
 
-  const upload = useMutation({
+  const uploadVersionMutation = useMutation({
     mutationFn: () => {
-      if (!file) throw new Error('Choose a file before uploading.');
-      return documentApi.upload(projectId, file, title || undefined);
+      if (!versionDoc || !versionFile) throw new Error('Select a replacement file.');
+      return documentApi.uploadVersion(versionDoc.id, versionFile);
     },
     onSuccess: () => {
-      setFile(null);
-      setTitle('');
+      setVersionDoc(null);
+      setVersionFile(null);
       client.invalidateQueries({ queryKey: ['documents', projectId] });
       client.invalidateQueries({ queryKey: ['project-dashboard', projectId] });
       client.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
+
+  const handleUploadQueue = async () => {
+    if (uploadQueue.length === 0 || isUploadingQueue) return;
+    setIsUploadingQueue(true);
+
+    const pendingItems = uploadQueue.filter(
+      (item) => item.status === 'QUEUED' || item.status === 'FAILED'
+    );
+
+    let index = 0;
+    const concurrency = 2;
+
+    const uploadWorker = async () => {
+      while (index < pendingItems.length) {
+        const currentItem = pendingItems[index++];
+        setUploadQueue((prev) =>
+          prev.map((item) =>
+            item.id === currentItem.id ? { ...item, status: 'UPLOADING', errorMessage: null } : item
+          )
+        );
+
+        try {
+          const result = await documentApi.upload(projectId, currentItem.file);
+          const allocatedCode = result.documentCode ?? result.docCode ?? (result.documentNumber ? `DOC-${String(result.documentNumber).padStart(3, '0')}` : 'DOC');
+          setUploadQueue((prev) =>
+            prev.map((item) =>
+              item.id === currentItem.id
+                ? {
+                    ...item,
+                    status: 'READY',
+                    documentCode: allocatedCode,
+                  }
+                : item
+            )
+          );
+        } catch (err: any) {
+          const errStatus = err?.status ?? err?.response?.status;
+          const errCode = err?.code ?? err?.response?.data?.code;
+          const isQuota = errStatus === 429 || errCode === 'QUOTA_EXCEEDED';
+          const errorMsg = isQuota
+            ? 'Storage quota exceeded'
+            : err?.message || 'Upload failed';
+
+          setUploadQueue((prev) =>
+            prev.map((item) =>
+              item.id === currentItem.id
+                ? {
+                    ...item,
+                    status: isQuota ? 'QUOTA_EXCEEDED' : 'FAILED',
+                    errorMessage: errorMsg,
+                  }
+                : item
+            )
+          );
+        }
+      }
+    };
+
+    const workers = Array.from(
+      { length: Math.min(concurrency, pendingItems.length) },
+      () => uploadWorker()
+    );
+    await Promise.all(workers);
+
+    setIsUploadingQueue(false);
+    client.invalidateQueries({ queryKey: ['documents', projectId] });
+    client.invalidateQueries({ queryKey: ['project-dashboard', projectId] });
+    client.invalidateQueries({ queryKey: ['workspace-usage'] });
+    client.invalidateQueries({ queryKey: ['storage-usage'] });
+    client.invalidateQueries({ queryKey: ['dashboard'] });
+  };
+
+  const hasQuotaExceeded = uploadQueue.some((item) => item.status === 'QUOTA_EXCEEDED');
 
   return (
     <section className="page">
@@ -484,36 +576,113 @@ function ProjectDocumentsPage({ projectId }: { projectId: string }) {
 
       <div className="grid cols-2" style={{ gap: 20 }}>
         <Card>
-          <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>Upload Research Document</h2>
-          {upload.error ? <ErrorState title="Upload failed" error={upload.error} /> : null}
-          <form
-            className="form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              upload.mutate();
-            }}
-          >
-            <Field label="Document Title (Optional)">
-              <Input
-                placeholder="e.g. Semi-Structured Interview Guide"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-            </Field>
-            <Field label="Select File (.pdf, .doc, .docx, .txt, .csv, .xlsx)">
+          <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>Upload Research Documents</h2>
+          <p className="muted" style={{ fontSize: '0.85rem', margin: '4px 0 16px' }}>
+            Select one or multiple research documents (.pdf, .docx, .txt). Files are processed and indexed with sequential DOC codes.
+          </p>
+
+          {hasQuotaExceeded && (
+            <div className="alert warning" style={{ marginBottom: 16 }}>
+              <strong>Storage Quota Exceeded</strong>
+              <p style={{ margin: '6px 0 12px' }}>
+                Your workspace storage limit has been reached. Upgrade to continue uploading documents.
+              </p>
+              <Button
+                type="button"
+                variant="primary"
+                className="btn-compact"
+                onClick={() => navigate(paths.billing)}
+              >
+                Upgrade Storage
+              </Button>
+            </div>
+          )}
+
+          <div style={{ marginBottom: 16 }}>
+            <Field label="Select File(s) (.pdf, .docx, .txt)">
               <Input
                 type="file"
-                accept=".pdf,.doc,.docx,.txt,.csv,.xlsx"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                multiple
+                accept=".pdf,.doc,.docx,.txt"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    const newItems: UploadQueueItem[] = Array.from(e.target.files).map((f) => ({
+                      id: `${f.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                      file: f,
+                      status: 'QUEUED',
+                    }));
+                    setUploadQueue((prev) => [...prev, ...newItems]);
+                  }
+                  e.target.value = '';
+                }}
               />
             </Field>
-            <p className="muted" style={{ fontSize: '0.8rem' }}>
-              {file ? `${file.name} • ${Math.round(file.size / 1024)} KB` : 'Files are securely hashed and stored in backend S3/Postgres.'}
-            </p>
-            <Button type="submit" disabled={!file || upload.isPending}>
-              {upload.isPending ? 'Uploading & Hashing...' : 'Upload to Project'}
-            </Button>
-          </form>
+          </div>
+
+          {uploadQueue.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <strong style={{ fontSize: '0.9rem' }}>Upload Queue ({uploadQueue.length})</strong>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  style={{ fontSize: '0.75rem', padding: '2px 6px' }}
+                  onClick={() => setUploadQueue([])}
+                  disabled={isUploadingQueue}
+                >
+                  Clear Queue
+                </Button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '200px', overflowY: 'auto', padding: '8px', border: '1px solid var(--border)', borderRadius: '6px' }}>
+                {uploadQueue.map((item) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      fontSize: '0.82rem',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      backgroundColor: 'var(--card-bg, #1e293b)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', marginRight: 8 }}>
+                      <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.file.name}
+                      </span>
+                      <span className="muted" style={{ fontSize: '0.72rem' }}>
+                        {Math.round(item.file.size / 1024)} KB
+                        {item.documentCode ? ` · ${item.documentCode}` : ''}
+                      </span>
+                    </div>
+                    <div>
+                      {item.status === 'QUEUED' && <Badge tone="info">Ready</Badge>}
+                      {item.status === 'UPLOADING' && <Badge tone="warning">Uploading...</Badge>}
+                      {item.status === 'READY' && <Badge tone="success">Ready ({item.documentCode})</Badge>}
+                      {item.status === 'QUOTA_EXCEEDED' && <Badge tone="danger">Quota Exceeded</Badge>}
+                      {item.status === 'FAILED' && <Badge tone="danger">Failed</Badge>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <Button
+                  type="button"
+                  variant="primary"
+                  className="w-full"
+                  disabled={isUploadingQueue || uploadQueue.every((q) => q.status === 'READY')}
+                  onClick={handleUploadQueue}
+                >
+                  {isUploadingQueue
+                    ? 'Uploading Documents (2 concurrent)...'
+                    : `Upload ${uploadQueue.filter((q) => q.status === 'QUEUED' || q.status === 'FAILED').length} Document(s)`}
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
 
         <Card>
@@ -527,6 +696,44 @@ function ProjectDocumentsPage({ projectId }: { projectId: string }) {
               <option value="ARCHIVED">Archived</option>
             </Select>
           </Field>
+
+          {versionDoc && (
+            <div style={{ marginTop: 20, padding: 12, border: '1px solid var(--border)', borderRadius: 6 }}>
+              <h3 style={{ fontSize: '0.95rem', fontWeight: 600, margin: '0 0 8px' }}>
+                Upload New Version for {versionDoc.documentCode ?? versionDoc.docCode}
+              </h3>
+              <p className="muted" style={{ fontSize: '0.8rem', margin: '0 0 12px' }}>
+                Creates version v{(versionDoc.currentVersion?.versionNumber ?? 1) + 1} while retaining previous version history.
+              </p>
+              <Field label="Select replacement file">
+                <Input
+                  type="file"
+                  accept=".pdf,.doc,.docx,.txt"
+                  onChange={(e) => setVersionFile(e.target.files?.[0] ?? null)}
+                />
+              </Field>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={!versionFile || uploadVersionMutation.isPending}
+                  onClick={() => uploadVersionMutation.mutate()}
+                >
+                  {uploadVersionMutation.isPending ? 'Uploading...' : 'Save New Version'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setVersionDoc(null);
+                    setVersionFile(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
       </div>
 
@@ -550,26 +757,43 @@ function ProjectDocumentsPage({ projectId }: { projectId: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageContent(docs.data).map((doc) => (
-                    <tr key={doc.id}>
-                      <td><strong>{doc.docCode}</strong></td>
-                      <td>{doc.filename ?? doc.originalFilename ?? doc.title}</td>
-                      <td>v{doc.version ?? doc.currentVersion ?? 1}</td>
-                      <td>
-                        <Badge tone={doc.status === 'READY' ? 'success' : doc.status === 'FAILED' ? 'danger' : 'info'}>
-                          {doc.status ?? 'READY'}
-                        </Badge>
-                      </td>
-                      <td>{doc.semanticIndexStatus ?? 'INDEXED'}</td>
-                      <td style={{ textAlign: 'right' }}>
-                        <Button asChild variant="secondary" style={{ fontSize: '0.8rem', padding: '4px 8px' }}>
-                          <a href={documentApi.downloadUrl(doc.id)} rel="noopener noreferrer">
-                            Download
-                          </a>
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
+                  {pageContent(docs.data).map((doc) => {
+                    const docCode = doc.documentCode ?? doc.docCode ?? (doc.documentNumber ? `DOC-${String(doc.documentNumber).padStart(3, '0')}` : 'DOC-—');
+                    const filename = doc.currentVersion?.originalFilename ?? doc.title ?? doc.filename ?? doc.originalFilename ?? 'Untitled';
+                    const versionText = doc.currentVersion ? `v${doc.currentVersion.versionNumber}` : doc.version ? `v${doc.version}` : 'No version available';
+                    const statusText = doc.currentVersion?.scanStatus === 'OCR_REQUIRED' ? 'OCR required' : (doc.currentVersion?.status ?? doc.status ?? 'READY');
+
+                    return (
+                      <tr key={doc.id}>
+                        <td><strong>{docCode}</strong></td>
+                        <td>{filename}</td>
+                        <td>{versionText}</td>
+                        <td>
+                          <Badge tone={statusText === 'READY' ? 'success' : statusText === 'FAILED' || statusText === 'OCR required' ? 'danger' : 'info'}>
+                            {statusText}
+                          </Badge>
+                        </td>
+                        <td>{doc.semanticIndexStatus ?? 'INDEXED'}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              style={{ fontSize: '0.8rem', padding: '4px 8px' }}
+                              onClick={() => setVersionDoc(doc)}
+                            >
+                              New Version
+                            </Button>
+                            <Button asChild variant="secondary" style={{ fontSize: '0.8rem', padding: '4px 8px' }}>
+                              <a href={documentApi.downloadUrl(doc.id)} rel="noopener noreferrer">
+                                Download
+                              </a>
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

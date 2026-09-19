@@ -14,7 +14,8 @@ import java.util.UUID;
         uniqueConstraints = @UniqueConstraint(name = "uk_subscription_plans_code", columnNames = "code"),
         indexes = {
                 @Index(name = "idx_subscription_plans_status", columnList = "status"),
-                @Index(name = "idx_subscription_plans_public_order", columnList = "publicly_available,display_order")
+                @Index(name = "idx_subscription_plans_public_order", columnList = "publicly_available,display_order"),
+                @Index(name = "idx_subscription_plans_featured", columnList = "featured")
         })
 @Getter
 @Setter
@@ -49,6 +50,9 @@ public class SubscriptionPlan {
 
     @Column(name = "publicly_available", nullable = false)
     private boolean publiclyAvailable;
+
+    @Column(name = "featured", nullable = false)
+    private boolean featured;
 
     @Column(name = "display_order", nullable = false)
     private int displayOrder;

@@ -42,8 +42,8 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea className="textarea" {...props} />;
 }
 
-export function Badge({ children, tone, className }: { children: ReactNode; tone?: 'success' | 'warning' | 'danger' | 'info'; className?: string }) {
-  return <span className={clsx('badge', tone, className)}>{children}</span>;
+export function Badge({ children, tone, className, style }: { children: ReactNode; tone?: 'success' | 'warning' | 'danger' | 'info'; className?: string; style?: import('react').CSSProperties }) {
+  return <span className={clsx('badge', tone, className)} style={style}>{children}</span>;
 }
 
 export function Card({
@@ -73,7 +73,7 @@ export function Breadcrumbs({ items }: { items: string[] }) {
   );
 }
 
-export function LoadingButton({ loading, children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean }) {
+export function LoadingButton({ loading, children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger'; loading?: boolean }) {
   return <Button {...props} disabled={loading || props.disabled}>{loading ? 'Working...' : children}</Button>;
 }
 

@@ -3,7 +3,6 @@ import { useState } from 'react';
 import { analysisApi, notificationApi, reportApi } from '../api/endpoints';
 import { Breadcrumbs, Button, Card, Field, Input, Textarea, Badge, Select } from '../components/ui';
 import { EmptyState, ErrorState } from '../components/states';
-import { useAuth } from '../auth/AuthProvider';
 import { useProjectId } from '../hooks/useProjectId';
 import { displayValue, pageContent } from '../utils/collections';
 
@@ -133,12 +132,7 @@ export function NotificationsPage() {
   return <section className="page"><div className="page-header"><h1 className="page-title">Notifications</h1><Button type="button" variant="secondary" onClick={() => markAll.mutate()}>Mark all read</Button></div>{notifications.isError ? <ErrorState error={notifications.error} /> : <RecordRows rows={pageContent(notifications.data) as never} />}</section>;
 }
 
-export function ProfilePage() {
-  const auth = useAuth();
-  const displayName = auth.user?.fullName ?? (`${auth.user?.firstName ?? ''} ${auth.user?.lastName ?? ''}`.trim() || 'Signed-in user');
-  return <section className="page"><h1 className="page-title">Profile</h1><div className="grid cols-2"><Card><h2>Profile information</h2><p>{displayName}</p><p className="muted">{auth.user?.email}</p><Badge>{auth.user?.status ?? 'Authenticated'}</Badge></Card><Card><h2>Settings</h2><p><a href="/app/settings/security">Security settings</a></p><p><a href="/app/settings/notifications">Notification preferences</a></p></Card></div></section>;
-}
-
+export { ProfilePage } from './ProfilePage';
 export { SecuritySettingsPage } from './SecuritySettingsPage';
 
 export function NotificationSettingsPage() {

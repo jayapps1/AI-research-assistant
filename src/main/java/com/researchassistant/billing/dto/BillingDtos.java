@@ -23,4 +23,13 @@ public final class BillingDtos {
     public record PaymentTransactionResponse(UUID id, UUID workspaceId, String reference, PaymentEnvironment environment,
                                              PaymentTransactionStatus status, BigDecimal amount, String currency,
                                              String planCode, BillingInterval billingInterval, OffsetDateTime createdAt) {}
+    public record PaymentAttemptDetailResponse(UUID paymentAttemptId, UUID paymentIntentId, UUID workspaceId,
+                                               String planCode, String planName, BigDecimal expectedAmount, String currency,
+                                               int attemptNumber, PaymentAttemptStatus status, String providerStatus,
+                                               String internalReference, String providerReference, String authorizationUrl,
+                                               String failureCode, String failureMessageSafe, boolean retryable,
+                                               OffsetDateTime createdAt, OffsetDateTime completedAt, OffsetDateTime providerVerifiedAt) {}
+    public record PlanPriceBreakdownResponse(String planCode, BillingInterval billingInterval, String currency,
+                                            BigDecimal baseAmount, BigDecimal processingRate, BigDecimal processingAmount,
+                                            BigDecimal aiGenerationRate, BigDecimal aiGenerationAmount, BigDecimal totalAmount) {}
 }

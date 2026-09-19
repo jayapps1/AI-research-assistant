@@ -43,7 +43,9 @@ public class CacheConfiguration {
                         AppCacheNames.PUBLIC_PAGES,
                         AppCacheNames.PUBLIC_SERVICES,
                         AppCacheNames.PUBLIC_FAQS,
-                        AppCacheNames.PUBLIC_PRICING
+                        AppCacheNames.PUBLIC_PRICING,
+                        AppCacheNames.PUBLIC_STATISTICS,
+                        AppCacheNames.WORKSPACE_ENTITLEMENTS
                 );
         cacheManager.setAllowNullValues(false);
         return cacheManager;
@@ -81,27 +83,19 @@ public class CacheConfiguration {
                                 .fromSerializer(serializer)
                 );
 
-        Map<String, RedisCacheConfiguration> cacheConfigurations = Map.of(
-                AppCacheNames.PROJECT_METADATA,
-                defaults.entryTtl(properties.projectMetadataTtl()),
-                AppCacheNames.DOCUMENT_METADATA,
-                defaults.entryTtl(properties.documentMetadataTtl()),
-                AppCacheNames.LITERATURE_SUMMARY,
-                defaults.entryTtl(properties.literatureSummaryTtl()),
-                AppCacheNames.RESEARCH_DESIGN_VALIDATION,
-                defaults.entryTtl(properties.researchDesignValidationTtl()),
-                AppCacheNames.FORMATTED_CITATIONS,
-                defaults.entryTtl(properties.literatureSummaryTtl()),
-                AppCacheNames.PUBLIC_SITE_SETTINGS,
-                defaults.entryTtl(properties.projectMetadataTtl()),
-                AppCacheNames.PUBLIC_PAGES,
-                defaults.entryTtl(properties.projectMetadataTtl()),
-                AppCacheNames.PUBLIC_SERVICES,
-                defaults.entryTtl(properties.projectMetadataTtl()),
-                AppCacheNames.PUBLIC_FAQS,
-                defaults.entryTtl(properties.projectMetadataTtl()),
-                AppCacheNames.PUBLIC_PRICING,
-                defaults.entryTtl(properties.projectMetadataTtl())
+        Map<String, RedisCacheConfiguration> cacheConfigurations = Map.ofEntries(
+                Map.entry(AppCacheNames.PROJECT_METADATA, defaults.entryTtl(properties.projectMetadataTtl())),
+                Map.entry(AppCacheNames.DOCUMENT_METADATA, defaults.entryTtl(properties.documentMetadataTtl())),
+                Map.entry(AppCacheNames.LITERATURE_SUMMARY, defaults.entryTtl(properties.literatureSummaryTtl())),
+                Map.entry(AppCacheNames.RESEARCH_DESIGN_VALIDATION, defaults.entryTtl(properties.researchDesignValidationTtl())),
+                Map.entry(AppCacheNames.FORMATTED_CITATIONS, defaults.entryTtl(properties.literatureSummaryTtl())),
+                Map.entry(AppCacheNames.PUBLIC_SITE_SETTINGS, defaults.entryTtl(properties.projectMetadataTtl())),
+                Map.entry(AppCacheNames.PUBLIC_PAGES, defaults.entryTtl(properties.projectMetadataTtl())),
+                Map.entry(AppCacheNames.PUBLIC_SERVICES, defaults.entryTtl(properties.projectMetadataTtl())),
+                Map.entry(AppCacheNames.PUBLIC_FAQS, defaults.entryTtl(properties.projectMetadataTtl())),
+                Map.entry(AppCacheNames.PUBLIC_PRICING, defaults.entryTtl(properties.projectMetadataTtl())),
+                Map.entry(AppCacheNames.PUBLIC_STATISTICS, defaults.entryTtl(properties.projectMetadataTtl())),
+                Map.entry(AppCacheNames.WORKSPACE_ENTITLEMENTS, defaults.entryTtl(properties.projectMetadataTtl()))
         );
 
         return RedisCacheManager.builder(redisConnectionFactory)

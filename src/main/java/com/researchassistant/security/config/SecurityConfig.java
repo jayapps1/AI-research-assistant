@@ -116,7 +116,8 @@ public class SecurityConfig {
                                         "/api/v1/auth/password/reset",
                                         "/api/v1/billing/webhooks/paystack",
                                         "/api/v1/billing/paystack/callback",
-                                        "/api/v1/public/**"
+                                        "/api/v1/public/**",
+                                        "/api/v1/users/*/avatar"
                                 ).permitAll()
 
                                 // ------------------------------------------------

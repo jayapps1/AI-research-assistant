@@ -23,4 +23,26 @@ public interface WorkspaceRepository extends JpaRepository<Workspace, UUID> {
             WorkspaceType type,
             WorkspaceStatus status
     );
+
+    boolean existsByOwnerIdAndTypeAndStatus(
+            UUID ownerId,
+            WorkspaceType type,
+            WorkspaceStatus status
+    );
+
+    long countByStatus(WorkspaceStatus status);
+
+    @org.springframework.data.jpa.repository.Query("""
+            select w from Workspace w
+            where w.status = com.researchassistant.workspace.entity.WorkspaceStatus.ACTIVE
+              and not exists (
+                  select s.id from WorkspaceSubscription s
+                  where s.workspace.id = w.id
+                    and s.status in (com.researchassistant.subscription.WorkspaceSubscriptionStatus.TRIALING,
+                                     com.researchassistant.subscription.WorkspaceSubscriptionStatus.ACTIVE,
+                                     com.researchassistant.subscription.WorkspaceSubscriptionStatus.PAST_DUE,
+                                     com.researchassistant.subscription.WorkspaceSubscriptionStatus.SUSPENDED)
+              )
+            """)
+    List<Workspace> findWorkspacesWithoutActiveSubscription();
 }

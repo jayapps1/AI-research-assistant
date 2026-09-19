@@ -54,7 +54,7 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
     @Override
     public String modelName() {
         return properties.generation().model() == null || properties.generation().model().isBlank()
-                ? "gpt-4o-mini"
+                ? "gpt-5.6-luna"
                 : properties.generation().model();
     }
 
@@ -114,6 +114,7 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
             );
         } catch (Exception e) {
             long latencyMs = System.currentTimeMillis() - startTime;
+            SafeErrorDetails safeError = resolveSafeError(e);
             return new AiTaskResult<>(
                     UUID.randomUUID(),
                     request.taskType(),
@@ -125,12 +126,12 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
                     null,
                     null,
                     latencyMs,
-                    "GENERATION_ERROR",
-                    e.getMessage(),
+                    safeError.code(),
+                    safeError.message(),
                     null,
                     startedAt,
                     OffsetDateTime.now(),
-                    List.of(e.getMessage())
+                    List.of(safeError.message())
             );
         }
     }
@@ -154,15 +155,37 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
         if (result.status() == AiRequestStatus.COMPLETED && result.result() != null) {
             return result.result();
         }
+        String failureReason = !result.warnings().isEmpty()
+                ? String.join(", ", result.warnings())
+                : result.failureCode() != null ? result.failureCode() : "AI generation failed";
         return new GeneratedAnswerDraft(
-                "Unable to generate answer: " + String.join(", ", result.warnings()),
+                "Unable to generate answer: " + failureReason,
                 List.of(),
                 providerName(),
                 modelName(),
                 result.inputTokens(),
                 result.outputTokens(),
                 result.latencyMs(),
-                "FAILED"
+                result.failureCode() != null ? result.failureCode() : "FAILED"
         );
     }
+
+    private SafeErrorDetails resolveSafeError(Throwable throwable) {
+        String msg = throwable != null && throwable.getMessage() != null ? throwable.getMessage().toLowerCase() : "";
+        if (msg.contains("401") || msg.contains("unauthorized") || msg.contains("invalid_api_key") || msg.contains("authentication")) {
+            return new SafeErrorDetails("AI_PROVIDER_AUTHENTICATION_FAILED", "AI provider authentication failed. Please check provider configuration.");
+        }
+        if (msg.contains("429") || msg.contains("rate_limit") || msg.contains("insufficient_quota") || msg.contains("quota")) {
+            return new SafeErrorDetails("AI_PROVIDER_RATE_LIMITED", "AI provider rate limit or quota exceeded. Please try again later.");
+        }
+        if (msg.contains("timeout") || msg.contains("timed out") || throwable instanceof java.util.concurrent.TimeoutException) {
+            return new SafeErrorDetails("AI_PROVIDER_TIMEOUT", "AI provider request timed out. Please try again.");
+        }
+        if (msg.contains("model") && (msg.contains("not found") || msg.contains("does not exist") || msg.contains("not permitted") || msg.contains("permission"))) {
+            return new SafeErrorDetails("AI_MODEL_UNAVAILABLE", "Configured AI model is currently unavailable.");
+        }
+        return new SafeErrorDetails("AI_PROVIDER_ERROR", "An error occurred while communicating with the AI service.");
+    }
+
+    private record SafeErrorDetails(String code, String message) {}
 }

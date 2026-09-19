@@ -23,6 +23,7 @@ public class EntitlementService {
     private final WorkspaceRepository workspaceRepository;
     private final ComplimentaryAccessGrantRepository complimentaryAccessGrantRepository;
     private final EntitlementOverrideRepository entitlementOverrideRepository;
+    private final FreeSubscriptionProvisioningService freeSubscriptionProvisioningService;
 
     public EntitlementService(
             WorkspaceSubscriptionRepository subscriptionRepository,
@@ -30,7 +31,8 @@ public class EntitlementService {
             PlanEntitlementRepository entitlementRepository,
             WorkspaceRepository workspaceRepository,
             ComplimentaryAccessGrantRepository complimentaryAccessGrantRepository,
-            EntitlementOverrideRepository entitlementOverrideRepository
+            EntitlementOverrideRepository entitlementOverrideRepository,
+            FreeSubscriptionProvisioningService freeSubscriptionProvisioningService
     ) {
         this.subscriptionRepository = subscriptionRepository;
         this.planRepository = planRepository;
@@ -38,6 +40,7 @@ public class EntitlementService {
         this.workspaceRepository = workspaceRepository;
         this.complimentaryAccessGrantRepository = complimentaryAccessGrantRepository;
         this.entitlementOverrideRepository = entitlementOverrideRepository;
+        this.freeSubscriptionProvisioningService = freeSubscriptionProvisioningService;
     }
 
     public boolean isFeatureEnabled(UUID workspaceId, PlanFeature feature) {
@@ -89,7 +92,7 @@ public class EntitlementService {
 
     public WorkspaceSubscription effectiveSubscription(UUID workspaceId) {
         return subscriptionRepository.findCurrentEffective(workspaceId, OffsetDateTime.now())
-                .orElseGet(() -> createFreeSubscription(workspaceId));
+                .orElseGet(() -> freeSubscriptionProvisioningService.ensureFreeSubscription(workspaceId));
     }
 
     public SubscriptionPlan effectivePlan(UUID workspaceId) {
@@ -103,28 +106,6 @@ public class EntitlementService {
 
     @Transactional
     public WorkspaceSubscription ensureFreeSubscription(UUID workspaceId) {
-        return subscriptionRepository.findCurrentEffective(workspaceId, OffsetDateTime.now())
-                .orElseGet(() -> createFreeSubscription(workspaceId));
-    }
-
-    @Transactional
-    @CacheEvict(cacheNames = "subscription:workspace-entitlements", allEntries = true)
-    protected WorkspaceSubscription createFreeSubscription(UUID workspaceId) {
-        Workspace workspace = workspaceRepository.findById(workspaceId)
-                .orElseThrow(() -> new ResourceNotFoundException("Workspace not found."));
-        SubscriptionPlan freePlan = planRepository.findByCodeIgnoreCase(FREE_PLAN_CODE)
-                .orElseThrow(() -> new ResourceNotFoundException("FREE subscription plan is not configured."));
-        OffsetDateTime now = OffsetDateTime.now();
-        WorkspaceSubscription subscription = new WorkspaceSubscription();
-        subscription.setWorkspace(workspace);
-        subscription.setPlan(freePlan);
-        subscription.setStatus(WorkspaceSubscriptionStatus.ACTIVE);
-        subscription.setBillingInterval(BillingInterval.NONE);
-        subscription.setStartsAt(now);
-        subscription.setCurrentPeriodStart(now.withDayOfMonth(1).toLocalDate().atStartOfDay().atOffset(now.getOffset()));
-        subscription.setCurrentPeriodEnd(subscription.getCurrentPeriodStart().plusMonths(1));
-        subscription.setAutoRenew(false);
-        subscription.setAccessSource(SubscriptionAccessSource.FREE_DEFAULT);
-        return subscriptionRepository.save(subscription);
+        return freeSubscriptionProvisioningService.ensureFreeSubscription(workspaceId);
     }
 }

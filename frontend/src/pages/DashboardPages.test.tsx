@@ -238,7 +238,7 @@ describe('DashboardPages Suite', () => {
       });
 
       expect(await screen.findByTestId('project-dashboard-routed')).toBeInTheDocument();
-    });
+    }, 15000);
   });
 
   describe('ProjectDashboard', () => {

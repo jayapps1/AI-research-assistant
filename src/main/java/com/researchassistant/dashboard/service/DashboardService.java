@@ -538,7 +538,7 @@ public class DashboardService {
                 activity.getProject().getId(),
                 activity.getProject().getTitle(),
                 activity.getType().name(),
-                activity.getSummary(),
+                activity.getSafeSummary(),
                 actorName,
                 activity.getOccurredAt()
         );

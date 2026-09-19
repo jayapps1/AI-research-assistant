@@ -54,6 +54,7 @@ public class AuthService {
     private final SecurityAuditService securityAuditService;
     private final TotpLoginChallengeService totpLoginChallengeService;
     private final SystemUserRoleRepository systemUserRoleRepository;
+    private final com.researchassistant.workspace.service.PersonalWorkspaceService personalWorkspaceService;
 
     public AuthService(
             AuthenticationManager authenticationManager,
@@ -63,7 +64,8 @@ public class AuthService {
             TotpService totpService,
             SecurityAuditService securityAuditService,
             TotpLoginChallengeService totpLoginChallengeService,
-            SystemUserRoleRepository systemUserRoleRepository
+            SystemUserRoleRepository systemUserRoleRepository,
+            com.researchassistant.workspace.service.PersonalWorkspaceService personalWorkspaceService
     ) {
         this.authenticationManager = authenticationManager;
         this.userRepository = userRepository;
@@ -73,6 +75,7 @@ public class AuthService {
         this.securityAuditService = securityAuditService;
         this.totpLoginChallengeService = totpLoginChallengeService;
         this.systemUserRoleRepository = systemUserRoleRepository;
+        this.personalWorkspaceService = personalWorkspaceService;
     }
 
     /**
@@ -95,7 +98,8 @@ public class AuthService {
                     "TOTP_REQUIRED",
                     challenge.challengeId(),
                     AuthenticationMethod.PASSWORD_AND_TOTP.name(),
-                    challenge.expiresInSeconds()
+                    challenge.expiresInSeconds(),
+                    user.getEmail()
             );
         }
 
@@ -118,6 +122,11 @@ public class AuthService {
     }
 
     private AuthTokenResponse issueTokenPair(User user, HttpServletRequest httpRequest) {
+        try {
+            personalWorkspaceService.ensurePersonalWorkspace(user);
+        } catch (Exception ex) {
+            // Do not block authentication if personal workspace already exists or encounters non-critical race
+        }
         IssuedAccessToken accessToken = jwtTokenService.issueAccessToken(user);
         IssuedRefreshToken refreshToken = refreshTokenService.createRefreshToken(user, httpRequest);
         return tokenResponse(accessToken, refreshToken.tokenValue(), user);

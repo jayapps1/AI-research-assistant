@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @Transactional
@@ -32,17 +33,20 @@ public class PersonalWorkspaceService {
     private final WorkspaceMembershipRepository membershipRepository;
     private final EntitlementService entitlementService;
     private final SecurityAuditService auditService;
+    private final com.researchassistant.identity.repository.UserRepository userRepository;
 
     public PersonalWorkspaceService(
             WorkspaceRepository workspaceRepository,
             WorkspaceMembershipRepository membershipRepository,
             EntitlementService entitlementService,
-            SecurityAuditService auditService
+            SecurityAuditService auditService,
+            com.researchassistant.identity.repository.UserRepository userRepository
     ) {
         this.workspaceRepository = workspaceRepository;
         this.membershipRepository = membershipRepository;
         this.entitlementService = entitlementService;
         this.auditService = auditService;
+        this.userRepository = userRepository;
     }
 
     /**
@@ -53,6 +57,12 @@ public class PersonalWorkspaceService {
      * @param user the authenticated or newly created user
      * @return the active personal workspace entity
      */
+    public Workspace ensurePersonalWorkspace(UUID userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new com.researchassistant.common.exception.ResourceNotFoundException("User not found: " + userId));
+        return ensurePersonalWorkspace(user);
+    }
+
     public Workspace ensurePersonalWorkspace(User user) {
         Optional<Workspace> existing = workspaceRepository.findFirstByOwnerIdAndTypeAndStatus(
                 user.getId(),
@@ -63,6 +73,11 @@ public class PersonalWorkspaceService {
         if (existing.isPresent()) {
             Workspace workspace = existing.get();
             ensureOwnerMembership(workspace, user);
+            try {
+                entitlementService.ensureFreeSubscription(workspace.getId());
+            } catch (Exception ex) {
+                log.warn("Could not ensure free subscription for existing personal workspace {}: {}", workspace.getId(), ex.getMessage());
+            }
             return workspace;
         }
 
@@ -150,13 +165,6 @@ public class PersonalWorkspaceService {
         if (firstName != null && !firstName.isBlank()) {
             return firstName.trim() + "'s Workspace";
         }
-        String email = user.getEmail();
-        if (email != null && email.contains("@")) {
-            String prefix = email.substring(0, email.indexOf('@'));
-            if (!prefix.isBlank()) {
-                return prefix + "'s Workspace";
-            }
-        }
-        return "Personal Workspace";
+        return "My Workspace";
     }
 }

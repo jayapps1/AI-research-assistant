@@ -31,4 +31,6 @@ public interface UserRepository extends JpaRepository<User, UUID> {
      * @return true when the email is already registered
      */
     boolean existsByEmailIgnoreCase(String email);
+
+    long countByStatus(com.researchassistant.identity.entity.UserStatus status);
 }

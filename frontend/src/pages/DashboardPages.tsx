@@ -18,11 +18,12 @@ import {
   Database,
   Search,
 } from 'lucide-react';
-import { dashboardApi, projectApi } from '../api/endpoints';
+import { billingApi, dashboardApi, projectApi } from '../api/endpoints';
 import { Badge, Breadcrumbs, Button, Card, Input, Pagination, Select } from '../components/ui';
 import { EmptyState, ErrorState, PageLoading } from '../components/states';
 import { useWorkspace } from '../features/workspaces/WorkspaceProvider';
 import { CreateProjectModal } from '../features/projects/CreateProjectModal';
+import { CreateWorkspaceModal } from '../features/workspaces/CreateWorkspaceModal';
 import { pageContent } from '../utils/collections';
 import { paths } from '../routes/paths';
 
@@ -66,11 +67,17 @@ function formatRelativeTime(dateStr?: string): string {
 
 export function HomeDashboard() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const { selectedWorkspace } = useWorkspace();
+  const { selectedWorkspace, selectedWorkspaceId } = useWorkspace();
 
   const userDashboard = useQuery({
     queryKey: ['dashboard'],
     queryFn: dashboardApi.userDashboard,
+  });
+
+  const subscriptionQuery = useQuery({
+    queryKey: ['billing', selectedWorkspaceId, 'subscription'],
+    queryFn: () => billingApi.subscription(selectedWorkspaceId as string),
+    enabled: Boolean(selectedWorkspaceId),
   });
 
   if (userDashboard.isLoading) return <PageLoading label="Loading your research workspace..." />;
@@ -78,6 +85,16 @@ export function HomeDashboard() {
 
   const data = userDashboard.data;
   const currentWorkspace = data?.currentWorkspace || selectedWorkspace;
+
+  const sub = subscriptionQuery.data as Record<string, unknown> | undefined;
+  const planCode = String(sub?.planCode ?? '').toUpperCase();
+  const periodEndStr = sub?.periodEnd ? String(sub.periodEnd) : null;
+  const isApproachingExpiry = Boolean(
+    planCode &&
+    planCode !== 'FREE' &&
+    periodEndStr &&
+    (new Date(periodEndStr).getTime() - Date.now()) <= 7 * 24 * 60 * 60 * 1000
+  );
 
   return (
     <section className="page">
@@ -96,6 +113,25 @@ export function HomeDashboard() {
           <Plus size={16} /> New Research Project
         </Button>
       </div>
+
+      {/* Subscription Renewal Notice Banner */}
+      {isApproachingExpiry && periodEndStr ? (
+        <div
+          className="alert warning"
+          style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Sparkles size={18} />
+            <span>
+              Your {sub?.planName ? String(sub.planName) : planCode} plan expires on{' '}
+              <strong>{formatDate(periodEndStr)}</strong>.
+            </span>
+          </div>
+          <Link to={paths.billing} className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '0.88rem' }}>
+            Renew Now
+          </Link>
+        </div>
+      ) : null}
 
       {/* 4 Stat Cards Grid */}
       <div className="grid cols-4" style={{ gap: 16 }}>
@@ -306,6 +342,7 @@ export function HomeDashboard() {
 
 export function WorkspacePage() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createWorkspaceModalOpen, setCreateWorkspaceModalOpen] = useState(false);
   const { workspaces, selectedWorkspaceId, setSelectedWorkspaceId } = useWorkspace();
 
   const activeWorkspace = workspaces.find((w) => w.id === selectedWorkspaceId) ?? workspaces[0];
@@ -323,9 +360,14 @@ export function WorkspacePage() {
           <h1 className="page-title">Workspaces</h1>
           <p className="muted">Manage your research environments, organization tiers, and collaborator seats.</p>
         </div>
-        <Button type="button" onClick={() => setCreateModalOpen(true)}>
-          <Plus size={16} /> New Project in Workspace
-        </Button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Button type="button" variant="primary" onClick={() => setCreateWorkspaceModalOpen(true)}>
+            <Plus size={16} /> Create Workspace
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => setCreateModalOpen(true)}>
+            <Plus size={16} /> New Project
+          </Button>
+        </div>
       </div>
 
       {/* Active Workspace Overview Card */}
@@ -427,6 +469,10 @@ export function WorkspacePage() {
         onClose={() => setCreateModalOpen(false)}
         defaultWorkspaceId={activeWorkspace?.id}
       />
+      <CreateWorkspaceModal
+        open={createWorkspaceModalOpen}
+        onClose={() => setCreateWorkspaceModalOpen(false)}
+      />
     </section>
   );
 }
@@ -448,7 +494,7 @@ export function ProjectsPage() {
       workspace?.id
         ? projectApi.list(workspace.id, page, 10, { q: q || undefined, status: status || undefined })
         : projectApi.mine(page, 10, { q: q || undefined, status: status || undefined }),
-    enabled: true,
+    enabled: Boolean(workspace?.id),
   });
 
   const projects = pageContent(projectsQuery.data);

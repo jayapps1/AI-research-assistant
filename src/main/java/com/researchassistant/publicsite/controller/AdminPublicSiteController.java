@@ -21,13 +21,16 @@ public class AdminPublicSiteController {
     private final AuthenticatedUserResolver userResolver;
     private final SystemAdminAuthorizationService adminAuthorizationService;
     private final PublicContentService contentService;
+    private final com.researchassistant.publicsite.service.PublicStatisticsService statisticsService;
 
     public AdminPublicSiteController(AuthenticatedUserResolver userResolver,
                                      SystemAdminAuthorizationService adminAuthorizationService,
-                                     PublicContentService contentService) {
+                                     PublicContentService contentService,
+                                     com.researchassistant.publicsite.service.PublicStatisticsService statisticsService) {
         this.userResolver = userResolver;
         this.adminAuthorizationService = adminAuthorizationService;
         this.contentService = contentService;
+        this.statisticsService = statisticsService;
     }
 
     private User requireAdmin(Authentication authentication) {
@@ -207,5 +210,54 @@ public class AdminPublicSiteController {
     public void deleteFaq(@PathVariable UUID id, Authentication authentication) {
         User admin = requireAdmin(authentication);
         contentService.deleteFaq(id, admin);
+    }
+
+    // =========================================================================
+    // STATISTICS
+    // =========================================================================
+
+    @GetMapping("/statistics")
+    public List<AdminPublicStatisticResponse> getAllStatistics(Authentication authentication) {
+        requireAdmin(authentication);
+        return statisticsService.getAdminStatistics();
+    }
+
+    @GetMapping("/statistics/{id}")
+    public AdminPublicStatisticResponse getStatisticById(@PathVariable UUID id, Authentication authentication) {
+        requireAdmin(authentication);
+        return statisticsService.getStatisticById(id);
+    }
+
+    @PostMapping("/statistics")
+    @ResponseStatus(HttpStatus.CREATED)
+    public AdminPublicStatisticResponse createStatistic(
+            @Valid @RequestBody CreatePublicStatisticRequest request,
+            Authentication authentication) {
+        requireAdmin(authentication);
+        return statisticsService.createStatistic(request);
+    }
+
+    @PutMapping("/statistics/{id}")
+    public AdminPublicStatisticResponse updateStatistic(
+            @PathVariable UUID id,
+            @Valid @RequestBody UpdatePublicStatisticRequest request,
+            Authentication authentication) {
+        requireAdmin(authentication);
+        return statisticsService.updateStatistic(id, request);
+    }
+
+    @DeleteMapping("/statistics/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteStatistic(@PathVariable UUID id, Authentication authentication) {
+        requireAdmin(authentication);
+        statisticsService.deleteStatistic(id);
+    }
+
+    @GetMapping("/statistics/preview-metric")
+    public MetricPreviewResponse previewMetric(
+            @RequestParam("metric") com.researchassistant.publicsite.entity.PublicSystemMetric metric,
+            Authentication authentication) {
+        requireAdmin(authentication);
+        return statisticsService.previewMetric(metric);
     }
 }

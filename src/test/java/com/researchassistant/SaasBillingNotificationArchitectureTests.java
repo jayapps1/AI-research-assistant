@@ -40,7 +40,7 @@ class SaasBillingNotificationArchitectureTests {
                 Duration.ofHours(24),
                 Duration.ofMinutes(30)
         );
-        PaystackClient client = new PaystackClient(properties, RestClient.builder());
+        PaystackClient client = new PaystackClient(properties, RestClient.builder(), new com.researchassistant.billing.MoneyMinorUnitConverter());
 
         assertThat(client.toSmallestUnit(new BigDecimal("50.00"))).isEqualTo(5000L);
         assertThat(client.toSmallestUnit(new BigDecimal("0.99"))).isEqualTo(99L);

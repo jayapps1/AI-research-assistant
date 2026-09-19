@@ -102,6 +102,7 @@ public class RagQueryService {
         this.properties = properties;
     }
 
+    @Transactional
     public GroundedAnswerResponse submit(
             java.util.UUID conversationId,
             User user,
@@ -189,7 +190,7 @@ public class RagQueryService {
 
     @Transactional
     protected GroundedAnswerResponse persistInsufficientEvidence(RagQuery query) {
-        RagQuery managed = queryRepository.getReferenceById(query.getId());
+        RagQuery managed = queryRepository.findWithConversationById(query.getId()).orElse(query);
         managed.setStatus(RagQueryStatus.INSUFFICIENT_EVIDENCE);
         managed.setCompletedAt(OffsetDateTime.now());
         GroundedAnswer answer = new GroundedAnswer();
@@ -256,17 +257,19 @@ public class RagQueryService {
 
     @Transactional
     protected void updateStatus(RagQuery query, RagQueryStatus status) {
-        RagQuery managed = queryRepository.getReferenceById(query.getId());
+        RagQuery managed = queryRepository.findById(query.getId()).orElse(query);
         managed.setStatus(status);
+        queryRepository.save(managed);
     }
 
     @Transactional
     protected void markFailed(RagQuery query, String code, String message) {
-        RagQuery managed = queryRepository.getReferenceById(query.getId());
+        RagQuery managed = queryRepository.findById(query.getId()).orElse(query);
         managed.setStatus(RagQueryStatus.FAILED);
         managed.setCompletedAt(OffsetDateTime.now());
         managed.setFailureCode(code);
         managed.setFailureMessage(message);
+        queryRepository.save(managed);
     }
 
     @Transactional(readOnly = true)

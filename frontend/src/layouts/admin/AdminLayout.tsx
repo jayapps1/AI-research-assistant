@@ -26,6 +26,7 @@ import {
 import { useAuth } from '../../auth/AuthProvider';
 import { useTheme } from '../../app/ThemeProvider';
 import { Badge, Button } from '../../components/ui';
+import { Avatar } from '../../components/Avatar';
 import { paths } from '../../routes/paths';
 
 const adminNav = [
@@ -128,17 +129,28 @@ export function AdminLayout() {
               aria-expanded={avatarOpen}
               onClick={() => setAvatarOpen((v) => !v)}
             >
-              <span className="avatar-circle">
-                {(adminName[0] || 'A').toUpperCase()}
-              </span>
+              <Avatar
+                src={auth.user?.avatarUrl || (auth.user?.id ? `/api/v1/users/${auth.user.id}/avatar` : undefined)}
+                name={adminName}
+                email={auth.user?.email}
+                size={34}
+              />
             </button>
 
             {avatarOpen ? (
               <div className="avatar-dropdown-menu" role="menu">
-                <div className="dropdown-user-info">
-                  <strong>{adminName}</strong>
-                  <span className="muted">{auth.user?.email}</span>
-                  <Badge tone="info" className="badge-sm">SYSTEM_ADMIN</Badge>
+                <div className="dropdown-user-info" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '10px' }}>
+                  <Avatar
+                    src={auth.user?.avatarUrl || (auth.user?.id ? `/api/v1/users/${auth.user.id}/avatar` : undefined)}
+                    name={adminName}
+                    email={auth.user?.email}
+                    size={40}
+                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                    <strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{adminName}</strong>
+                    <span className="muted" style={{ fontSize: '0.8rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{auth.user?.email}</span>
+                    <Badge tone="info" className="badge-sm" style={{ marginTop: '4px', alignSelf: 'flex-start' }}>SYSTEM_ADMIN</Badge>
+                  </div>
                 </div>
                 <hr className="dropdown-divider" />
                 <button

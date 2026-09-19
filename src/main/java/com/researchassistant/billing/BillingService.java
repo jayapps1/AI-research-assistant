@@ -2,7 +2,9 @@ package com.researchassistant.billing;
 
 import com.researchassistant.audit.AuditEventService;
 import com.researchassistant.audit.AuditEventType;
+import com.researchassistant.billing.dto.BillingDtos;
 import com.researchassistant.billing.dto.BillingDtos.InitializePaymentResponse;
+import com.researchassistant.billing.dto.BillingDtos.PaymentAttemptDetailResponse;
 import com.researchassistant.billing.dto.BillingDtos.PaymentAttemptInitializationResponse;
 import com.researchassistant.billing.dto.BillingDtos.PaymentAttemptSummary;
 import com.researchassistant.billing.dto.BillingDtos.PaymentIntentResponse;
@@ -40,14 +42,23 @@ public class BillingService {
     private final PaymentIdempotencyRecordRepository idempotencyRecordRepository;
     private final PaymentProperties paymentProperties;
     private final NotificationService notificationService;
+    private final FreeSubscriptionProvisioningService freeSubscriptionProvisioningService;
+    private final SubscriptionPlanPriceRepository planPriceRepository;
+    private final MoneyMinorUnitConverter moneyMinorUnitConverter;
     private final SecureRandom random = new SecureRandom();
+
+    private final BillingPriceCalculator priceCalculator;
 
     public BillingService(WorkspaceRepository workspaceRepository, SubscriptionPlanRepository planRepository,
                           WorkspaceSubscriptionRepository subscriptionRepository, PaymentTransactionRepository transactionRepository,
                           PaymentProvider paymentProvider, SubscriptionChangeService subscriptionChangeService,
                           AuditEventService auditEventService, BillingPaymentIntentRepository intentRepository,
                           PaymentAttemptRepository attemptRepository, PaymentIdempotencyRecordRepository idempotencyRecordRepository,
-                          PaymentProperties paymentProperties, NotificationService notificationService) {
+                          PaymentProperties paymentProperties, NotificationService notificationService,
+                          FreeSubscriptionProvisioningService freeSubscriptionProvisioningService,
+                          SubscriptionPlanPriceRepository planPriceRepository,
+                          MoneyMinorUnitConverter moneyMinorUnitConverter,
+                          BillingPriceCalculator priceCalculator) {
         this.workspaceRepository = workspaceRepository;
         this.planRepository = planRepository;
         this.subscriptionRepository = subscriptionRepository;
@@ -60,6 +71,10 @@ public class BillingService {
         this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.paymentProperties = paymentProperties;
         this.notificationService = notificationService;
+        this.freeSubscriptionProvisioningService = freeSubscriptionProvisioningService;
+        this.planPriceRepository = planPriceRepository;
+        this.moneyMinorUnitConverter = moneyMinorUnitConverter;
+        this.priceCalculator = priceCalculator;
     }
 
     public InitializePaymentResponse initialize(UUID workspaceId, User user, String planCode, BillingInterval interval) {
@@ -74,7 +89,34 @@ public class BillingService {
                 .orElseThrow(() -> new ResourceNotFoundException("Workspace not found."));
         SubscriptionPlan plan = planRepository.findByCodeIgnoreCase(planCode)
                 .orElseThrow(() -> new ResourceNotFoundException("Subscription plan not found."));
-        if (plan.getPrice().signum() <= 0 || interval == BillingInterval.NONE) {
+        if (plan.getStatus() != SubscriptionPlanStatus.ACTIVE || !plan.isPubliclyAvailable()) {
+            throw new IllegalArgumentException("Subscription plan '" + plan.getCode() + "' is not available for purchase.");
+        }
+
+        // Authoritative price resolution from SubscriptionPlanPrice
+        SubscriptionPlanPrice planPrice = planPriceRepository
+                .findByPlanCodeIgnoreCaseAndBillingIntervalAndActiveTrue(plan.getCode(), interval)
+                .orElse(null);
+
+        if (interval == BillingInterval.YEARLY && planPrice == null) {
+            throw new IllegalArgumentException("Yearly billing is not configured for plan '" + plan.getCode() + "'.");
+        }
+
+        java.math.BigDecimal authoritativeBaseAmount;
+        String authoritativeCurrency;
+        if (planPrice != null) {
+            authoritativeBaseAmount = planPrice.getPrice();
+            authoritativeCurrency = planPrice.getCurrency();
+        } else if (interval == plan.getBillingInterval() || interval == BillingInterval.MONTHLY) {
+            authoritativeBaseAmount = plan.getPrice();
+            authoritativeCurrency = plan.getCurrency();
+        } else {
+            throw new IllegalArgumentException("Billing interval '" + interval + "' is not available for plan '" + plan.getCode() + "'.");
+        }
+
+        BillingDtos.PlanPriceBreakdownResponse breakdown = priceCalculator.calculate(plan.getCode(), interval, authoritativeBaseAmount, authoritativeCurrency);
+
+        if (breakdown.totalAmount().signum() <= 0 || interval == BillingInterval.NONE) {
             WorkspaceSubscription subscription = subscriptionChangeService.activatePlan(workspaceId, plan.getCode(), BillingInterval.NONE, null, user.getId(), "FREE_ACTIVATED", SubscriptionAccessSource.FREE_DEFAULT);
             return new PaymentAttemptInitializationResponse(subscription.getId(), null, 0, null, "FREE", PaymentAttemptStatus.SUCCESS);
         }
@@ -83,14 +125,35 @@ public class BillingService {
         intent.setInitiatedBy(user);
         intent.setPlan(plan);
         intent.setBillingInterval(interval);
-        intent.setExpectedAmount(plan.getPrice());
-        intent.setCurrency(plan.getCurrency());
+        intent.setBaseAmount(breakdown.baseAmount());
+        intent.setProcessingFeeAmount(breakdown.processingAmount());
+        intent.setAiGenerationFeeAmount(breakdown.aiGenerationAmount());
+        intent.setTotalAmount(breakdown.totalAmount());
+        intent.setExpectedAmount(breakdown.totalAmount());
+        intent.setCurrency(breakdown.currency());
         intent.setStatus(PaymentIntentStatus.OPEN);
         intent.setExpiresAt(OffsetDateTime.now().plus(paymentProperties.intentTtl()));
         intent = intentRepository.saveAndFlush(intent);
+        auditEventService.record(user.getId(), "USER", workspace, null, AuditEventType.PAYMENT_INTENT_CREATED,
+                "BillingPaymentIntent", intent.getId(), "{\"plan\":\"" + plan.getCode() + "\",\"base\":" + breakdown.baseAmount() + ",\"total\":" + breakdown.totalAmount() + ",\"interval\":\"" + interval + "\"}");
         PaymentAttemptInitializationResponse response = initializeAttempt(intent, user, false);
         saveIdempotent("INITIALIZE", idempotencyKey, user, response);
         return response;
+    }
+
+    @Transactional(readOnly = true)
+    public BillingDtos.PlanPriceBreakdownResponse getPriceBreakdown(String planCode, BillingInterval interval) {
+        SubscriptionPlan plan = planRepository.findByCodeIgnoreCase(planCode)
+                .orElseThrow(() -> new ResourceNotFoundException("Subscription plan not found: " + planCode));
+        SubscriptionPlanPrice planPrice = planPriceRepository
+                .findByPlanCodeIgnoreCaseAndBillingIntervalAndActiveTrue(plan.getCode(), interval)
+                .orElse(null);
+        if (interval == BillingInterval.YEARLY && planPrice == null) {
+            throw new IllegalArgumentException("Yearly billing is not configured for plan '" + plan.getCode() + "'.");
+        }
+        java.math.BigDecimal base = planPrice != null ? planPrice.getPrice() : plan.getPrice();
+        String curr = planPrice != null ? planPrice.getCurrency() : plan.getCurrency();
+        return priceCalculator.calculate(plan.getCode(), interval, base, curr);
     }
 
     public PaymentAttemptInitializationResponse retry(UUID paymentIntentId, User user, String idempotencyKey) {
@@ -166,7 +229,7 @@ public class BillingService {
             }
             return attempt;
         }
-        long expected = paymentProvider.toSmallestUnit(attempt.getExpectedAmount());
+        long expected = moneyMinorUnitConverter.toMinorUnits(attempt.getExpectedAmount(), attempt.getCurrency());
         if (!attempt.getInternalReference().equals(data.reference())
                 || data.amount() == null || data.amount() != expected
                 || !attempt.getCurrency().equalsIgnoreCase(data.currency())
@@ -176,7 +239,7 @@ public class BillingService {
             attempt.setFailureCode("VERIFICATION_MISMATCH");
             attempt.setFailureMessageSafe(PaymentFailureCategory.VERIFICATION_FAILED.name());
             auditEventService.record(actorId, "USER", attempt.getPaymentIntent().getWorkspace(), null, AuditEventType.PAYMENT_ATTEMPT_FAILED,
-                    "PaymentAttempt", attempt.getId(), "{}");
+                    "PaymentAttempt", attempt.getId(), "{\"reason\":\"VERIFICATION_MISMATCH\",\"expectedMinorUnits\":" + expected + ",\"receivedMinorUnits\":" + data.amount() + "}");
             return attempt;
         }
         settleSuccessfulAttempt(attempt, actorId);
@@ -189,6 +252,53 @@ public class BillingService {
                 .orElseThrow(() -> new ResourceNotFoundException("Payment attempt not found."));
     }
 
+    @Transactional
+    public BillingDtos.PaymentAttemptDetailResponse getOrVerifyAttemptByReference(String reference, UUID actorId) {
+        PaymentAttempt attempt = attemptRepository.findByInternalReference(reference)
+                .or(() -> attemptRepository.findByProviderAndEnvironmentAndProviderReference(PaymentProviderType.PAYSTACK, paymentProvider.environment(), reference))
+                .orElseThrow(() -> new ResourceNotFoundException("Payment attempt not found with reference: " + reference));
+
+        if (attempt.getStatus() == PaymentAttemptStatus.PENDING || attempt.getStatus() == PaymentAttemptStatus.CREATED) {
+            try {
+                attempt = verifyAttempt(attempt.getId(), actorId);
+            } catch (Exception ignored) {
+            }
+        }
+        return toDetailResponse(attempt);
+    }
+
+    @Transactional(readOnly = true)
+    public BillingDtos.PaymentAttemptDetailResponse getAttemptDetail(UUID attemptId) {
+        PaymentAttempt attempt = attemptRepository.findById(attemptId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment attempt not found: " + attemptId));
+        return toDetailResponse(attempt);
+    }
+
+    private BillingDtos.PaymentAttemptDetailResponse toDetailResponse(PaymentAttempt attempt) {
+        BillingPaymentIntent intent = attempt.getPaymentIntent();
+        return new BillingDtos.PaymentAttemptDetailResponse(
+                attempt.getId(),
+                intent.getId(),
+                intent.getWorkspace().getId(),
+                intent.getPlan().getCode(),
+                intent.getPlan().getName(),
+                attempt.getExpectedAmount(),
+                attempt.getCurrency(),
+                attempt.getAttemptNumber(),
+                attempt.getStatus(),
+                attempt.getProviderStatus(),
+                attempt.getInternalReference(),
+                attempt.getProviderReference(),
+                attempt.getAuthorizationUrl(),
+                attempt.getFailureCode(),
+                attempt.getFailureMessageSafe(),
+                isRetryable(attempt),
+                attempt.getCreatedAt(),
+                attempt.getCompletedAt(),
+                attempt.getProviderVerifiedAt()
+        );
+    }
+
     private PaymentTransaction verifyLegacyReference(String reference, UUID actorId) {
         PaymentTransaction transaction = transactionRepository.findByInternalReference(reference)
                 .orElseGet(() -> transactionRepository.findByProviderAndEnvironmentAndProviderReference(PaymentProviderType.PAYSTACK, paymentProvider.environment(), reference)
@@ -198,7 +308,7 @@ public class BillingService {
         }
         PaystackVerificationResponse response = paymentProvider.verify(transaction.getInternalReference());
         PaystackVerificationData data = response == null ? null : response.data();
-        long expected = paymentProvider.toSmallestUnit(transaction.getAmount());
+        long expected = moneyMinorUnitConverter.toMinorUnits(transaction.getAmount(), transaction.getCurrency());
         if (data == null || !"success".equalsIgnoreCase(data.status())
                 || !transaction.getInternalReference().equals(data.reference())
                 || data.amount() == null || data.amount() != expected
@@ -207,7 +317,7 @@ public class BillingService {
             transaction.setStatus(PaymentTransactionStatus.VERIFICATION_FAILED);
             transaction.setFailureCode("VERIFICATION_MISMATCH");
             auditEventService.record(actorId, "USER", transaction.getWorkspace(), null, AuditEventType.PAYMENT_FAILED,
-                    "PaymentTransaction", transaction.getId(), "{}");
+                    "PaymentTransaction", transaction.getId(), "{\"reason\":\"VERIFICATION_MISMATCH\",\"expectedMinorUnits\":" + expected + ",\"receivedMinorUnits\":" + (data == null ? null : data.amount()) + "}");
             return transaction;
         }
         OffsetDateTime now = OffsetDateTime.now();
@@ -301,7 +411,9 @@ public class BillingService {
             intent.setSettledAt(OffsetDateTime.now());
             subscriptionChangeService.activatePlan(intent.getWorkspace().getId(), intent.getPlan().getCode(),
                     intent.getBillingInterval(), attempt.getProviderReference(), actorId, "PAYMENT_SUCCESS", SubscriptionAccessSource.PAID);
-            notifyPayment(attempt, NotificationType.PAYMENT_SUCCESS, "Payment succeeded", "Your subscription payment succeeded.");
+            auditEventService.record(actorId, "USER", intent.getWorkspace(), null, AuditEventType.SUBSCRIPTION_UPGRADED,
+                    "WorkspaceSubscription", intent.getWorkspace().getId(), "{\"plan\":\"" + intent.getPlan().getCode() + "\"}");
+            notifyPayment(attempt, NotificationType.PAYMENT_SUCCESS, "Payment succeeded", "Your workspace has been upgraded to " + intent.getPlan().getName() + ".");
         } else if (existingSuccesses > 0) {
             attempt.setRequiresReview(true);
             intent.setStatus(PaymentIntentStatus.REQUIRES_REVIEW);
@@ -362,10 +474,9 @@ public class BillingService {
         return transactionRepository.findAllByWorkspaceIdOrderByCreatedAtDesc(workspaceId, pageable);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public WorkspaceSubscription subscription(UUID workspaceId) {
-        return subscriptionRepository.findCurrentEffective(workspaceId, OffsetDateTime.now())
-                .orElseThrow(() -> new ResourceNotFoundException("Active subscription not found."));
+        return freeSubscriptionProvisioningService.ensureFreeSubscription(workspaceId);
     }
 
     private String generateReference() {

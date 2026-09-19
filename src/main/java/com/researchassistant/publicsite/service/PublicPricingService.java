@@ -18,11 +18,14 @@ public class PublicPricingService {
 
     private final SubscriptionPlanRepository planRepository;
     private final PlanEntitlementRepository entitlementRepository;
+    private final SubscriptionPlanPriceRepository planPriceRepository;
 
     public PublicPricingService(SubscriptionPlanRepository planRepository,
-                                PlanEntitlementRepository entitlementRepository) {
+                                PlanEntitlementRepository entitlementRepository,
+                                SubscriptionPlanPriceRepository planPriceRepository) {
         this.planRepository = planRepository;
         this.entitlementRepository = entitlementRepository;
+        this.planPriceRepository = planPriceRepository;
     }
 
     @Cacheable(AppCacheNames.PUBLIC_PRICING)
@@ -57,7 +60,20 @@ public class PublicPricingService {
             featureSummaries = defaultFeatureHighlights(plan.getCode());
         }
 
-        boolean isFree = plan.getPrice().compareTo(BigDecimal.ZERO) == 0;
+        List<SubscriptionPlanPrice> prices = planPriceRepository.findAllByPlanIdAndActiveTrue(plan.getId());
+        BigDecimal monthlyPrice = prices.stream()
+                .filter(p -> p.getBillingInterval() == BillingInterval.MONTHLY)
+                .findFirst()
+                .map(SubscriptionPlanPrice::getPrice)
+                .orElse(plan.getPrice());
+
+        BigDecimal annualPrice = prices.stream()
+                .filter(p -> p.getBillingInterval() == BillingInterval.YEARLY)
+                .findFirst()
+                .map(SubscriptionPlanPrice::getPrice)
+                .orElse(null);
+
+        boolean isFree = monthlyPrice.compareTo(BigDecimal.ZERO) == 0;
         boolean featured = "PRO".equalsIgnoreCase(plan.getCode());
 
         String ctaLabel = isFree ? "Get Started Free" : "Choose " + plan.getName();
@@ -68,7 +84,9 @@ public class PublicPricingService {
                 plan.getCode(),
                 plan.getName(),
                 plan.getDescription(),
-                plan.getPrice(),
+                monthlyPrice,
+                monthlyPrice,
+                annualPrice,
                 plan.getCurrency(),
                 plan.getBillingInterval(),
                 featured,

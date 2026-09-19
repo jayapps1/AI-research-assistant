@@ -22,6 +22,7 @@ import { publicApi } from '../../api/public';
 import { paths } from '../../routes/paths';
 import { SeoMetadata } from '../../layouts/public/SeoMetadata';
 import { useAuth } from '../../auth/AuthProvider';
+import { PublicStatisticsSection } from '../../features/publicSite/PublicStatisticsSection';
 
 export function HomePage() {
   const { isAuthenticated } = useAuth();
@@ -155,6 +156,9 @@ export function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* VERIFIED PLATFORM STATISTICS */}
+      <PublicStatisticsSection />
 
       {/* 2. VALUE PILLARS (3 CORE PRINCIPLES) */}
       <section className="public-section bg-subtle" id="pillars-section">

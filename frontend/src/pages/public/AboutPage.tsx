@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { paths } from '../../routes/paths';
 import { SeoMetadata } from '../../layouts/public/SeoMetadata';
+import { PublicStatisticsSection } from '../../features/publicSite/PublicStatisticsSection';
 
 export function AboutPage() {
   return (
@@ -96,6 +97,13 @@ export function AboutPage() {
           </div>
         </div>
       </section>
+
+      {/* Platform Scale & Impact */}
+      <PublicStatisticsSection
+        eyebrow="Platform Scale"
+        title="Empowering Research Across the Globe"
+        subtitle="Transparent metrics on our growing network of researchers, validated studies, and analyzed academic documents."
+      />
 
       {/* Responsible AI & COPE Alignment */}
       <section className="public-section bg-subtle">

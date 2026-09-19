@@ -15,9 +15,6 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Password is required').max(128),
 });
 
-const totpSchema = loginSchema.extend({
-  totpCode: z.string().regex(/^\d{6}$/, 'Enter the 6-digit authenticator code'),
-});
 
 const totpOnlySchema = z.object({
   email: z.string().email().max(255),
@@ -61,9 +58,16 @@ export function LoginPage() {
             setError(authErrorMessage(err, 'Invalid or expired authenticator code.'));
           }
         })}>
-          <div className="auth-step-note">
-            <ShieldCheck size={18} aria-hidden />
-            <span>Enter the authenticator code for {challenge.email}. The password has been accepted.</span>
+          <div className="auth-step-note" style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 600, margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ShieldCheck size={20} aria-hidden /> Verify your identity
+            </h2>
+            <p style={{ margin: 0, fontSize: '0.95rem' }}>
+              Enter the authenticator code for {challenge.email}.
+            </p>
+            <p className="text-success" style={{ margin: 0, fontSize: '0.875rem', color: 'var(--success, #16a34a)', fontWeight: 500 }}>
+              The password has been accepted.
+            </p>
           </div>
           {error ? <div className="alert danger" role="alert">{error}</div> : null}
           <Field label="Authenticator code" error={challengeForm.formState.errors.totpCode?.message}>
@@ -83,10 +87,10 @@ export function LoginPage() {
             <Link to="/forgot-password">Lost authenticator? Use a recovery code</Link>
           </div>
           <Button type="submit" disabled={challengeForm.formState.isSubmitting}>
-            {challengeForm.formState.isSubmitting ? 'Verifying...' : 'Verify & sign in'}
+            {challengeForm.formState.isSubmitting ? 'Verifying...' : 'Verify & Sign In'}
           </Button>
           <Button type="button" variant="secondary" onClick={() => { setChallenge(null); setError(null); challengeForm.reset(); }}>
-            Back to password
+            Back
           </Button>
         </form>
       ) : (
@@ -108,7 +112,7 @@ export function LoginPage() {
                 navigate(destination, { replace: true });
               } catch (err) {
                 if (err instanceof TotpChallengeRequired) {
-                  setChallenge({ id: err.challengeId, email: values.email, expiresIn: err.expiresIn });
+                  setChallenge({ id: err.challengeId, email: err.email || values.email, expiresIn: err.expiresIn });
                   form.reset({ email: values.email, password: '' });
                   return;
                 }
@@ -165,27 +169,42 @@ export function TotpPage() {
   const auth = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const previous = location.state as { email?: string; password?: string } | null;
+  const previous = location.state as { challengeId?: string; email?: string } | null;
   const [error, setError] = useState<string | null>(null);
-  const form = useForm<z.infer<typeof totpSchema>>({
-    resolver: zodResolver(totpSchema),
-    defaultValues: { email: previous?.email ?? '', password: previous?.password ?? '', totpCode: '' },
+  const form = useForm<{ totpCode: string }>({
+    defaultValues: { totpCode: '' },
   });
 
   return (
-    <AuthLayout title="Verify authenticator code">
-      <form className="form" onSubmit={form.handleSubmit(async (values) => {
-        setError(null);
-        try {
-          await auth.login({ ...values, authenticationMethod: 'PASSWORD_AND_TOTP' });
-          navigate(paths.dashboard, { replace: true });
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'Invalid or expired authenticator code.');
-        }
-      })}>
+    <AuthLayout title="Verify your identity">
+      <form
+        className="form"
+        onSubmit={form.handleSubmit(async (values) => {
+          setError(null);
+          try {
+            if (previous?.challengeId) {
+              await auth.completeTotpChallenge({
+                challengeId: previous.challengeId,
+                totpCode: values.totpCode,
+              });
+            } else {
+              throw new Error('No active authentication challenge found. Please sign in again.');
+            }
+            navigate(paths.dashboard, { replace: true });
+          } catch (err) {
+            setError(authErrorMessage(err, 'Invalid or expired authenticator code.'));
+          }
+        })}
+      >
+        <div className="auth-step-note" style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+          <p style={{ margin: 0, fontSize: '0.95rem' }}>
+            Enter the authenticator code for {previous?.email || 'your account'}.
+          </p>
+          <p className="text-success" style={{ margin: 0, fontSize: '0.875rem', color: 'var(--success, #16a34a)', fontWeight: 500 }}>
+            The password has been accepted.
+          </p>
+        </div>
         {error ? <div className="alert danger" role="alert">{error}</div> : null}
-        <Field label="Email" error={form.formState.errors.email?.message}><Input autoComplete="email" {...form.register('email')} /></Field>
-        <Field label="Password" error={form.formState.errors.password?.message}><PasswordInput autoComplete="current-password" {...form.register('password')} /></Field>
         <Field label="6-digit code" error={form.formState.errors.totpCode?.message}>
           <Input
             inputMode="numeric"
@@ -193,13 +212,22 @@ export function TotpPage() {
             autoComplete="one-time-code"
             maxLength={6}
             {...form.register('totpCode', {
+              required: 'Authenticator code is required',
               onChange: (e) => {
                 e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
               },
             })}
           />
         </Field>
-        <Button type="submit" disabled={form.formState.isSubmitting}>Verify and continue</Button>
+        <div className="auth-row">
+          <Link to="/forgot-password">Lost authenticator? Use a recovery code</Link>
+        </div>
+        <Button type="submit" disabled={form.formState.isSubmitting}>
+          {form.formState.isSubmitting ? 'Verifying...' : 'Verify and continue'}
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => navigate('/login', { replace: true })}>
+          Back
+        </Button>
       </form>
     </AuthLayout>
   );
@@ -340,6 +368,15 @@ function PasswordInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
 function authErrorMessage(error: unknown, fallback: string) {
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     return 'Network unavailable. Check your connection and try again.';
+  }
+  if (typeof error === 'object' && error !== null) {
+    const errObj = error as { code?: string; message?: string; status?: number };
+    const code = errObj.code?.toUpperCase();
+    if (code === 'INVALID_TOTP') return 'Invalid authenticator code. Please check your app and try again.';
+    if (code === 'TOTP_REPLAYED') return 'This authenticator code has already been used. Please wait for the next code.';
+    if (code === 'TOTP_RATE_LIMITED' || errObj.status === 429) return 'Too many attempts. Please wait a moment before trying again.';
+    if (code === 'TOTP_NOT_ENROLLED') return 'Authenticator app is not configured for this account.';
+    if (code === 'CHALLENGE_EXPIRED') return 'Authentication challenge has expired. Please sign in again.';
   }
   if (error instanceof Error) {
     const msg = error.message;

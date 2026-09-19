@@ -36,6 +36,10 @@ import com.researchassistant.project.service.ProjectAuthorizationService;
 import com.researchassistant.security.audit.SecurityAuditEventType;
 import com.researchassistant.security.audit.SecurityAuditService;
 
+import com.researchassistant.subscription.PlanFeature;
+import com.researchassistant.usage.QuotaService;
+import com.researchassistant.usage.UsageMetricType;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ContentDisposition;
@@ -83,6 +87,7 @@ public class DocumentService {
     private final DocumentProcessingPipelineService processingPipelineService;
     private final CacheInvalidationService cacheInvalidationService;
     private final FileSecurityScanner fileSecurityScanner;
+    private final QuotaService quotaService;
 
     public DocumentService(
             DocumentRepository documentRepository,
@@ -96,7 +101,8 @@ public class DocumentService {
             SecurityAuditService auditService,
             DocumentProcessingPipelineService processingPipelineService,
             CacheInvalidationService cacheInvalidationService,
-            FileSecurityScanner fileSecurityScanner
+            FileSecurityScanner fileSecurityScanner,
+            QuotaService quotaService
     ) {
         this.documentRepository = documentRepository;
         this.versionRepository = versionRepository;
@@ -110,6 +116,7 @@ public class DocumentService {
         this.processingPipelineService = processingPipelineService;
         this.cacheInvalidationService = cacheInvalidationService;
         this.fileSecurityScanner = fileSecurityScanner;
+        this.quotaService = quotaService;
     }
 
     public DocumentResponse uploadDocument(
@@ -124,6 +131,14 @@ public class DocumentService {
                         projectId,
                         user
                 );
+
+        UUID workspaceId = auth.project().getWorkspace().getId();
+        quotaService.requireWithinQuota(
+                workspaceId,
+                PlanFeature.STORAGE,
+                UsageMetricType.STORAGE_BYTES,
+                file.getSize()
+        );
 
         ResearchProject lockedProject = projectRepository
                 .findByIdForDocumentNumberAllocation(projectId)
@@ -172,7 +187,16 @@ public class DocumentService {
             MultipartFile file
     ) {
         validateFile(file);
-        documentAuthorizationService.requireDocumentEditor(documentId, user);
+        DocumentAuthorizationContext auth =
+                documentAuthorizationService.requireDocumentEditor(documentId, user);
+
+        UUID workspaceId = auth.projectContext().project().getWorkspace().getId();
+        quotaService.requireWithinQuota(
+                workspaceId,
+                PlanFeature.STORAGE,
+                UsageMetricType.STORAGE_BYTES,
+                file.getSize()
+        );
 
         Document lockedDocument = documentRepository
                 .findByIdForVersionAllocation(documentId)

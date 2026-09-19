@@ -2,7 +2,7 @@ import { screen } from '@testing-library/react';
 import { render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { PublicHeader } from './PublicHeader';
 import { PublicFooter } from './PublicFooter';
 import { PublicLayout } from './PublicLayout';
@@ -11,6 +11,10 @@ import { ThemeProvider } from '../../app/ThemeProvider';
 import { setTokens, clearTokens } from '../../api/tokens';
 
 describe('PublicLayout & PublicHeader', () => {
+  beforeEach(() => {
+    clearTokens();
+    sessionStorage.clear();
+  });
   it('renders public navigation links and does not render app sidebar', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 

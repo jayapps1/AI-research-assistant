@@ -40,13 +40,22 @@ spring:
 
   ai:
     model:
-      chat: none
-      embedding: none
+      chat: ${SPRING_AI_MODEL_CHAT:${AI_GENERATION_PROVIDER:none}}
+      embedding: ${SPRING_AI_MODEL_EMBEDDING:${AI_EMBEDDING_PROVIDER:${AI_EMBEDDINGS_PROVIDER:none}}}
       image: none
       moderation: none
       audio:
         speech: none
         transcription: none
+
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      chat:
+        options:
+          model: ${AI_GENERATION_MODEL:gpt-5.6-luna}
+      embedding:
+        options:
+          model: ${AI_EMBEDDING_MODEL:${AI_EMBEDDINGS_MODEL:text-embedding-3-small}}
 
     vectorstore:
       type: none
@@ -132,14 +141,14 @@ app:
     generation:
       enabled: ${AI_GENERATION_ENABLED:false}
       provider: ${AI_GENERATION_PROVIDER:none}
-      model: ${AI_GENERATION_MODEL:}
+      model: ${AI_GENERATION_MODEL:gpt-5.6-luna}
       temperature: ${AI_GENERATION_TEMPERATURE:0.2}
       max-output-tokens: ${AI_GENERATION_MAX_OUTPUT_TOKENS:4096}
       timeout: ${AI_GENERATION_TIMEOUT:PT60S}
     embedding:
       enabled: ${AI_EMBEDDING_ENABLED:${AI_EMBEDDINGS_ENABLED:false}}
       provider: ${AI_EMBEDDING_PROVIDER:${AI_EMBEDDINGS_PROVIDER:none}}
-      model: ${AI_EMBEDDING_MODEL:${AI_EMBEDDINGS_MODEL:}}
+      model: ${AI_EMBEDDING_MODEL:${AI_EMBEDDINGS_MODEL:text-embedding-3-small}}
       dimensions: ${AI_EMBEDDING_DIMENSIONS:${AI_EMBEDDINGS_DIMENSIONS:}}
       batch-size: ${AI_EMBEDDING_BATCH_SIZE:${AI_EMBEDDINGS_BATCH_SIZE:64}}
       timeout: ${AI_EMBEDDING_TIMEOUT:PT60S}
@@ -173,11 +182,11 @@ app:
       context-turns: ${RAG_CONVERSATION_CONTEXT_TURNS:6}
   payment:
     paystack:
-      enabled: ${PAYSTACK_ENABLED:false}
+      enabled: ${PAYSTACK_ENABLED:true}
       mode: ${PAYSTACK_MODE:test}
       secret-key: ${PAYSTACK_SECRET_KEY:}
       public-key: ${PAYSTACK_PUBLIC_KEY:}
-      callback-base-url: ${PAYSTACK_CALLBACK_BASE_URL:}
+      callback-base-url: ${PAYSTACK_CALLBACK_BASE_URL:http://localhost:8080}
       live-enabled: ${PAYSTACK_LIVE_ENABLED:false}
       connect-timeout: ${PAYSTACK_CONNECT_TIMEOUT:PT10S}
       read-timeout: ${PAYSTACK_READ_TIMEOUT:PT30S}
@@ -185,6 +194,11 @@ app:
       retry-cooldown: ${PAYMENT_RETRY_COOLDOWN:PT15S}
       intent-ttl: ${PAYMENT_INTENT_TTL:PT24H}
       attempt-ttl: ${PAYMENT_ATTEMPT_TTL:PT30M}
+  subscription:
+    renewal-reminders:
+      enabled: ${SUBSCRIPTION_RENEWAL_REMINDERS_ENABLED:true}
+      days-before: ${SUBSCRIPTION_RENEWAL_REMINDERS_DAYS_BEFORE:7,3,1,0}
+      cron: ${SUBSCRIPTION_RENEWAL_REMINDERS_CRON:0 0 8 * * *}
   notifications:
     email:
       enabled: ${EMAIL_ENABLED:false}

@@ -13,6 +13,8 @@ public final class AppCacheNames {
     public static final String PUBLIC_SERVICES = "public:services";
     public static final String PUBLIC_FAQS = "public:faqs";
     public static final String PUBLIC_PRICING = "public:pricing";
+    public static final String PUBLIC_STATISTICS = "public:statistics";
+    public static final String WORKSPACE_ENTITLEMENTS = "subscription:workspace-entitlements";
 
     private AppCacheNames() {
     }

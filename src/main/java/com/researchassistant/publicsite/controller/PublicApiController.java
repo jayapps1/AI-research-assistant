@@ -17,13 +17,21 @@ public class PublicApiController {
     private final PublicContentService contentService;
     private final PublicPricingService pricingService;
     private final ContactSubmissionService contactSubmissionService;
+    private final com.researchassistant.publicsite.service.PublicStatisticsService statisticsService;
 
     public PublicApiController(PublicContentService contentService,
                                PublicPricingService pricingService,
-                               ContactSubmissionService contactSubmissionService) {
+                               ContactSubmissionService contactSubmissionService,
+                               com.researchassistant.publicsite.service.PublicStatisticsService statisticsService) {
         this.contentService = contentService;
         this.pricingService = pricingService;
         this.contactSubmissionService = contactSubmissionService;
+        this.statisticsService = statisticsService;
+    }
+
+    @GetMapping("/statistics")
+    public List<PublicStatisticResponse> getStatistics() {
+        return statisticsService.getPublicStatistics();
     }
 
     @GetMapping("/site")

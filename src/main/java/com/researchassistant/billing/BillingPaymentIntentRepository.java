@@ -13,6 +13,7 @@ import java.util.UUID;
 
 public interface BillingPaymentIntentRepository extends JpaRepository<BillingPaymentIntent, UUID> {
     Page<BillingPaymentIntent> findAllByWorkspaceIdOrderByCreatedAtDesc(UUID workspaceId, Pageable pageable);
+    Page<BillingPaymentIntent> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select i from BillingPaymentIntent i where i.id = :id")

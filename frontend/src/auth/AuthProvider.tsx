@@ -23,6 +23,7 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
   hasCapability: (capability: string) => boolean;
+  updateUser: (partialUser: Partial<User>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -55,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         authenticationMethod: input.authenticationMethod ?? 'PASSWORD',
       });
       if (isLoginChallenge(response)) {
-        throw new TotpChallengeRequired(response.challengeId, response.expiresIn);
+        throw new TotpChallengeRequired(response.challengeId, response.expiresIn, response.email || input.email);
       }
       const tokenResponse = response as AuthTokenResponse;
       setTokens({ accessToken: tokenResponse.accessToken, refreshToken: tokenResponse.refreshToken });
@@ -109,9 +110,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user],
   );
 
+  const updateUser = useCallback((partialUser: Partial<User>) => {
+    setUser((prev) => {
+      if (!prev) return null;
+      const updated = { ...prev, ...partialUser };
+      sessionStorage.setItem('raa.user', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
   const value = useMemo(
-    () => ({ user, status, isAuthenticated: status === 'authenticated', login, completeTotpChallenge, register, logout, logoutAll, hasCapability }),
-    [completeTotpChallenge, hasCapability, login, logout, logoutAll, register, status, user],
+    () => ({ user, status, isAuthenticated: status === 'authenticated', login, completeTotpChallenge, register, logout, logoutAll, hasCapability, updateUser }),
+    [completeTotpChallenge, hasCapability, login, logout, logoutAll, register, status, updateUser, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

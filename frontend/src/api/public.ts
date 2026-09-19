@@ -3,10 +3,13 @@ import type { PageResponse } from '../types/api';
 import type {
   AdminContactResponseDto,
   AdminContactSubmissionResponse,
+  AdminPublicStatistic,
   CreateOrUpdateFaqRequest,
   CreateOrUpdatePageRequest,
   CreateOrUpdateSectionRequest,
   CreateOrUpdateServiceRequest,
+  CreatePublicStatisticRequest,
+  MetricPreviewResponse,
   PublicContactSubmissionRequest,
   PublicContactSubmissionResponse,
   PublicFaqResponse,
@@ -16,6 +19,9 @@ import type {
   PublicPricingTierResponse,
   PublicServiceOfferingResponse,
   PublicSiteSettingsResponse,
+  PublicStatistic,
+  PublicSystemMetric,
+  UpdatePublicStatisticRequest,
   UpdateSiteSettingsRequest,
 } from '../types/publicSite';
 
@@ -50,6 +56,11 @@ export const publicApi = {
 
   getPricing: async (): Promise<PublicPricingTierResponse[]> => {
     const { data } = await api.get<PublicPricingTierResponse[]>('/public/pricing');
+    return data;
+  },
+
+  getStatistics: async (): Promise<PublicStatistic[]> => {
+    const { data } = await api.get<PublicStatistic[]>('/public/statistics');
     return data;
   },
 
@@ -150,6 +161,38 @@ export const publicApi = {
 
   deleteAdminFaq: async (faqId: string): Promise<void> => {
     await api.delete(`/admin/public-site/faqs/${faqId}`);
+  },
+
+  // Admin Statistics Management Endpoints
+  getAdminStatistics: async (): Promise<AdminPublicStatistic[]> => {
+    const { data } = await api.get<AdminPublicStatistic[]>('/admin/public-site/statistics');
+    return data;
+  },
+
+  getAdminStatisticById: async (id: string): Promise<AdminPublicStatistic> => {
+    const { data } = await api.get<AdminPublicStatistic>(`/admin/public-site/statistics/${id}`);
+    return data;
+  },
+
+  createAdminStatistic: async (payload: CreatePublicStatisticRequest): Promise<AdminPublicStatistic> => {
+    const { data } = await api.post<AdminPublicStatistic>('/admin/public-site/statistics', payload);
+    return data;
+  },
+
+  updateAdminStatistic: async (id: string, payload: UpdatePublicStatisticRequest): Promise<AdminPublicStatistic> => {
+    const { data } = await api.put<AdminPublicStatistic>(`/admin/public-site/statistics/${id}`, payload);
+    return data;
+  },
+
+  deleteAdminStatistic: async (id: string): Promise<void> => {
+    await api.delete(`/admin/public-site/statistics/${id}`);
+  },
+
+  previewMetric: async (metric: PublicSystemMetric): Promise<MetricPreviewResponse> => {
+    const { data } = await api.get<MetricPreviewResponse>('/admin/public-site/statistics/preview-metric', {
+      params: { metric },
+    });
+    return data;
   },
 
   // Admin Contact Submissions Management Endpoints

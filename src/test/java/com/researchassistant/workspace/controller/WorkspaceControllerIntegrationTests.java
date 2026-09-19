@@ -62,6 +62,12 @@ class WorkspaceControllerIntegrationTests {
     @Autowired
     private WorkspaceMembershipRepository membershipRepository;
 
+    @Autowired
+    private com.researchassistant.subscription.WorkspaceSubscriptionRepository subscriptionRepository;
+
+    @Autowired
+    private com.researchassistant.subscription.EntitlementService entitlementService;
+
     @Test
     void authenticatedUserCreatesWorkspaceAndBecomesOwner()
             throws Exception {
@@ -120,7 +126,7 @@ class WorkspaceControllerIntegrationTests {
         WorkspaceResponse visible = createWorkspace(
                 ownerToken,
                 "Visible",
-                WorkspaceType.PERSONAL
+                WorkspaceType.ORGANIZATION
         );
         addMember(ownerToken, visible.id(), member.email(), "MEMBER")
                 .andExpect(status().isCreated());
@@ -128,7 +134,7 @@ class WorkspaceControllerIntegrationTests {
         WorkspaceResponse removed = createWorkspace(
                 ownerToken,
                 "Removed",
-                WorkspaceType.PERSONAL
+                WorkspaceType.ORGANIZATION
         );
         addMember(ownerToken, removed.id(), member.email(), "MEMBER")
                 .andExpect(status().isCreated());
@@ -138,14 +144,15 @@ class WorkspaceControllerIntegrationTests {
         createWorkspace(
                 login(unrelated.email()).accessToken(),
                 "Unrelated",
-                WorkspaceType.PERSONAL
+                WorkspaceType.ORGANIZATION
         );
 
         mockMvc.perform(get("/api/v1/workspaces")
                         .header("Authorization", "Bearer " + memberToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(visible.id().toString()))
-                .andExpect(jsonPath("$.length()").value(1));
+                .andExpect(jsonPath("$[?(@.id == '%s')]".formatted(visible.id())).exists())
+                .andExpect(jsonPath("$[?(@.id == '%s')]".formatted(removed.id())).doesNotExist())
+                .andExpect(jsonPath("$.length()").value(2));
     }
 
     @Test
@@ -162,7 +169,7 @@ class WorkspaceControllerIntegrationTests {
         WorkspaceResponse workspace = createWorkspace(
                 ownerToken,
                 "Detail",
-                WorkspaceType.PERSONAL
+                WorkspaceType.ORGANIZATION
         );
         addMember(ownerToken, workspace.id(), member.email(), "MEMBER")
                 .andExpect(status().isCreated());
@@ -229,7 +236,7 @@ class WorkspaceControllerIntegrationTests {
         WorkspaceResponse workspace = createWorkspace(
                 ownerToken,
                 "Archive",
-                WorkspaceType.PERSONAL
+                WorkspaceType.ORGANIZATION
         );
         addMember(ownerToken, workspace.id(), admin.email(), "ADMIN")
                 .andExpect(status().isCreated());
@@ -369,6 +376,131 @@ class WorkspaceControllerIntegrationTests {
         mockMvc.perform(get("/api/v1/workspaces/{workspaceId}", workspace.id())
                         .header("Authorization", "Bearer " + memberToken))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void registrationAutomaticallyProvisionsPersonalWorkspaceWithOwnerAndFreePlan() {
+        UserResponse user = createUser();
+
+        var personalWsOpt = workspaceRepository.findFirstByOwnerIdAndTypeAndStatus(
+                user.id(),
+                WorkspaceType.PERSONAL,
+                WorkspaceStatus.ACTIVE
+        );
+
+        assertThat(personalWsOpt).isPresent();
+        var personalWs = personalWsOpt.get();
+        assertThat(personalWs.getName()).isEqualTo("Workspace's Workspace");
+
+        WorkspaceMembership membership = membershipRepository
+                .findByWorkspaceIdAndUserId(personalWs.getId(), user.id())
+                .orElseThrow();
+        assertThat(membership.getRole()).isEqualTo(WorkspaceRole.OWNER);
+        assertThat(membership.getStatus()).isEqualTo(WorkspaceMembershipStatus.ACTIVE);
+
+        var subscriptionOpt = subscriptionRepository.findActiveSubscription(personalWs.getId());
+        assertThat(subscriptionOpt).isPresent();
+        var subscription = subscriptionOpt.get();
+        assertThat(subscription.getPlan().getCode()).isEqualTo("FREE");
+        assertThat(subscription.getStatus()).isEqualTo(com.researchassistant.subscription.WorkspaceSubscriptionStatus.ACTIVE);
+        assertThat(subscription.getAccessSource()).isEqualTo(com.researchassistant.subscription.SubscriptionAccessSource.FREE_DEFAULT);
+    }
+
+    @Test
+    void creatingDuplicatePersonalWorkspaceIsRejected() throws Exception {
+        UserResponse user = createUser();
+        String token = login(user.email()).accessToken();
+
+        mockMvc.perform(post("/api/v1/workspaces")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "name", "Second Personal",
+                                "type", "PERSONAL"
+                        ))))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void workspaceBillingReportsFreeAccessWithoutRequiringPaystack() throws Exception {
+        UserResponse user = createUser();
+        String token = login(user.email()).accessToken();
+
+        var personalWs = workspaceRepository.findFirstByOwnerIdAndTypeAndStatus(
+                user.id(),
+                WorkspaceType.PERSONAL,
+                WorkspaceStatus.ACTIVE
+        ).orElseThrow();
+
+        mockMvc.perform(get("/api/v1/workspaces/{workspaceId}/billing/subscription", personalWs.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.planCode").value("FREE"))
+                .andExpect(jsonPath("$.price").value(0))
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.accessSource").value("FREE_DEFAULT"))
+                .andExpect(jsonPath("$.isComplimentary").value(false));
+    }
+
+    @Test
+    void projectCreationWorksOnFreeWorkspaceBelowLimitAndCreatorIsLead() throws Exception {
+        UserResponse user = createUser();
+        String token = login(user.email()).accessToken();
+
+        var personalWs = workspaceRepository.findFirstByOwnerIdAndTypeAndStatus(
+                user.id(),
+                WorkspaceType.PERSONAL,
+                WorkspaceStatus.ACTIVE
+        ).orElseThrow();
+
+        mockMvc.perform(post("/api/v1/workspaces/{workspaceId}/projects", personalWs.getId())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "title", "Grounded Clinical Study",
+                                "description", "Investigating biomarkers"
+                        ))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.title").value("Grounded Clinical Study"))
+                .andExpect(jsonPath("$.status").value("DRAFT"))
+                .andExpect(jsonPath("$.currentUserRole").value("LEAD"));
+    }
+
+    @Test
+    void projectCreationBlockedWhenFreeQuotaExhaustedWith429() throws Exception {
+        UserResponse user = createUser();
+        String token = login(user.email()).accessToken();
+
+        var personalWs = workspaceRepository.findFirstByOwnerIdAndTypeAndStatus(
+                user.id(),
+                WorkspaceType.PERSONAL,
+                WorkspaceStatus.ACTIVE
+        ).orElseThrow();
+
+        // Create 5 projects (FREE quota limit is 5)
+        for (int i = 1; i <= 5; i++) {
+            mockMvc.perform(post("/api/v1/workspaces/{workspaceId}/projects", personalWs.getId())
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of(
+                                    "title", "Research Project #" + i,
+                                    "description", "Initial study " + i
+                            ))))
+                    .andExpect(status().isCreated());
+        }
+
+        // 6th project exceeds the FREE project creation limit of 5
+        mockMvc.perform(post("/api/v1/workspaces/{workspaceId}/projects", personalWs.getId())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "title", "Research Project Exceeding Quota",
+                                "description", "Should be rejected"
+                        ))))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.errorCode").value("QUOTA_EXCEEDED"))
+                .andExpect(jsonPath("$.metadata.feature").value("PROJECT_CREATION"))
+                .andExpect(jsonPath("$.metadata.limit").value("5"));
     }
 
     private UserResponse createUser() {

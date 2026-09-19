@@ -45,6 +45,9 @@ const PrivacyPolicyPage = lazy(() => import('./pages/public/LegalPages').then((m
 const TermsOfServicePage = lazy(() => import('./pages/public/LegalPages').then((m) => ({ default: m.TermsOfServicePage })));
 const AdminPublicSitePage = lazy(() => import('./pages/admin/AdminPublicSitePage').then((m) => ({ default: m.AdminPublicSitePage })));
 const AdminContactInboxPage = lazy(() => import('./pages/admin/AdminContactInboxPage').then((m) => ({ default: m.AdminContactInboxPage })));
+const AdminPlansPage = lazy(() => import('./pages/admin/AdminPlansPage').then((m) => ({ default: m.AdminPlansPage })));
+const AdminPaymentsPage = lazy(() => import('./pages/admin/AdminPaymentsPage').then((m) => ({ default: m.AdminPaymentsPage })));
+const PaymentResultPage = lazy(() => import('./pages/billing/PaymentResultPage').then((m) => ({ default: m.PaymentResultPage })));
 const AdminLayout = lazy(() => import('./layouts/admin/AdminLayout').then((m) => ({ default: m.AdminLayout })));
 
 export default function App() {
@@ -110,6 +113,7 @@ export default function App() {
               <Route path="app/reports" element={<ReportPage />} />
               <Route path="app/references" element={<ReferencesPage />} />
               <Route path="app/billing" element={<BillingPage />} />
+              <Route path="app/billing/payment-result" element={<PaymentResultPage />} />
               <Route path="app/notifications" element={<NotificationsPage />} />
               <Route path="app/settings" element={<ProfilePage />} />
               <Route path="app/settings/profile" element={<ProfilePage />} />
@@ -119,6 +123,7 @@ export default function App() {
               <Route path="projects" element={<ProjectsPage />} />
               <Route path="projects/:projectId" element={<ProjectDashboard />} />
               <Route path="billing" element={<BillingPage />} />
+              <Route path="billing/payment-result" element={<PaymentResultPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="settings" element={<ProfilePage />} />
@@ -131,8 +136,8 @@ export default function App() {
                 <Route path="admin/users" element={<AdminPage />} />
                 <Route path="admin/workspaces" element={<AdminPage />} />
                 <Route path="admin/projects" element={<AdminPage />} />
-                <Route path="admin/plans" element={<AdminPage />} />
-                <Route path="admin/payments" element={<AdminPage />} />
+                <Route path="admin/plans" element={<AdminPlansPage />} />
+                <Route path="admin/payments" element={<AdminPaymentsPage />} />
                 <Route path="admin/complimentary-access" element={<AdminPage />} />
                 <Route path="admin/ai-usage" element={<AdminPage />} />
                 <Route path="admin/jobs" element={<AdminPage />} />

@@ -19,6 +19,7 @@ import com.researchassistant.workspace.entity.WorkspaceMembership;
 import com.researchassistant.workspace.entity.WorkspaceMembershipStatus;
 import com.researchassistant.workspace.entity.WorkspaceRole;
 import com.researchassistant.workspace.entity.WorkspaceStatus;
+import com.researchassistant.workspace.entity.WorkspaceType;
 import com.researchassistant.workspace.exception.InvalidWorkspaceOperationException;
 import com.researchassistant.workspace.exception.WorkspaceNotFoundException;
 import com.researchassistant.workspace.repository.WorkspaceMembershipRepository;
@@ -70,9 +71,22 @@ public class WorkspaceService {
             User currentUser,
             CreateWorkspaceRequest request
     ) {
+        WorkspaceType type = request.type() != null ? request.type() : WorkspaceType.ORGANIZATION;
+        if (type == WorkspaceType.PERSONAL) {
+            if (workspaceRepository.existsByOwnerIdAndTypeAndStatus(
+                    currentUser.getId(),
+                    WorkspaceType.PERSONAL,
+                    WorkspaceStatus.ACTIVE
+            )) {
+                throw new IllegalArgumentException(
+                        "A personal workspace already exists for this user."
+                );
+            }
+        }
+
         Workspace workspace = new Workspace();
         workspace.setName(normalizeRequiredName(request.name()));
-        workspace.setType(request.type());
+        workspace.setType(type);
         workspace.setOwner(currentUser);
         workspace.setStatus(WorkspaceStatus.ACTIVE);
 

@@ -2,8 +2,10 @@ package com.researchassistant.billing;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.researchassistant.billing.dto.BillingDtos;
 import com.researchassistant.billing.dto.BillingDtos.InitializePaymentRequest;
 import com.researchassistant.billing.dto.BillingDtos.InitializePaymentResponse;
+import com.researchassistant.billing.dto.BillingDtos.PaymentAttemptDetailResponse;
 import com.researchassistant.billing.dto.BillingDtos.PaymentAttemptInitializationResponse;
 import com.researchassistant.billing.dto.BillingDtos.PaymentIntentResponse;
 import com.researchassistant.billing.dto.BillingDtos.PaymentTransactionResponse;
@@ -29,17 +31,20 @@ public class BillingController {
     private final com.researchassistant.subscription.SubscriptionChangeService changeService;
     private final PaystackWebhookVerifier webhookVerifier;
     private final ObjectMapper objectMapper;
+    private final com.researchassistant.subscription.ComplimentaryAccessGrantRepository complimentaryAccessGrantRepository;
 
     public BillingController(AuthenticatedUserResolver userResolver, WorkspaceAuthorizationService workspaceAuthorizationService,
                              BillingService billingService,
                              com.researchassistant.subscription.SubscriptionChangeService changeService,
-                             PaystackWebhookVerifier webhookVerifier, ObjectMapper objectMapper) {
+                             PaystackWebhookVerifier webhookVerifier, ObjectMapper objectMapper,
+                             com.researchassistant.subscription.ComplimentaryAccessGrantRepository complimentaryAccessGrantRepository) {
         this.userResolver = userResolver;
         this.workspaceAuthorizationService = workspaceAuthorizationService;
         this.billingService = billingService;
         this.changeService = changeService;
         this.webhookVerifier = webhookVerifier;
         this.objectMapper = objectMapper;
+        this.complimentaryAccessGrantRepository = complimentaryAccessGrantRepository;
     }
 
     @PostMapping("/api/v1/workspaces/{workspaceId}/billing/initialize")
@@ -78,7 +83,15 @@ public class BillingController {
         workspaceAuthorizationService.requireAdminOrOwner(existing.getPaymentIntent().getWorkspace().getId(), user);
         PaymentAttempt attempt = billingService.verifyAttempt(attemptId, user.getId());
         workspaceAuthorizationService.requireAdminOrOwner(attempt.getPaymentIntent().getWorkspace().getId(), user);
-        return Map.of("paymentAttemptId", attempt.getId(), "paymentIntentId", attempt.getPaymentIntent().getId(), "status", attempt.getStatus());
+        String planCode = attempt.getPaymentIntent() != null && attempt.getPaymentIntent().getPlan() != null
+                ? attempt.getPaymentIntent().getPlan().getCode()
+                : null;
+        return Map.of(
+                "paymentAttemptId", attempt.getId(),
+                "paymentIntentId", attempt.getPaymentIntent().getId(),
+                "status", attempt.getStatus().name(),
+                "planCode", planCode != null ? planCode : ""
+        );
     }
 
     @GetMapping("/api/v1/workspaces/{workspaceId}/billing/transactions")
@@ -93,8 +106,33 @@ public class BillingController {
         User user = userResolver.requireActiveUser(authentication);
         workspaceAuthorizationService.requireActiveMembership(workspaceId, user);
         WorkspaceSubscription subscription = billingService.subscription(workspaceId);
-        return Map.of("id", subscription.getId(), "planCode", subscription.getPlan().getCode(), "status", subscription.getStatus(),
-                "periodStart", subscription.getCurrentPeriodStart(), "periodEnd", subscription.getCurrentPeriodEnd(), "autoRenew", subscription.isAutoRenew());
+        com.researchassistant.subscription.SubscriptionPlan plan = subscription.getPlan();
+
+        java.time.OffsetDateTime now = java.time.OffsetDateTime.now();
+        java.util.List<com.researchassistant.subscription.ComplimentaryAccessGrant> grants =
+                complimentaryAccessGrantRepository.findActiveWorkspacePlanGrants(workspaceId, now);
+        boolean isComplimentary = !grants.isEmpty() || subscription.getAccessSource() == com.researchassistant.subscription.SubscriptionAccessSource.COMPLIMENTARY;
+        String accessSource = !grants.isEmpty()
+                ? grants.getFirst().getType().name()
+                : (subscription.getAccessSource() != null ? subscription.getAccessSource().name() : "FREE_DEFAULT");
+        if (!grants.isEmpty()) {
+            plan = grants.getFirst().getPlan();
+        }
+
+        Map<String, Object> response = new java.util.LinkedHashMap<>();
+        response.put("id", subscription.getId());
+        response.put("planCode", plan.getCode());
+        response.put("planName", plan.getName());
+        response.put("price", plan.getPrice());
+        response.put("currency", plan.getCurrency());
+        response.put("status", subscription.getStatus().name());
+        response.put("accessSource", accessSource);
+        response.put("accessType", accessSource);
+        response.put("isComplimentary", isComplimentary);
+        response.put("periodStart", subscription.getCurrentPeriodStart());
+        response.put("periodEnd", subscription.getCurrentPeriodEnd());
+        response.put("autoRenew", subscription.isAutoRenew());
+        return response;
     }
 
     @PostMapping("/api/v1/billing/transactions/{transactionId}/verify")
@@ -105,15 +143,40 @@ public class BillingController {
         return toResponse(transaction);
     }
 
+    @GetMapping("/api/v1/billing/payment-attempts/by-reference/{reference}")
+    public BillingDtos.PaymentAttemptDetailResponse getAttemptByReference(@PathVariable String reference, Authentication authentication) {
+        User user = userResolver.requireActiveUser(authentication);
+        BillingDtos.PaymentAttemptDetailResponse detail = billingService.getOrVerifyAttemptByReference(reference, user.getId());
+        workspaceAuthorizationService.requireActiveMembership(detail.workspaceId(), user);
+        return detail;
+    }
+
+    @GetMapping("/api/v1/billing/payment-attempts/{attemptId}")
+    public BillingDtos.PaymentAttemptDetailResponse getAttemptDetail(@PathVariable UUID attemptId, Authentication authentication) {
+        User user = userResolver.requireActiveUser(authentication);
+        BillingDtos.PaymentAttemptDetailResponse detail = billingService.getAttemptDetail(attemptId);
+        workspaceAuthorizationService.requireActiveMembership(detail.workspaceId(), user);
+        return detail;
+    }
+
+    @GetMapping("/api/v1/billing/plans/{planCode}/breakdown")
+    public BillingDtos.PlanPriceBreakdownResponse getPlanPriceBreakdown(
+            @PathVariable String planCode,
+            @RequestParam(defaultValue = "MONTHLY") com.researchassistant.subscription.BillingInterval interval) {
+        return billingService.getPriceBreakdown(planCode, interval);
+    }
+
     @GetMapping("/api/v1/billing/paystack/callback")
-    public Map<String, Object> callback(@RequestParam String reference) {
+    public org.springframework.web.servlet.view.RedirectView callback(@RequestParam String reference) {
         try {
-            PaymentAttempt attempt = billingService.verifyAttemptReference(reference, null);
-            return Map.of("paymentIntentId", attempt.getPaymentIntent().getId(), "paymentAttemptId", attempt.getId(), "status", attempt.getStatus());
+            billingService.verifyAttemptReference(reference, null);
         } catch (RuntimeException ignored) {
-            PaymentTransaction transaction = billingService.verifyReference(reference, null);
-            return Map.of("transactionId", transaction.getId(), "status", transaction.getStatus());
+            try {
+                billingService.verifyReference(reference, null);
+            } catch (RuntimeException alsoIgnored) {
+            }
         }
+        return new org.springframework.web.servlet.view.RedirectView("/app/billing/payment-result?reference=" + java.net.URLEncoder.encode(reference, java.nio.charset.StandardCharsets.UTF_8));
     }
 
     @PostMapping("/api/v1/workspaces/{workspaceId}/billing/cancel")

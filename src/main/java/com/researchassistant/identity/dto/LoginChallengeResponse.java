@@ -8,6 +8,10 @@ public record LoginChallengeResponse(
         String status,
         String challengeId,
         String authenticationMethod,
-        long expiresIn
+        long expiresIn,
+        String email
 ) {
+    public LoginChallengeResponse(String status, String challengeId, String authenticationMethod, long expiresIn) {
+        this(status, challengeId, authenticationMethod, expiresIn, null);
+    }
 }

@@ -47,7 +47,7 @@ public class UsageAggregationService {
                     .sumTotalTokensByWorkspaceIdBetweenAndStatus(workspaceId, start, end, AiRequestStatus.COMPLETED);
             case STORAGE_BYTES -> documentVersionRepository.sumFileSizeBytesByWorkspaceId(workspaceId)
                     + reportExportJobRepository.sumFileSizeBytesByWorkspaceId(workspaceId);
-            case PROJECT_COUNT -> projectRepository.countByWorkspaceId(workspaceId);
+            case PROJECT_COUNT -> projectRepository.countByWorkspaceIdAndStatusNot(workspaceId, ResearchProjectStatus.ARCHIVED);
             case ACTIVE_PROJECT_COUNT -> projectRepository.countByWorkspaceIdAndStatus(workspaceId, ResearchProjectStatus.ACTIVE);
             case COLLABORATOR_COUNT -> projectId == null ? 0L : membershipRepository.countByProjectIdAndStatus(projectId, ProjectMembershipStatus.ACTIVE);
             case REPORT_EXPORT -> reportExportJobRepository.countByWorkspaceIdBetween(workspaceId, start, end);

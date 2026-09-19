@@ -46,6 +46,7 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
 
     long countByProjectId(UUID projectId);
     long countByProjectIdAndStatus(UUID projectId, DocumentStatus status);
+    long countByStatusNot(DocumentStatus status);
 
     @Query("""
             select d

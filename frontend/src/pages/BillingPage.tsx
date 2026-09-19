@@ -15,8 +15,9 @@ import {
 import { billingApi } from '../api/endpoints';
 import { publicApi } from '../api/public';
 import { useWorkspace } from '../features/workspaces/WorkspaceProvider';
-import { Badge, Button, Card, Field, Input } from '../components/ui';
+import { Badge, Button, Card, Pagination } from '../components/ui';
 import { paths } from '../routes/paths';
+import type { PaymentTransaction, PaymentTransactionPage } from '../types/api';
 import type { PublicPricingTierResponse } from '../types/publicSite';
 import { displayValue } from '../utils/collections';
 
@@ -24,7 +25,7 @@ export function BillingPage() {
   const navigate = useNavigate();
   const { selectedWorkspaceId: workspaceId, selectedWorkspace } = useWorkspace();
   const [billingInterval, setBillingInterval] = useState<'MONTHLY' | 'YEARLY'>('MONTHLY');
-  const [retryIntentId, setRetryIntentId] = useState('');
+  const [transactionPage, setTransactionPage] = useState(0);
 
   const subscriptionQuery = useQuery({
     queryKey: ['billing', workspaceId, 'subscription'],
@@ -38,9 +39,9 @@ export function BillingPage() {
     enabled: Boolean(workspaceId),
   });
 
-  const transactionsQuery = useQuery({
-    queryKey: ['billing', workspaceId, 'transactions'],
-    queryFn: () => billingApi.transactions(workspaceId),
+  const transactionsQuery = useQuery<PaymentTransactionPage>({
+    queryKey: ['billing', workspaceId, 'transactions', transactionPage],
+    queryFn: () => billingApi.transactions(workspaceId, transactionPage, 10),
     enabled: Boolean(workspaceId),
   });
 
@@ -52,10 +53,20 @@ export function BillingPage() {
   const initializeMutation = useMutation({
     mutationFn: (body: { planCode: string; billingInterval: string }) =>
       billingApi.initialize(workspaceId, body),
+    onSuccess: (data) => {
+      if (data?.authorizationUrl && /^https:\/\/(checkout|standard)\.paystack\.com\//.test(data.authorizationUrl)) {
+        window.location.href = data.authorizationUrl;
+      }
+    },
   });
 
   const retryMutation = useMutation({
     mutationFn: (paymentIntentId: string) => billingApi.retry(paymentIntentId),
+    onSuccess: (data) => {
+      if (data?.authorizationUrl && /^https:\/\/(checkout|standard)\.paystack\.com\//.test(data.authorizationUrl)) {
+        window.location.href = data.authorizationUrl;
+      }
+    },
   });
 
   // 1. WORKSPACE REQUIREMENT: CLEAN EMPTY STATE WHEN NO WORKSPACE IS SELECTED
@@ -94,13 +105,47 @@ export function BillingPage() {
   const usageData = usageQuery.data as Record<string, unknown> | undefined;
 
   const handleChoosePlan = (plan: PublicPricingTierResponse) => {
+    if (plan.code.toUpperCase() === 'FREE' || Number(plan.monthlyPrice) === 0) {
+      return; // FREE must never invoke Paystack
+    }
     initializeMutation.mutate({
       planCode: plan.code,
       billingInterval,
     });
   };
 
-  const transactions = (transactionsQuery.data as Record<string, unknown>[]) ?? [];
+  const transactionsPage = transactionsQuery.data;
+  const transactions: PaymentTransaction[] = Array.isArray(transactionsPage?.content)
+    ? transactionsPage.content
+    : Array.isArray(transactionsPage)
+      ? (transactionsPage as unknown as PaymentTransaction[])
+      : [];
+  const totalPages = transactionsPage?.totalPages ?? 1;
+
+  const periodEndStr = subscriptionData?.periodEnd ? String(subscriptionData.periodEnd) : null;
+  const periodEndDate = periodEndStr ? new Date(periodEndStr) : null;
+  const nowMs = Date.now();
+  const isApproachingExpiry = Boolean(
+    currentPlanCode !== 'FREE' &&
+    periodEndDate &&
+    (periodEndDate.getTime() - nowMs) <= 7 * 24 * 60 * 60 * 1000
+  );
+  const isExpired = Boolean(
+    currentPlanCode !== 'FREE' &&
+    periodEndDate &&
+    periodEndDate.getTime() <= nowMs
+  );
+
+  const hasYearlyPricing = (plansQuery.data ?? []).some(
+    (p) => p.annualPrice != null && Number(p.annualPrice) > 0,
+  );
+
+  const handleRenewNow = () => {
+    initializeMutation.mutate({
+      planCode: currentPlanCode,
+      billingInterval: (subscriptionData?.billingInterval as string) || 'MONTHLY',
+    });
+  };
 
   return (
     <section className="page billing-page">
@@ -123,6 +168,7 @@ export function BillingPage() {
               subscriptionQuery.refetch();
               usageQuery.refetch();
               transactionsQuery.refetch();
+              plansQuery.refetch();
             }}
             disabled={subscriptionQuery.isFetching}
           >
@@ -130,6 +176,31 @@ export function BillingPage() {
           </Button>
         </div>
       </header>
+
+      {/* RENEWAL NOTICE BANNER FOR PAID PLANS */}
+      {(isApproachingExpiry || isExpired) && (
+        <div
+          className={`alert ${isExpired ? 'danger' : 'warning'}`}
+          style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Sparkles size={20} />
+            <div>
+              <strong>{isExpired ? 'Subscription Expired:' : 'Subscription Renewal Notice:'}</strong>{' '}
+              Your {currentPlanCode} plan {isExpired ? 'expired on' : 'expires on'} {periodEndStr ? periodEndStr.slice(0, 10) : 'soon'}.
+              {isExpired ? ' Your workspace has fallen back to the Free plan limits.' : ' Renew now to avoid interruption to your academic research features.'}
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={handleRenewNow}
+            disabled={initializeMutation.isPending}
+          >
+            {initializeMutation.isPending ? 'Processing...' : 'Renew Now'}
+          </Button>
+        </div>
+      )}
 
       {/* PAYSTACK TEST CHECKOUT RESULT ALERT */}
       {initializeMutation.data ? (
@@ -149,24 +220,43 @@ export function BillingPage() {
           </div>
 
           <div className="current-plan-badge-box">
-            <div className="plan-name-display">{currentPlanCode} TIER</div>
+            <div className="plan-name-display">{currentPlanCode}</div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text)' }}>
+              {currentPlanCode === 'FREE'
+                ? 'GHS 0'
+                : subscriptionData?.price != null
+                  ? `${subscriptionData.currency ?? 'GHS'} ${subscriptionData.price} / ${(subscriptionData.billingInterval as string)?.toLowerCase() === 'yearly' ? 'year' : 'month'}`
+                  : ''}
+            </div>
             {isComplimentary ? (
               <Badge tone="success">
                 <Gift size={13} /> {accessType.replaceAll('_', ' ')}
               </Badge>
             ) : (
-              <Badge tone="info">{displayValue(subscriptionData?.status, 'ACTIVE')}</Badge>
+              <Badge tone={isExpired ? 'danger' : 'info'}>
+                {isExpired ? 'EXPIRED' : displayValue(subscriptionData?.status, 'ACTIVE')}
+              </Badge>
             )}
           </div>
 
           <div className="plan-meta-details">
             <div className="plan-meta-row">
-              <span className="muted">Billing status:</span>
-              <strong>{isComplimentary ? 'No billing required (Granted)' : 'Active subscription'}</strong>
+              <span className="muted">Access source:</span>
+              <strong>{isComplimentary ? 'Complimentary' : currentPlanCode === 'FREE' ? 'Free Default' : 'Paid Subscription'}</strong>
             </div>
-            {subscriptionData?.periodEnd ? (
+            <div className="plan-meta-row">
+              <span className="muted">Billing status:</span>
+              <strong>{isComplimentary ? 'No billing required (Granted)' : currentPlanCode === 'FREE' ? 'Active free plan (No charges)' : isExpired ? 'Expired (Fallback to Free)' : 'Active subscription'}</strong>
+            </div>
+            {subscriptionData?.periodStart && currentPlanCode !== 'FREE' ? (
               <div className="plan-meta-row">
-                <span className="muted">Current period ends:</span>
+                <span className="muted">Started:</span>
+                <strong>{String(subscriptionData.periodStart).slice(0, 10)}</strong>
+              </div>
+            ) : null}
+            {subscriptionData?.periodEnd && currentPlanCode !== 'FREE' ? (
+              <div className="plan-meta-row">
+                <span className="muted">{isExpired ? 'Expired:' : 'Renews/Expires:'}</span>
                 <strong>{String(subscriptionData.periodEnd).slice(0, 10)}</strong>
               </div>
             ) : null}
@@ -175,6 +265,20 @@ export function BillingPage() {
               <Badge tone="warning" className="badge-sm">Paystack Test Gateway</Badge>
             </div>
           </div>
+
+          {currentPlanCode !== 'FREE' && (isApproachingExpiry || isExpired) ? (
+            <div style={{ marginTop: '16px' }}>
+              <Button
+                type="button"
+                variant="primary"
+                className="w-full"
+                onClick={handleRenewNow}
+                disabled={initializeMutation.isPending}
+              >
+                {initializeMutation.isPending ? 'Processing...' : 'Renew Now'}
+              </Button>
+            </div>
+          ) : null}
         </Card>
 
         {/* CARD 2: RESOURCE QUOTAS WITH PROGRESS BARS */}
@@ -220,23 +324,31 @@ export function BillingPage() {
             <p className="muted">Choose the empirical research tier that fits your academic project.</p>
           </div>
 
-          {/* SEGMENTED BILLING INTERVAL SELECTOR */}
-          <div className="interval-toggle-container" role="radiogroup" aria-label="Billing interval">
-            <button
-              type="button"
-              className={`interval-toggle-btn ${billingInterval === 'MONTHLY' ? 'is-active' : ''}`}
-              onClick={() => setBillingInterval('MONTHLY')}
-            >
-              Monthly
-            </button>
-            <button
-              type="button"
-              className={`interval-toggle-btn ${billingInterval === 'YEARLY' ? 'is-active' : ''}`}
-              onClick={() => setBillingInterval('YEARLY')}
-            >
-              Yearly <span className="discount-pill">Save 20%</span>
-            </button>
-          </div>
+          {/* DYNAMIC BILLING INTERVAL SELECTOR: show Monthly only if no yearly prices exist */}
+          {hasYearlyPricing ? (
+            <div className="interval-toggle-container" role="radiogroup" aria-label="Billing interval">
+              <button
+                type="button"
+                className={`interval-toggle-btn ${billingInterval === 'MONTHLY' ? 'is-active' : ''}`}
+                onClick={() => setBillingInterval('MONTHLY')}
+              >
+                Monthly
+              </button>
+              <button
+                type="button"
+                className={`interval-toggle-btn ${billingInterval === 'YEARLY' ? 'is-active' : ''}`}
+                onClick={() => setBillingInterval('YEARLY')}
+              >
+                Yearly
+              </button>
+            </div>
+          ) : (
+            <div className="interval-toggle-container">
+              <span className="badge info" style={{ padding: '6px 12px', fontSize: '0.85rem' }}>
+                Monthly Billing
+              </span>
+            </div>
+          )}
         </div>
 
         {/* PLAN CARDS GRID */}
@@ -248,8 +360,9 @@ export function BillingPage() {
           <div className="billing-plan-cards-grid">
             {(plansQuery.data ?? []).map((plan) => {
               const isCurrent = currentPlanCode === plan.code.toUpperCase();
-              const price = billingInterval === 'YEARLY' ? plan.annualPrice : plan.monthlyPrice;
-              const periodSuffix = billingInterval === 'YEARLY' ? '/ year' : '/ month';
+              const isFree = plan.code.toUpperCase() === 'FREE' || Number(plan.monthlyPrice) === 0;
+              const hasYearlyForThisPlan = plan.annualPrice != null && Number(plan.annualPrice) > 0;
+              const isYearlyUnavailable = billingInterval === 'YEARLY' && !isFree && !hasYearlyForThisPlan;
 
               return (
                 <div
@@ -263,11 +376,13 @@ export function BillingPage() {
                   <div className="plan-card-top">
                     <h3 className="plan-card-title">{plan.name}</h3>
                     <p className="plan-card-description muted">{plan.description}</p>
-                    <div className="plan-card-price">
-                      <span className="price-currency">{plan.currency}</span>
-                      <span className="price-amount">{price}</span>
-                      <span className="price-interval muted">{periodSuffix}</span>
-                    </div>
+                    <PlanBreakdownDisplay
+                      planCode={plan.code}
+                      interval={billingInterval}
+                      fallbackCurrency={plan.currency}
+                      fallbackBasePrice={isFree ? 0 : billingInterval === 'YEARLY' ? (plan.annualPrice ?? 0) : plan.monthlyPrice}
+                      isFree={isFree}
+                    />
                   </div>
 
                   <hr className="plan-card-divider" />
@@ -286,6 +401,14 @@ export function BillingPage() {
                       <Button type="button" variant="secondary" disabled className="w-full">
                         Current Plan
                       </Button>
+                    ) : isFree ? (
+                      <Button type="button" variant="secondary" disabled className="w-full">
+                        Included Base Plan
+                      </Button>
+                    ) : isYearlyUnavailable ? (
+                      <Button type="button" variant="secondary" disabled className="w-full">
+                        Yearly Not Available
+                      </Button>
                     ) : (
                       <Button
                         type="button"
@@ -294,7 +417,7 @@ export function BillingPage() {
                         onClick={() => handleChoosePlan(plan)}
                         disabled={initializeMutation.isPending}
                       >
-                        {initializeMutation.isPending ? 'Processing...' : `Choose ${plan.name}`}
+                        {initializeMutation.isPending ? 'Processing...' : `Upgrade to ${plan.name}`}
                         <ArrowRight size={15} />
                       </Button>
                     )}
@@ -316,57 +439,97 @@ export function BillingPage() {
           </div>
         </div>
 
-        {transactions.length === 0 ? (
+        {transactionsQuery.isLoading ? (
           <p className="muted" style={{ padding: '16px 0' }}>
-            No transaction records found for this workspace.
+            Loading payment transactions...
+          </p>
+        ) : transactionsQuery.isError ? (
+          <div className="alert danger" style={{ marginTop: '12px' }}>
+            Unable to load transaction history. Please refresh or try again later.
+          </div>
+        ) : transactions.length === 0 ? (
+          <p className="muted" style={{ padding: '16px 0' }}>
+            No payment transactions yet.
           </p>
         ) : (
-          <div className="admin-table-container" style={{ marginTop: '12px' }}>
-            <table className="admin-data-table">
-              <thead>
-                <tr>
-                  <th>Reference</th>
-                  <th>Plan</th>
-                  <th>Interval</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transactions.map((tx, idx) => (
-                  <tr key={String(tx.id ?? idx)}>
-                    <td>
-                      <code style={{ fontSize: '0.82rem' }}>
-                        {String(tx.internalReference ?? tx.reference ?? tx.id).slice(0, 16)}...
-                      </code>
-                    </td>
-                    <td><strong>{displayValue(tx.planCode)}</strong></td>
-                    <td>{displayValue(tx.billingInterval)}</td>
-                    <td>
-                      {displayValue(tx.currency)} {displayValue(tx.amount)}
-                    </td>
-                    <td>
-                      <Badge
-                        tone={
-                          tx.status === 'SUCCESS'
-                            ? 'success'
-                            : tx.status === 'PENDING'
-                              ? 'warning'
-                              : 'danger'
-                        }
-                      >
-                        {displayValue(tx.status)}
-                      </Badge>
-                    </td>
-                    <td className="muted" style={{ fontSize: '0.85rem' }}>
-                      {tx.createdAt ? String(tx.createdAt).slice(0, 10) : 'Recent'}
-                    </td>
+          <>
+            <div className="admin-table-container" style={{ marginTop: '12px' }}>
+              <table className="admin-data-table">
+                <thead>
+                  <tr>
+                    <th>Reference</th>
+                    <th>Plan</th>
+                    <th>Interval</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {transactions.map((tx, idx) => (
+                    <tr key={String(tx.id ?? idx)}>
+                      <td>
+                        <code style={{ fontSize: '0.82rem' }}>
+                          {(() => {
+                            const ref = String(tx.reference ?? tx.internalReference ?? tx.id);
+                            return ref.length > 24 ? `${ref.slice(0, 20)}...` : ref;
+                          })()}
+                        </code>
+                      </td>
+                      <td><strong>{displayValue(tx.planCode)}</strong></td>
+                      <td>{displayValue(tx.billingInterval)}</td>
+                      <td>
+                        {displayValue(tx.currency)} {displayValue(tx.amount)}
+                      </td>
+                      <td>
+                        <Badge
+                          tone={
+                            tx.status === 'SUCCESS' || tx.status === 'SUCCEEDED'
+                              ? 'success'
+                              : tx.status === 'PENDING' || tx.status === 'INITIALIZED'
+                                ? 'warning'
+                                : 'danger'
+                          }
+                        >
+                          {displayValue(tx.status)}
+                        </Badge>
+                      </td>
+                      <td className="muted" style={{ fontSize: '0.85rem' }}>
+                        {tx.createdAt ? String(tx.createdAt).slice(0, 10) : 'Recent'}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {['FAILED', 'PENDING', 'INITIALIZED'].includes(String(tx.status)) && tx.paymentIntentId ? (
+                          <Button
+                            type="button"
+                            variant="primary"
+                            className="btn-compact"
+                            style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                            disabled={retryMutation.isPending}
+                            onClick={() => retryMutation.mutate(String(tx.paymentIntentId))}
+                          >
+                            <RefreshCw size={12} className={retryMutation.isPending ? 'spin' : ''} /> Pay Again
+                          </Button>
+                        ) : (
+                          <span className="muted" style={{ fontSize: '0.75rem' }}>—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {totalPages > 1 ? (
+              <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                <Pagination
+                  page={transactionPage}
+                  totalPages={totalPages}
+                  onPageChange={setTransactionPage}
+                />
+              </div>
+            ) : null}
+          </>
         )}
 
         <div className="alert info" style={{ marginTop: '20px' }}>
@@ -379,29 +542,78 @@ export function BillingPage() {
           </div>
         </div>
 
-        <div className="retry-intent-box" style={{ marginTop: '14px' }}>
-          <Field label="Retry payment intent ID (if required)">
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <Input
-                value={retryIntentId}
-                onChange={(e) => setRetryIntentId(e.target.value)}
-                placeholder="UUID of unfulfilled payment intent"
-                style={{ maxWidth: '380px' }}
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={!retryIntentId || retryMutation.isPending}
-                onClick={() => retryMutation.mutate(retryIntentId)}
-              >
-                {retryMutation.isPending ? 'Retrying...' : 'Pay Again'}
-              </Button>
-            </div>
-          </Field>
-          {retryMutation.data ? <CheckoutResultBanner data={retryMutation.data} /> : null}
-        </div>
+        {retryMutation.data ? <CheckoutResultBanner data={retryMutation.data} /> : null}
       </Card>
     </section>
+  );
+}
+
+function PlanBreakdownDisplay({
+  planCode,
+  interval,
+  fallbackCurrency,
+  fallbackBasePrice,
+  isFree,
+}: {
+  planCode: string;
+  interval: string;
+  fallbackCurrency: string;
+  fallbackBasePrice: number | string;
+  isFree: boolean;
+}) {
+  const breakdownQuery = useQuery({
+    queryKey: ['billing', 'breakdown', planCode, interval],
+    queryFn: () => billingApi.priceBreakdown(planCode, interval),
+    enabled: !isFree,
+    staleTime: 60_000,
+  });
+
+  if (isFree) {
+    return (
+      <div className="plan-card-price">
+        <span className="price-currency">{fallbackCurrency}</span>
+        <span className="price-amount">0.00</span>
+        <span className="price-interval muted">/ month</span>
+      </div>
+    );
+  }
+
+  const breakdown = breakdownQuery.data;
+  const curr = breakdown?.currency ?? fallbackCurrency;
+  const base = breakdown ? Number(breakdown.baseAmount).toFixed(2) : Number(fallbackBasePrice || 0).toFixed(2);
+  const proc = breakdown ? Number(breakdown.processingAmount).toFixed(2) : (Number(base) * 0.02).toFixed(2);
+  const ai = breakdown ? Number(breakdown.aiGenerationAmount).toFixed(2) : (Number(base) * 0.30).toFixed(2);
+  const total = breakdown ? Number(breakdown.totalAmount).toFixed(2) : (Number(base) * 1.32).toFixed(2);
+
+  return (
+    <div className="plan-breakdown-box" style={{ marginTop: '8px', fontSize: '0.82rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
+        <span className="muted">Base subscription:</span>
+        <span>{curr} {base}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
+        <span className="muted">Processing:</span>
+        <span>{curr} {proc}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+        <span className="muted">AI generation:</span>
+        <span>{curr} {ai}</span>
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          borderTop: '1px solid var(--border, #334155)',
+          paddingTop: '6px',
+          marginTop: '4px',
+          fontWeight: 700,
+          fontSize: '0.92rem',
+        }}
+      >
+        <span>Total {interval === 'YEARLY' ? '/ year' : '/ month'}:</span>
+        <span style={{ color: 'var(--brand, #38bdf8)' }}>{curr} {total}</span>
+      </div>
+    </div>
   );
 }
 
@@ -414,8 +626,12 @@ function UsageProgressItem({
   metric?: { used?: number; limit?: number | null };
   unit: string;
 }) {
-  const used = metric?.used ?? 0;
-  const limit = metric?.limit;
+  const rawUsed = metric?.used ?? 0;
+  const rawLimit = metric?.limit;
+  const isStorage = unit === 'MB' || unit === 'BYTES';
+  const used = isStorage && rawUsed > 1024 * 1024 ? Math.round(rawUsed / (1024 * 1024)) : rawUsed;
+  const limit = isStorage && rawLimit && rawLimit > 1024 * 1024 ? Math.round(rawLimit / (1024 * 1024)) : rawLimit;
+  const displayUnit = isStorage ? 'MB' : unit;
   const isUnlimited = limit === null || limit === undefined;
   const percent = isUnlimited ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
 
@@ -428,7 +644,7 @@ function UsageProgressItem({
             <span className="badge-sm badge-info">Unlimited</span>
           ) : (
             <>
-              <strong>{used.toLocaleString()}</strong> / {limit.toLocaleString()} {unit}
+              <strong>{used.toLocaleString()}</strong> / {limit.toLocaleString()} {displayUnit}
             </>
           )}
         </span>

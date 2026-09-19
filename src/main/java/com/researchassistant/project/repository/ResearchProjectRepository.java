@@ -26,6 +26,10 @@ public interface ResearchProjectRepository
 
     long countByWorkspaceIdAndStatus(UUID workspaceId, com.researchassistant.project.entity.ResearchProjectStatus status);
 
+    long countByWorkspaceIdAndStatusNot(UUID workspaceId, com.researchassistant.project.entity.ResearchProjectStatus status);
+
+    long countByStatusNot(com.researchassistant.project.entity.ResearchProjectStatus status);
+
     @Query("""
             select p
             from ResearchProject p

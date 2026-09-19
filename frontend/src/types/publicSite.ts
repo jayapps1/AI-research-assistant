@@ -248,3 +248,78 @@ export interface CreateOrUpdateFaqRequest {
   displayOrder?: number;
   enabled?: boolean;
 }
+
+export type PublicStatisticValueSource = 'MANUAL' | 'SYSTEM_DERIVED';
+
+export type PublicSystemMetric =
+  | 'TOTAL_RESEARCH_PROJECTS'
+  | 'TOTAL_ACTIVE_USERS'
+  | 'TOTAL_DOCUMENTS_PROCESSED'
+  | 'TOTAL_WORKSPACES'
+  | 'TOTAL_COMPLETED_REPORT_EXPORTS';
+
+export interface PublicStatistic {
+  code: string;
+  label: string;
+  value: string;
+  prefix?: string;
+  suffix?: string;
+  iconKey?: string;
+  featured: boolean;
+}
+
+export interface AdminPublicStatistic {
+  id: UUID;
+  code: string;
+  label: string;
+  description?: string;
+  valueSource: PublicStatisticValueSource;
+  manualValue?: string;
+  systemMetric?: PublicSystemMetric;
+  resolvedValue: string;
+  prefix?: string;
+  suffix?: string;
+  iconKey?: string;
+  enabled: boolean;
+  featured: boolean;
+  displayOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePublicStatisticRequest {
+  code: string;
+  label: string;
+  description?: string;
+  valueSource: PublicStatisticValueSource;
+  manualValue?: string;
+  systemMetric?: PublicSystemMetric;
+  prefix?: string;
+  suffix?: string;
+  iconKey?: string;
+  enabled?: boolean;
+  featured?: boolean;
+  displayOrder?: number;
+}
+
+export interface UpdatePublicStatisticRequest {
+  label: string;
+  description?: string;
+  valueSource: PublicStatisticValueSource;
+  manualValue?: string;
+  systemMetric?: PublicSystemMetric;
+  prefix?: string;
+  suffix?: string;
+  iconKey?: string;
+  enabled?: boolean;
+  featured?: boolean;
+  displayOrder?: number;
+}
+
+export interface MetricPreviewResponse {
+  metric: PublicSystemMetric;
+  rawValue: number;
+  formattedValue: string;
+  calculatedAt: string;
+}
+

@@ -1,7 +1,11 @@
 import { api } from './client';
 import type {
+  AdminPaymentItem,
+  AdminPlanEntitlement,
+  AdminSubscriptionPlan,
   AuthTokenResponse,
   Citation,
+  CreateSubscriptionPlanRequest,
   DatasetImportPreview,
   DatasetImportStart,
   DatasetItem,
@@ -12,7 +16,10 @@ import type {
   LoginResponse,
   NotificationItem,
   PageResponse,
+  PaymentAttemptDetail,
   PaymentAttemptInitialization,
+  PaymentTransactionPage,
+  PlanPriceBreakdown,
   ProjectDashboardResponse,
   ProjectMember,
   RagAnswer,
@@ -21,8 +28,10 @@ import type {
   ResearchProgressResponse,
   ResearchProject,
   TotpEnrollmentResponse,
+  UpdateSubscriptionPlanRequest,
   User,
   UserDashboardResponse,
+  UserProfileResponse,
   UserTaskSummary,
   ValidationIssue,
   Workspace,
@@ -201,12 +210,18 @@ export const reportApi = {
 
 export const billingApi = {
   subscription: (workspaceId: string) => api.get<Record<string, unknown>>(`/workspaces/${workspaceId}/billing/subscription`).then((r) => r.data),
-  transactions: (workspaceId: string) => api.get<Record<string, unknown>[]>(`/workspaces/${workspaceId}/billing/transactions`).then((r) => r.data),
+  transactions: (workspaceId: string, page = 0, size = 10) =>
+    api.get<PaymentTransactionPage>(`/workspaces/${workspaceId}/billing/transactions`, { params: { page, size } }).then((r) => r.data),
   usage: (workspaceId: string) => api.get<Record<string, unknown>>(`/workspaces/${workspaceId}/usage`).then((r) => r.data),
   entitlements: (workspaceId: string) => api.get<Record<string, unknown>>(`/workspaces/${workspaceId}/entitlements`).then((r) => r.data),
   initialize: (workspaceId: string, body: { planCode: string; billingInterval: string }) =>
     api.post<PaymentAttemptInitialization>(`/workspaces/${workspaceId}/billing/initialize`, body).then((r) => r.data),
   retry: (paymentIntentId: string) => api.post<PaymentAttemptInitialization>(`/billing/payment-intents/${paymentIntentId}/retry`).then((r) => r.data),
+  verifyAttempt: (attemptId: string) => api.post<PaymentAttemptDetail>(`/billing/payment-attempts/${attemptId}/verify`).then((r) => r.data),
+  verifyAttemptByReference: (reference: string) => api.get<PaymentAttemptDetail>(`/billing/payment-attempts/by-reference/${reference}`).then((r) => r.data),
+  getAttempt: (attemptId: string) => api.get<PaymentAttemptDetail>(`/billing/payment-attempts/${attemptId}`).then((r) => r.data),
+  priceBreakdown: (planCode: string, interval = 'MONTHLY') =>
+    api.get<PlanPriceBreakdown>(`/billing/plans/${planCode}/breakdown`, { params: { interval } }).then((r) => r.data),
 };
 
 export const notificationApi = {
@@ -221,9 +236,24 @@ export const adminApi = {
   operations: () => api.get<Record<string, unknown>>('/admin/operations/status').then((r) => r.data),
   users: () => api.get<PageResponse<Record<string, unknown>>>('/admin/users').then((r) => r.data),
   workspaces: () => api.get<PageResponse<Record<string, unknown>>>('/admin/workspaces').then((r) => r.data),
-  plans: () => api.get<Record<string, unknown>[]>('/admin/subscription-plans').then((r) => r.data),
+  plans: () => api.get<AdminSubscriptionPlan[]>('/admin/subscription-plans').then((r) => r.data),
+  getPlan: (planId: string) => api.get<AdminSubscriptionPlan>(`/admin/subscription-plans/${planId}`).then((r) => r.data),
+  createPlan: (body: CreateSubscriptionPlanRequest) => api.post<AdminSubscriptionPlan>('/admin/subscription-plans', body).then((r) => r.data),
+  updatePlan: (planId: string, body: UpdateSubscriptionPlanRequest) => api.patch<AdminSubscriptionPlan>(`/admin/subscription-plans/${planId}`, body).then((r) => r.data),
+  activatePlan: (planId: string) => api.post<AdminSubscriptionPlan>(`/admin/subscription-plans/${planId}/activate`).then((r) => r.data),
+  deactivatePlan: (planId: string) => api.post<AdminSubscriptionPlan>(`/admin/subscription-plans/${planId}/deactivate`).then((r) => r.data),
+  getPlanEntitlements: (planId: string) => api.get<AdminPlanEntitlement[]>(`/admin/subscription-plans/${planId}/entitlements`).then((r) => r.data),
+  updatePlanEntitlements: (planId: string, entitlements: AdminPlanEntitlement[]) =>
+    api.put<AdminPlanEntitlement[]>(`/admin/subscription-plans/${planId}/entitlements`, { entitlements }).then((r) => r.data),
+  payments: (page = 0, size = 20) => api.get<PageResponse<AdminPaymentItem>>('/admin/payments', { params: { page, size } }).then((r) => r.data),
   complimentaryAccess: () => api.get<PageResponse<Record<string, unknown>>>('/admin/complimentary-access').then((r) => r.data),
   grantComplimentaryAccess: (body: Record<string, unknown>) => api.post('/admin/complimentary-access', body).then((r) => r.data),
+};
+
+export const publicApi = {
+  pricing: () => api.get<any[]>('/public/pricing').then((r) => r.data),
+  siteSettings: () => api.get<Record<string, unknown>>('/public/site').then((r) => r.data),
+  statistics: () => api.get<any[]>('/public/statistics').then((r) => r.data),
 };
 
 export const dashboardApi = {
@@ -234,5 +264,22 @@ export const dashboardApi = {
     api.get<ProjectDashboardResponse>(`/projects/${projectId}/dashboard`).then((r) => r.data),
   researchProgress: (projectId: string) =>
     api.get<ResearchProgressResponse>(`/projects/${projectId}/research-progress`).then((r) => r.data),
+};
+
+export const profileApi = {
+  getProfile: () => api.get<UserProfileResponse>('/me/profile').then((r) => r.data),
+  uploadImage: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api
+      .post<UserProfileResponse>('/me/profile/image', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      })
+      .then((r) => r.data);
+  },
+  deleteImage: () => api.delete<UserProfileResponse>('/me/profile/image').then((r) => r.data),
+  getAvatarUrl: (userId: string) => `/api/v1/users/${userId}/avatar`,
 };
 

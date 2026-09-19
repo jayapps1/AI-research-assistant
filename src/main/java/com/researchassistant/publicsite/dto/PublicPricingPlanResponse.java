@@ -12,6 +12,8 @@ public record PublicPricingPlanResponse(
         String name,
         String description,
         BigDecimal price,
+        BigDecimal monthlyPrice,
+        BigDecimal annualPrice,
         String currency,
         BillingInterval billingInterval,
         boolean featured,

@@ -46,6 +46,18 @@ public class BillingPaymentIntent {
     @Column(name = "expected_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal expectedAmount;
 
+    @Column(name = "base_amount", precision = 12, scale = 2)
+    private BigDecimal baseAmount;
+
+    @Column(name = "processing_fee_amount", precision = 12, scale = 2)
+    private BigDecimal processingFeeAmount;
+
+    @Column(name = "ai_generation_fee_amount", precision = 12, scale = 2)
+    private BigDecimal aiGenerationFeeAmount;
+
+    @Column(name = "total_amount", precision = 12, scale = 2)
+    private BigDecimal totalAmount;
+
     @Column(nullable = false, length = 10)
     private String currency;
 

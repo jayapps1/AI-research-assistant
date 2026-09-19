@@ -30,22 +30,17 @@ public class AdminController {
     private final AdminDashboardService dashboardService;
     private final UserRepository userRepository;
     private final WorkspaceRepository workspaceRepository;
-    private final SubscriptionPlanRepository planRepository;
-    private final PlanEntitlementRepository entitlementRepository;
     private final AuditEventRepository auditEventRepository;
     private final ComplimentaryAccessService complimentaryAccessService;
 
     public AdminController(AuthenticatedUserResolver userResolver, SystemAdminAuthorizationService adminAuthorizationService,
                            AdminDashboardService dashboardService, UserRepository userRepository, WorkspaceRepository workspaceRepository,
-                           SubscriptionPlanRepository planRepository, PlanEntitlementRepository entitlementRepository,
                            AuditEventRepository auditEventRepository, ComplimentaryAccessService complimentaryAccessService) {
         this.userResolver = userResolver;
         this.adminAuthorizationService = adminAuthorizationService;
         this.dashboardService = dashboardService;
         this.userRepository = userRepository;
         this.workspaceRepository = workspaceRepository;
-        this.planRepository = planRepository;
-        this.entitlementRepository = entitlementRepository;
         this.auditEventRepository = auditEventRepository;
         this.complimentaryAccessService = complimentaryAccessService;
     }
@@ -106,30 +101,6 @@ public class AdminController {
                 "status", w.getStatus(), "ownerId", w.getOwner().getId());
     }
 
-    @GetMapping("/subscription-plans")
-    public Page<SubscriptionPlan> plans(Pageable pageable, Authentication authentication) {
-        requireAdmin(authentication);
-        return planRepository.findAll(pageable);
-    }
-
-    @PostMapping("/subscription-plans")
-    @CacheEvict(cacheNames = "subscription:workspace-entitlements", allEntries = true)
-    public SubscriptionPlan createPlan(@Valid @RequestBody PlanRequest request, Authentication authentication) {
-        requireAdmin(authentication);
-        SubscriptionPlan plan = new SubscriptionPlan();
-        apply(plan, request);
-        return planRepository.save(plan);
-    }
-
-    @PatchMapping("/subscription-plans/{planId}")
-    @CacheEvict(cacheNames = "subscription:workspace-entitlements", allEntries = true)
-    public SubscriptionPlan updatePlan(@PathVariable UUID planId, @RequestBody PlanRequest request, Authentication authentication) {
-        requireAdmin(authentication);
-        SubscriptionPlan plan = planRepository.findById(planId).orElseThrow();
-        apply(plan, request);
-        return planRepository.save(plan);
-    }
-
     @GetMapping("/audit-events")
     public Page<AuditEvent> audit(Pageable pageable, Authentication authentication) {
         requireAdmin(authentication);
@@ -163,18 +134,6 @@ public class AdminController {
         return toGrantResponse(complimentaryAccessService.revoke(grantId, request == null ? null : request.reason(), admin));
     }
 
-    private void apply(SubscriptionPlan plan, PlanRequest request) {
-        if (request.code() != null) plan.setCode(request.code());
-        if (request.name() != null) plan.setName(request.name());
-        if (request.description() != null) plan.setDescription(request.description());
-        if (request.status() != null) plan.setStatus(request.status());
-        if (request.billingInterval() != null) plan.setBillingInterval(request.billingInterval());
-        if (request.price() != null) plan.setPrice(request.price());
-        if (request.currency() != null) plan.setCurrency(request.currency());
-        if (request.publiclyAvailable() != null) plan.setPubliclyAvailable(request.publiclyAvailable());
-        if (request.displayOrder() != null) plan.setDisplayOrder(request.displayOrder());
-    }
-
     private User requireAdmin(Authentication authentication) {
         User user = userResolver.requireActiveUser(authentication);
         adminAuthorizationService.requireSystemAdmin(user.getId());
@@ -195,9 +154,5 @@ public class AdminController {
         );
     }
 
-    public record PlanRequest(@NotBlank String code, @NotBlank String name, String description,
-                              SubscriptionPlanStatus status, @NotNull BillingInterval billingInterval,
-                              @NotNull BigDecimal price, @NotBlank String currency, Boolean publiclyAvailable,
-                              Integer displayOrder) {}
     public record RevokeGrantRequest(String reason) {}
 }

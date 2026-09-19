@@ -16,9 +16,11 @@ import java.util.Map;
 public class PaystackClient {
     private final PaymentProperties properties;
     private final RestClient restClient;
+    private final MoneyMinorUnitConverter moneyMinorUnitConverter;
 
-    public PaystackClient(PaymentProperties properties, RestClient.Builder builder) {
+    public PaystackClient(PaymentProperties properties, RestClient.Builder builder, MoneyMinorUnitConverter moneyMinorUnitConverter) {
         this.properties = properties;
+        this.moneyMinorUnitConverter = moneyMinorUnitConverter;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(properties.connectTimeout());
         requestFactory.setReadTimeout(properties.readTimeout());
@@ -89,7 +91,7 @@ public class PaystackClient {
     }
 
     public long toSmallestUnit(BigDecimal amount) {
-        return amount.multiply(BigDecimal.valueOf(100)).setScale(0, RoundingMode.HALF_UP).longValueExact();
+        return moneyMinorUnitConverter.toMinorUnits(amount, "GHS");
     }
 
     public PaymentEnvironment environment() {

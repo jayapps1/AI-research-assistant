@@ -12,6 +12,9 @@ import {
   CheckCircle,
   AlertCircle,
   ExternalLink,
+  BarChart3,
+  Calculator,
+  Pencil,
 } from 'lucide-react';
 import { publicApi } from '../../api/public';
 import type {
@@ -19,11 +22,16 @@ import type {
   CreateOrUpdateServiceRequest,
   CreateOrUpdateFaqRequest,
   FaqCategory,
+  AdminPublicStatistic,
+  CreatePublicStatisticRequest,
+  UpdatePublicStatisticRequest,
+  PublicStatisticValueSource,
+  PublicSystemMetric,
 } from '../../types/publicSite';
 
 export function AdminPublicSitePage() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'settings' | 'pages' | 'services' | 'faqs'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'pages' | 'services' | 'faqs' | 'statistics'>('settings');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // 1. Site Settings Query
@@ -170,6 +178,123 @@ export function AdminPublicSitePage() {
     queryFn: () => publicApi.getAdminPages(),
   });
 
+  // 5. Statistics Query & Mutations
+  const { data: statistics, isLoading: statsLoading } = useQuery({
+    queryKey: ['adminStatistics'],
+    queryFn: () => publicApi.getAdminStatistics(),
+  });
+
+  const [statModalOpen, setStatModalOpen] = useState(false);
+  const [editingStatId, setEditingStatId] = useState<string | null>(null);
+  const [metricPreviewResult, setMetricPreviewResult] = useState<string | null>(null);
+  const [previewingMetric, setPreviewingMetric] = useState(false);
+
+  const initialStatForm = {
+    code: '',
+    label: '',
+    description: '',
+    valueSource: 'SYSTEM_DERIVED' as PublicStatisticValueSource,
+    manualValue: '',
+    systemMetric: 'TOTAL_RESEARCH_PROJECTS' as PublicSystemMetric,
+    prefix: '',
+    suffix: '+',
+    iconKey: 'folder-kanban',
+    enabled: true,
+    featured: false,
+    displayOrder: 0,
+  };
+
+  const [statForm, setStatForm] = useState(initialStatForm);
+
+  const createStatMutation = useMutation({
+    mutationFn: (payload: CreatePublicStatisticRequest) => publicApi.createAdminStatistic(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminStatistics'] });
+      queryClient.invalidateQueries({ queryKey: ['publicStatistics'] });
+      setStatModalOpen(false);
+      setEditingStatId(null);
+      setMetricPreviewResult(null);
+      setStatusMessage({ type: 'success', text: 'Statistic created successfully.' });
+      setTimeout(() => setStatusMessage(null), 4000);
+    },
+    onError: (err: Error) => {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to create statistic.' });
+    },
+  });
+
+  const updateStatMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: UpdatePublicStatisticRequest }) =>
+      publicApi.updateAdminStatistic(id, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminStatistics'] });
+      queryClient.invalidateQueries({ queryKey: ['publicStatistics'] });
+      setStatModalOpen(false);
+      setEditingStatId(null);
+      setMetricPreviewResult(null);
+      setStatusMessage({ type: 'success', text: 'Statistic updated successfully.' });
+      setTimeout(() => setStatusMessage(null), 4000);
+    },
+    onError: (err: Error) => {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to update statistic.' });
+    },
+  });
+
+  const deleteStatMutation = useMutation({
+    mutationFn: (id: string) => publicApi.deleteAdminStatistic(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminStatistics'] });
+      queryClient.invalidateQueries({ queryKey: ['publicStatistics'] });
+      setStatusMessage({ type: 'success', text: 'Statistic deleted successfully.' });
+      setTimeout(() => setStatusMessage(null), 4000);
+    },
+    onError: (err: Error) => {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to delete statistic.' });
+    },
+  });
+
+  const handlePreviewMetric = async (metric: PublicSystemMetric) => {
+    try {
+      setPreviewingMetric(true);
+      setMetricPreviewResult(null);
+      const res = await publicApi.previewMetric(metric);
+      setMetricPreviewResult(`Live DB count: ${res.rawValue} (formatted: "${res.formattedValue}")`);
+    } catch {
+      setMetricPreviewResult('Failed to preview live metric.');
+    } finally {
+      setPreviewingMetric(false);
+    }
+  };
+
+  const openCreateStatModal = () => {
+    setEditingStatId(null);
+    setStatForm({
+      ...initialStatForm,
+      displayOrder: statistics?.length ?? 0,
+    });
+    setMetricPreviewResult(null);
+    setStatModalOpen(true);
+  };
+
+  const openEditStatModal = (item: AdminPublicStatistic) => {
+    setEditingStatId(item.id);
+    setStatForm({
+      code: item.code,
+      label: item.label,
+      description: item.description || '',
+      valueSource: item.valueSource,
+      manualValue: item.manualValue || '',
+      systemMetric: item.systemMetric || 'TOTAL_RESEARCH_PROJECTS',
+      prefix: item.prefix || '',
+      suffix: item.suffix || '',
+      iconKey: item.iconKey || '',
+      enabled: item.enabled,
+      featured: item.featured,
+      displayOrder: item.displayOrder,
+    });
+    setMetricPreviewResult(null);
+    setStatModalOpen(true);
+  };
+
   return (
     <div className="admin-public-site-page p-6" id="admin-public-site-root">
       <div className="admin-header flex justify-between items-center mb-6">
@@ -234,6 +359,14 @@ export function AdminPublicSitePage() {
         >
           <HelpCircle size={16} className="inline mr-2" />
           FAQs
+        </button>
+        <button
+          type="button"
+          className={`tab-btn px-4 py-2 font-medium ${activeTab === 'statistics' ? 'border-b-2 border-primary text-primary' : 'text-muted'}`}
+          onClick={() => setActiveTab('statistics')}
+        >
+          <BarChart3 size={16} className="inline mr-2" />
+          Statistics
         </button>
       </div>
 
@@ -682,6 +815,371 @@ export function AdminPublicSitePage() {
                     </button>
                     <button type="submit" className="btn btn-primary" disabled={createFaqMutation.isPending}>
                       Create FAQ
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 5: PUBLIC STATISTICS */}
+      {activeTab === 'statistics' && (
+        <div className="tab-statistics-content">
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h2 className="text-xl font-bold">Public Statistics & Counters</h2>
+              <p className="text-muted text-sm">
+                Display empirical platform counters and metrics on the public homepage and about page.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary flex items-center gap-2"
+              onClick={openCreateStatModal}
+            >
+              <Plus size={16} />
+              <span>Add Statistic</span>
+            </button>
+          </div>
+
+          {statsLoading ? (
+            <p>Loading statistics...</p>
+          ) : !statistics || statistics.length === 0 ? (
+            <div className="card p-8 bg-card border rounded-lg text-center">
+              <p className="text-muted mb-4">No statistics configured yet.</p>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={openCreateStatModal}
+              >
+                Add Your First Statistic
+              </button>
+            </div>
+          ) : (
+            <div className="card bg-card border rounded-lg overflow-hidden">
+              <table className="w-full text-left border-collapse" style={{ width: '100%', textAlign: 'left' }}>
+                <thead>
+                  <tr className="border-b bg-muted/20" style={{ borderBottom: '1px solid var(--line)', background: 'var(--surface-2)' }}>
+                    <th className="p-3" style={{ padding: '10px 12px' }}>Order</th>
+                    <th className="p-3" style={{ padding: '10px 12px' }}>Code</th>
+                    <th className="p-3" style={{ padding: '10px 12px' }}>Label</th>
+                    <th className="p-3" style={{ padding: '10px 12px' }}>Source</th>
+                    <th className="p-3" style={{ padding: '10px 12px' }}>Resolved Display</th>
+                    <th className="p-3" style={{ padding: '10px 12px' }}>Featured</th>
+                    <th className="p-3" style={{ padding: '10px 12px' }}>Status</th>
+                    <th className="p-3 text-right" style={{ padding: '10px 12px', textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {statistics.map((stat) => (
+                    <tr key={stat.id} className="border-b hover:bg-muted/10" style={{ borderBottom: '1px solid var(--line)' }}>
+                      <td className="p-3 font-mono text-xs" style={{ padding: '10px 12px' }}>{stat.displayOrder}</td>
+                      <td className="p-3" style={{ padding: '10px 12px' }}>
+                        <span className="badge font-mono text-xs" style={{ background: 'var(--surface-2)', padding: '2px 6px', borderRadius: '4px' }}>
+                          {stat.code}
+                        </span>
+                      </td>
+                      <td className="p-3 font-medium" style={{ padding: '10px 12px' }}>{stat.label}</td>
+                      <td className="p-3" style={{ padding: '10px 12px' }}>
+                        <span className={`badge ${stat.valueSource === 'SYSTEM_DERIVED' ? 'badge-info' : 'badge-secondary'}`} style={{ fontSize: '0.75rem' }}>
+                          {stat.valueSource === 'SYSTEM_DERIVED' ? `System (${stat.systemMetric})` : 'Manual'}
+                        </span>
+                      </td>
+                      <td className="p-3 font-bold text-primary" style={{ padding: '10px 12px' }}>
+                        {stat.prefix || ''}{stat.resolvedValue}{stat.suffix || ''}
+                      </td>
+                      <td className="p-3" style={{ padding: '10px 12px' }}>
+                        {stat.featured ? (
+                          <span className="badge badge-primary text-xs" style={{ background: 'var(--brand)', color: '#fff', padding: '2px 6px', borderRadius: '4px' }}>
+                            Featured
+                          </span>
+                        ) : (
+                          <span className="text-muted text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="p-3" style={{ padding: '10px 12px' }}>
+                        <span className={`badge ${stat.enabled ? 'badge-success' : 'badge-danger'}`} style={{ fontSize: '0.75rem' }}>
+                          {stat.enabled ? 'Active' : 'Disabled'}
+                        </span>
+                      </td>
+                      <td className="p-3 text-right" style={{ padding: '10px 12px', textAlign: 'right' }}>
+                        <div className="flex justify-end gap-2" style={{ display: 'inline-flex', gap: '8px' }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => openEditStatModal(stat)}
+                            title="Edit statistic"
+                            style={{ padding: '4px 8px' }}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={() => {
+                              if (window.confirm(`Delete statistic "${stat.label}"?`)) {
+                                deleteStatMutation.mutate(stat.id);
+                              }
+                            }}
+                            title="Delete statistic"
+                            style={{ padding: '4px 8px' }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Modal for Create / Edit Statistic */}
+          {statModalOpen && (
+            <div className="modal-backdrop fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }}>
+              <div className="modal-content bg-card border rounded-lg max-w-xl w-full p-6 shadow-xl max-h-[90vh] overflow-y-auto" style={{ background: 'var(--surface, #ffffff)', border: '1px solid var(--line)', borderRadius: '12px', maxWidth: '560px', width: '100%', padding: '24px', maxHeight: '90vh', overflowY: 'auto' }}>
+                <h3 className="text-xl font-bold mb-4" style={{ marginTop: 0 }}>
+                  {editingStatId ? 'Edit Public Statistic' : 'Create Public Statistic'}
+                </h3>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (editingStatId) {
+                      updateStatMutation.mutate({
+                        id: editingStatId,
+                        payload: {
+                          label: statForm.label,
+                          description: statForm.description,
+                          valueSource: statForm.valueSource,
+                          manualValue: statForm.valueSource === 'MANUAL' ? statForm.manualValue : undefined,
+                          systemMetric: statForm.valueSource === 'SYSTEM_DERIVED' ? statForm.systemMetric : undefined,
+                          prefix: statForm.prefix,
+                          suffix: statForm.suffix,
+                          iconKey: statForm.iconKey,
+                          enabled: statForm.enabled,
+                          featured: statForm.featured,
+                          displayOrder: Number(statForm.displayOrder),
+                        },
+                      });
+                    } else {
+                      createStatMutation.mutate({
+                        code: statForm.code,
+                        label: statForm.label,
+                        description: statForm.description,
+                        valueSource: statForm.valueSource,
+                        manualValue: statForm.valueSource === 'MANUAL' ? statForm.manualValue : undefined,
+                        systemMetric: statForm.valueSource === 'SYSTEM_DERIVED' ? statForm.systemMetric : undefined,
+                        prefix: statForm.prefix,
+                        suffix: statForm.suffix,
+                        iconKey: statForm.iconKey,
+                        enabled: statForm.enabled,
+                        featured: statForm.featured,
+                        displayOrder: Number(statForm.displayOrder),
+                      });
+                    }
+                  }}
+                >
+                  {!editingStatId && (
+                    <div className="form-group mb-3">
+                      <label className="form-label font-medium" style={{ display: 'block', marginBottom: '4px' }}>Code</label>
+                      <input
+                        type="text"
+                        className="input w-full"
+                        style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                        value={statForm.code}
+                        onChange={(e) => setStatForm({ ...statForm, code: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
+                        placeholder="e.g. total-projects"
+                        pattern="^[a-z0-9-]+$"
+                        title="Lowercase alphanumeric with hyphens"
+                        required
+                      />
+                      <span className="text-muted text-xs" style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>Unique key (lowercase alphanumeric with hyphens)</span>
+                    </div>
+                  )}
+
+                  <div className="form-group mb-3">
+                    <label className="form-label font-medium" style={{ display: 'block', marginBottom: '4px' }}>Label</label>
+                    <input
+                      type="text"
+                      className="input w-full"
+                      style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                      value={statForm.label}
+                      onChange={(e) => setStatForm({ ...statForm, label: e.target.value })}
+                      placeholder="e.g. Active Research Projects"
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group mb-3">
+                    <label className="form-label font-medium" style={{ display: 'block', marginBottom: '4px' }}>Description</label>
+                    <input
+                      type="text"
+                      className="input w-full"
+                      style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                      value={statForm.description}
+                      onChange={(e) => setStatForm({ ...statForm, description: e.target.value })}
+                      placeholder="Optional internal description"
+                    />
+                  </div>
+
+                  <div className="form-group mb-3">
+                    <label className="form-label font-medium" style={{ display: 'block', marginBottom: '4px' }}>Value Source</label>
+                    <select
+                      className="input w-full"
+                      style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                      value={statForm.valueSource}
+                      onChange={(e) => {
+                        const newSource = e.target.value as PublicStatisticValueSource;
+                        setStatForm({ ...statForm, valueSource: newSource });
+                        setMetricPreviewResult(null);
+                      }}
+                    >
+                      <option value="SYSTEM_DERIVED">System Derived (Real database counts)</option>
+                      <option value="MANUAL">Manual Value</option>
+                    </select>
+                  </div>
+
+                  {statForm.valueSource === 'SYSTEM_DERIVED' ? (
+                    <div className="form-group mb-3 p-3 bg-muted/10 rounded" style={{ background: 'var(--surface-2)', padding: '12px', borderRadius: '8px' }}>
+                      <label className="form-label font-medium" style={{ display: 'block', marginBottom: '4px' }}>System Metric</label>
+                      <select
+                        className="input w-full mb-2"
+                        style={{ width: '100%', padding: '8px', boxSizing: 'border-box', marginBottom: '8px' }}
+                        value={statForm.systemMetric}
+                        onChange={(e) => {
+                          const metric = e.target.value as PublicSystemMetric;
+                          setStatForm({ ...statForm, systemMetric: metric });
+                          setMetricPreviewResult(null);
+                        }}
+                      >
+                        <option value="TOTAL_RESEARCH_PROJECTS">TOTAL_RESEARCH_PROJECTS (Active & Draft projects)</option>
+                        <option value="TOTAL_ACTIVE_USERS">TOTAL_ACTIVE_USERS (Active user accounts)</option>
+                        <option value="TOTAL_DOCUMENTS_PROCESSED">TOTAL_DOCUMENTS_PROCESSED (Uploaded documents)</option>
+                        <option value="TOTAL_WORKSPACES">TOTAL_WORKSPACES (Active workspaces)</option>
+                        <option value="TOTAL_COMPLETED_REPORT_EXPORTS">TOTAL_COMPLETED_REPORT_EXPORTS (Completed report exports)</option>
+                      </select>
+
+                      <div className="flex items-center gap-2" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm flex items-center gap-1"
+                          onClick={() => handlePreviewMetric(statForm.systemMetric)}
+                          disabled={previewingMetric}
+                          style={{ padding: '6px 12px', fontSize: '0.85rem' }}
+                        >
+                          <Calculator size={14} />
+                          <span>{previewingMetric ? 'Calculating...' : 'Preview Live DB Count'}</span>
+                        </button>
+                        {metricPreviewResult && (
+                          <span className="text-xs font-semibold text-primary" style={{ fontSize: '0.8rem', color: 'var(--brand)' }}>
+                            {metricPreviewResult}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="form-group mb-3">
+                      <label className="form-label font-medium" style={{ display: 'block', marginBottom: '4px' }}>Manual Value</label>
+                      <input
+                        type="text"
+                        className="input w-full"
+                        style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                        value={statForm.manualValue}
+                        onChange={(e) => setStatForm({ ...statForm, manualValue: e.target.value })}
+                        placeholder="e.g. 99.9% or 5,000"
+                        required
+                      />
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3 mb-3" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="form-group">
+                      <label className="form-label font-medium" style={{ display: 'block', marginBottom: '4px' }}>Prefix</label>
+                      <input
+                        type="text"
+                        className="input w-full"
+                        style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                        value={statForm.prefix}
+                        onChange={(e) => setStatForm({ ...statForm, prefix: e.target.value })}
+                        placeholder="e.g. > or $"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label font-medium" style={{ display: 'block', marginBottom: '4px' }}>Suffix</label>
+                      <input
+                        type="text"
+                        className="input w-full"
+                        style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                        value={statForm.suffix}
+                        onChange={(e) => setStatForm({ ...statForm, suffix: e.target.value })}
+                        placeholder="e.g. + or %"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 mb-3" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="form-group">
+                      <label className="form-label font-medium" style={{ display: 'block', marginBottom: '4px' }}>Icon Key</label>
+                      <input
+                        type="text"
+                        className="input w-full"
+                        style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                        value={statForm.iconKey}
+                        onChange={(e) => setStatForm({ ...statForm, iconKey: e.target.value })}
+                        placeholder="e.g. folder-kanban, users, file-text"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label font-medium" style={{ display: 'block', marginBottom: '4px' }}>Display Order</label>
+                      <input
+                        type="number"
+                        className="input w-full"
+                        style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                        value={statForm.displayOrder}
+                        onChange={(e) => setStatForm({ ...statForm, displayOrder: parseInt(e.target.value, 10) || 0 })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4 mb-4" style={{ display: 'flex', gap: '16px', margin: '12px 0' }}>
+                    <label className="flex items-center gap-2 cursor-pointer" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <input
+                        type="checkbox"
+                        checked={statForm.enabled}
+                        onChange={(e) => setStatForm({ ...statForm, enabled: e.target.checked })}
+                      />
+                      <span>Enabled</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <input
+                        type="checkbox"
+                        checked={statForm.featured}
+                        onChange={(e) => setStatForm({ ...statForm, featured: e.target.checked })}
+                      />
+                      <span>Featured (Highlighted)</span>
+                    </label>
+                  </div>
+
+                  <div className="flex justify-end gap-2 mt-4" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setStatModalOpen(false)}
+                      style={{ padding: '8px 16px' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      disabled={createStatMutation.isPending || updateStatMutation.isPending}
+                      style={{ padding: '8px 16px' }}
+                    >
+                      {editingStatId ? 'Save Changes' : 'Create Statistic'}
                     </button>
                   </div>
                 </form>

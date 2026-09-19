@@ -1,0 +1,120 @@
+# Test application configuration
+# Supplies required properties for @SpringBootTest integration tests.
+# These tests start the full application context and require a real PostgreSQL database.
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/research_assist
+    username: skilite
+    password: "@Jay0697"
+
+  flyway:
+    enabled: true
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: ""
+
+  ai:
+    openai:
+      api-key: "test-placeholder-not-real"
+    model:
+      chat: none
+      embedding: none
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
+    vectorstore:
+      type: none
+
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration
+      - org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreAutoConfiguration
+
+  cache:
+    type: simple
+
+app:
+  security:
+    jwt:
+      secret: ${app.security.jwt.secret:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      issuer: research-assistant-api
+      access-token-minutes: 15
+      refresh-token-days: 30
+    credentials:
+      encryption-key: ${app.security.credentials.encryption-key:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+    totp:
+      issuer: "AI Research Assistant"
+
+  seed:
+    super-admin:
+      enabled: false
+      email: ""
+      phone: ""
+      password: ""
+
+  api:
+    allowed-origins: http://localhost:3000
+    max-page-size: 100
+
+  rate-limit:
+    enabled: false
+
+  cache:
+    provider: simple
+
+  collaboration:
+    invitation-ttl: P7D
+
+  backup:
+    enabled: false
+
+  payment:
+    paystack:
+      enabled: false
+      mode: test
+      secret-key: ""
+      public-key: ""
+      callback-base-url: http://localhost:8096
+
+  notifications:
+    email:
+      enabled: false
+    arkesel:
+      enabled: false
+    firebase:
+      enabled: false
+
+  document:
+    max-upload-size-bytes: 52428800
+    storage:
+      type: local
+      local-directory: ./data/test-documents
+    chunking:
+      target-characters: 3000
+      overlap-characters: 300
+      minimum-characters: 200
+    processing:
+      auto-process-after-upload: false
+
+  integrity:
+    similarity:
+      provider: none
+
+  ai:
+    generation:
+      enabled: false
+      provider: none
+    embedding:
+      enabled: false
+      provider: none

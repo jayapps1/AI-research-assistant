@@ -27,4 +27,6 @@ public interface ReportExportJobRepository extends JpaRepository<ReportExportJob
     long countByWorkspaceIdBetween(@Param("workspaceId") UUID workspaceId,
                                    @Param("start") OffsetDateTime start,
                                    @Param("end") OffsetDateTime end);
+
+    long countByStatus(com.researchassistant.analysis.entity.ReportExportStatus status);
 }

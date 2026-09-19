@@ -183,9 +183,11 @@ describe('Public Pages Suite', () => {
 
   it('AboutPage renders academic integrity mission and COPE alignment', () => {
     render(
-      <MemoryRouter>
-        <AboutPage />
-      </MemoryRouter>,
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <AboutPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     expect(screen.getByRole('heading', { name: /Empowering Scholars with Auditable AI/i })).toBeInTheDocument();
