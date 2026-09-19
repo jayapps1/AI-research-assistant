@@ -57,20 +57,29 @@ public class PaystackClient {
     public PaystackInitializeResponse initialize(PaymentAttempt attempt, SubscriptionPlan plan) {
         requireConfigured();
         BillingPaymentIntent intent = attempt.getPaymentIntent();
+        java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+        metadata.put("internalPaymentIntentId", intent.getId().toString());
+        metadata.put("internalPaymentAttemptId", attempt.getId().toString());
+        metadata.put("workspaceId", intent.getWorkspace().getId().toString());
+        metadata.put("purchaseType", intent.getPurchaseType() != null ? intent.getPurchaseType().name() : "SUBSCRIPTION");
+        metadata.put("attemptNumber", attempt.getAttemptNumber());
+        if (plan != null) {
+            metadata.put("planCode", plan.getCode());
+        }
+        if (intent.getBillingInterval() != null) {
+            metadata.put("billingInterval", intent.getBillingInterval().name());
+        }
+        if (intent.getAiCreditPurchase() != null) {
+            metadata.put("packCode", intent.getAiCreditPurchase().getPackCode());
+        }
+
         Map<String, Object> body = Map.of(
                 "email", intent.getInitiatedBy().getEmail(),
                 "amount", toSmallestUnit(attempt.getExpectedAmount()),
                 "currency", attempt.getCurrency(),
                 "reference", attempt.getInternalReference(),
                 "callback_url", callbackUrl(attempt.getInternalReference()),
-                "metadata", Map.of(
-                        "internalPaymentIntentId", intent.getId().toString(),
-                        "internalPaymentAttemptId", attempt.getId().toString(),
-                        "workspaceId", intent.getWorkspace().getId().toString(),
-                        "planCode", plan.getCode(),
-                        "billingInterval", intent.getBillingInterval().name(),
-                        "attemptNumber", attempt.getAttemptNumber()
-                )
+                "metadata", metadata
         );
         return restClient.post()
                 .uri("/transaction/initialize")

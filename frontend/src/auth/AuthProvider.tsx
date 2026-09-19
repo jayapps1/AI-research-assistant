@@ -18,7 +18,7 @@ interface AuthContextValue {
   status: AuthStatus;
   isAuthenticated: boolean;
   login: (input: LoginInput) => Promise<void>;
-  completeTotpChallenge: (input: { challengeId: string; totpCode: string }) => Promise<void>;
+  completeTotpChallenge: (input: { challengeId: string; totpCode?: string; recoveryCode?: string }) => Promise<void>;
   register: (input: { email: string; password: string; firstName?: string; lastName?: string; locale?: string }) => Promise<void>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
@@ -67,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const completeTotpChallenge = useCallback(
-    async (input: { challengeId: string; totpCode: string }) => {
+    async (input: { challengeId: string; totpCode?: string; recoveryCode?: string }) => {
       const response = await authApi.completeTotpLoginChallenge(input);
       setTokens({ accessToken: response.accessToken, refreshToken: response.refreshToken });
       persistUser(response.user ?? null);

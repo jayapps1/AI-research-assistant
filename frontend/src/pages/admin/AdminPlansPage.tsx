@@ -16,13 +16,23 @@ import {
 import { adminApi } from '../../api/endpoints';
 import { Badge, Button, Card, Field, Input, Select, Textarea, LoadingButton } from '../../components/ui';
 import { ErrorState } from '../../components/states';
-import type { AdminPlanEntitlement, AdminSubscriptionPlan, CreateSubscriptionPlanRequest, LimitMode, UpdateSubscriptionPlanRequest } from '../../types/api';
+import type {
+  AdminPlanEntitlement,
+  AdminSubscriptionPlan,
+  AiCreditPack,
+  CreateAiCreditPackRequest,
+  CreateSubscriptionPlanRequest,
+  LimitMode,
+  UpdateAiCreditPackRequest,
+  UpdateSubscriptionPlanRequest,
+} from '../../types/api';
 
 const KNOWN_FEATURES = [
   { key: 'PROJECTS', label: 'Maximum Projects', defaultUnit: 'COUNT', icon: FolderKanban, isStorage: false },
   { key: 'MEMBERS_PER_WORKSPACE', label: 'Team Members per Workspace', defaultUnit: 'COUNT', icon: Users, isStorage: false },
   { key: 'STORAGE', label: 'Storage Quota', defaultUnit: 'BYTES', icon: HardDrive, isStorage: true },
   { key: 'AI_TOKENS_PER_MONTH', label: 'AI Tokens per Month', defaultUnit: 'COUNT', icon: Sparkles, isStorage: false },
+  { key: 'AI_GENERATION_CREDITS_MONTHLY', label: 'AI Credits per Month (Allowance)', defaultUnit: 'CREDITS', icon: Sparkles, isStorage: false },
   { key: 'EXPORTS_PER_MONTH', label: 'Document Exports per Month', defaultUnit: 'COUNT', icon: FileDown, isStorage: false },
   { key: 'ADVANCED_AI_MODELS', label: 'Advanced AI Models Access', defaultUnit: 'BOOLEAN', icon: Sparkles, isStorage: false },
   { key: 'PRIORITY_SUPPORT', label: 'Priority Support', defaultUnit: 'BOOLEAN', icon: Shield, isStorage: false },
@@ -61,13 +71,49 @@ export function AdminPlansPage() {
   // Entitlements state
   const [entitlements, setEntitlements] = useState<AdminPlanEntitlement[]>([]);
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState<'plans' | 'credit-packs' | 'grant-credits'>('plans');
+
+  // Credit pack modals & form states
+  const [showCreatePackModal, setShowCreatePackModal] = useState(false);
+  const [editingPack, setEditingPack] = useState<AiCreditPack | null>(null);
+
+  const [packCode, setPackCode] = useState('');
+  const [packName, setPackName] = useState('');
+  const [packDescription, setPackDescription] = useState('');
+  const [packCredits, setPackCredits] = useState('100');
+  const [packPrice, setPackPrice] = useState('50.00');
+  const [packCurrency, setPackCurrency] = useState('GHS');
+  const [packActive, setPackActive] = useState(true);
+  const [packDisplayOrder, setPackDisplayOrder] = useState('0');
+
+  const [editPackName, setEditPackName] = useState('');
+  const [editPackDescription, setEditPackDescription] = useState('');
+  const [editPackCredits, setEditPackCredits] = useState('');
+  const [editPackPrice, setEditPackPrice] = useState('');
+  const [editPackCurrency, setEditPackCurrency] = useState('GHS');
+  const [editPackActive, setEditPackActive] = useState(true);
+  const [editPackDisplayOrder, setEditPackDisplayOrder] = useState('0');
+
+  // Admin Grant Form state
+  const [grantWorkspaceId, setGrantWorkspaceId] = useState('');
+  const [grantAmount, setGrantAmount] = useState('50');
+  const [grantBucket, setGrantBucket] = useState<'PURCHASED' | 'PROMOTIONAL'>('PROMOTIONAL');
+  const [grantReason, setGrantReason] = useState('');
+
   // Fetch plans
   const { data: plans, isLoading, error, refetch } = useQuery<AdminSubscriptionPlan[]>({
     queryKey: ['admin', 'subscription-plans'],
     queryFn: () => adminApi.plans(),
   });
 
-  // Create mutation
+  // Fetch AI credit packs
+  const { data: creditPacks, isLoading: isPacksLoading, error: packsError, refetch: refetchPacks } = useQuery<AiCreditPack[]>({
+    queryKey: ['admin', 'ai-credit-packs'],
+    queryFn: () => adminApi.aiCreditPacks(),
+  });
+
+  // Create plan mutation
   const createMutation = useMutation({
     mutationFn: (body: CreateSubscriptionPlanRequest) => adminApi.createPlan(body),
     onSuccess: (created) => {
@@ -78,6 +124,49 @@ export function AdminPlansPage() {
     },
     onError: (err: unknown) => {
       setStatusMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create plan.' });
+    },
+  });
+
+  // Create AI credit pack mutation
+  const createPackMutation = useMutation({
+    mutationFn: (body: CreateAiCreditPackRequest) => adminApi.createAiCreditPack(body),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'ai-credit-packs'] });
+      setShowCreatePackModal(false);
+      resetPackCreateForm();
+      setStatusMessage({ type: 'success', text: `AI Credit Pack "${created.name}" (${created.code}) created successfully.` });
+    },
+    onError: (err: any) => {
+      setStatusMessage({ type: 'error', text: err?.response?.data?.message || err?.message || 'Failed to create credit pack.' });
+    },
+  });
+
+  // Update AI credit pack mutation
+  const updatePackMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateAiCreditPackRequest }) => adminApi.updateAiCreditPack(id, body),
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'ai-credit-packs'] });
+      setEditingPack(null);
+      setStatusMessage({ type: 'success', text: `AI Credit Pack "${updated.name}" updated successfully.` });
+    },
+    onError: (err: any) => {
+      setStatusMessage({ type: 'error', text: err?.response?.data?.message || err?.message || 'Failed to update credit pack.' });
+    },
+  });
+
+  // Admin grant credits mutation
+  const grantCreditsMutation = useMutation({
+    mutationFn: ({ workspaceId, body }: { workspaceId: string; body: { creditAmount: number; bucket: 'PURCHASED' | 'PROMOTIONAL'; reason: string } }) =>
+      adminApi.grantAiCredits(workspaceId, body),
+    onSuccess: (data) => {
+      setGrantReason('');
+      setStatusMessage({
+        type: 'success',
+        text: `Successfully granted credits to workspace! Total available: ${Number(data.totalAvailable).toFixed(2)} credits.`,
+      });
+    },
+    onError: (err: any) => {
+      setStatusMessage({ type: 'error', text: err?.response?.data?.message || err?.message || 'Failed to grant credits.' });
     },
   });
 
@@ -160,6 +249,83 @@ export function AdminPlansPage() {
     setNewDisplayOrder('2');
   };
 
+  const resetPackCreateForm = () => {
+    setPackCode('');
+    setPackName('');
+    setPackDescription('');
+    setPackCredits('100');
+    setPackPrice('50.00');
+    setPackCurrency('GHS');
+    setPackActive(true);
+    setPackDisplayOrder('0');
+  };
+
+  const handleOpenPackEdit = (pack: AiCreditPack) => {
+    setEditingPack(pack);
+    setEditPackName(pack.name);
+    setEditPackDescription(pack.description || '');
+    setEditPackCredits((pack.creditAmount || pack.credits || 0).toString());
+    setEditPackPrice((pack.priceAmount || pack.price || 0).toString());
+    setEditPackCurrency(pack.currency || 'GHS');
+    setEditPackActive(pack.active);
+    setEditPackDisplayOrder((pack.displayOrder || 0).toString());
+  };
+
+  const handleCreatePackSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!packCode.trim() || !packName.trim()) {
+      setStatusMessage({ type: 'error', text: 'Pack Code and Name are required.' });
+      return;
+    }
+    const creditsNum = parseFloat(packCredits);
+    if (isNaN(creditsNum) || creditsNum <= 0) {
+      setStatusMessage({ type: 'error', text: 'Please enter a valid credit amount greater than 0.' });
+      return;
+    }
+    const priceNum = parseFloat(packPrice);
+    if (isNaN(priceNum) || priceNum < 0) {
+      setStatusMessage({ type: 'error', text: 'Please enter a valid price.' });
+      return;
+    }
+    createPackMutation.mutate({
+      code: packCode.trim().toUpperCase(),
+      name: packName.trim(),
+      description: packDescription.trim() || undefined,
+      creditAmount: creditsNum,
+      priceAmount: priceNum,
+      currency: packCurrency.trim().toUpperCase(),
+      active: packActive,
+      displayOrder: parseInt(packDisplayOrder, 10) || 0,
+    });
+  };
+
+  const handleEditPackSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPack) return;
+    const creditsNum = parseFloat(editPackCredits);
+    if (isNaN(creditsNum) || creditsNum <= 0) {
+      setStatusMessage({ type: 'error', text: 'Please enter a valid credit amount greater than 0.' });
+      return;
+    }
+    const priceNum = parseFloat(editPackPrice);
+    if (isNaN(priceNum) || priceNum < 0) {
+      setStatusMessage({ type: 'error', text: 'Please enter a valid price.' });
+      return;
+    }
+    updatePackMutation.mutate({
+      id: editingPack.id,
+      body: {
+        name: editPackName.trim(),
+        description: editPackDescription.trim() || undefined,
+        creditAmount: creditsNum,
+        priceAmount: priceNum,
+        currency: editPackCurrency.trim().toUpperCase(),
+        active: editPackActive,
+        displayOrder: parseInt(editPackDisplayOrder, 10) || 0,
+      },
+    });
+  };
+
   const handleOpenEdit = (plan: AdminSubscriptionPlan) => {
     setEditingPlan(plan);
     setEditName(plan.name);
@@ -235,27 +401,29 @@ export function AdminPlansPage() {
 
   return (
     <div className="space-y-6" style={{ padding: '1.5rem' }}>
-      {/* Top Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <CreditCard className="w-6 h-6 text-primary" style={{ width: '24px', height: '24px' }} />
-            <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Subscription Plans</h1>
-          </div>
-          <p className="text-sm muted" style={{ margin: '0.25rem 0 0' }}>
-            Manage pricing tiers, billing cycles, public visibility, and feature entitlements.
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <Button variant="secondary" onClick={() => refetch()}>
-            <RefreshCw className="w-4 h-4 mr-1" style={{ width: '16px', height: '16px', verticalAlign: 'middle' }} />
-            Refresh
-          </Button>
-          <Button variant="primary" onClick={() => { resetCreateForm(); setShowCreateModal(true); }}>
-            <Plus className="w-4 h-4 mr-1" style={{ width: '16px', height: '16px', verticalAlign: 'middle' }} />
-            Create Plan
-          </Button>
-        </div>
+      {/* Navigation Tabs */}
+      <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border, #333)', paddingBottom: '12px', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className={`button ${activeTab === 'plans' ? 'primary' : 'secondary'}`}
+          onClick={() => setActiveTab('plans')}
+        >
+          Subscription Plans ({plans?.length ?? 0})
+        </button>
+        <button
+          type="button"
+          className={`button ${activeTab === 'credit-packs' ? 'primary' : 'secondary'}`}
+          onClick={() => setActiveTab('credit-packs')}
+        >
+          AI Credit Packs ({creditPacks?.length ?? 0})
+        </button>
+        <button
+          type="button"
+          className={`button ${activeTab === 'grant-credits' ? 'primary' : 'secondary'}`}
+          onClick={() => setActiveTab('grant-credits')}
+        >
+          Grant Workspace Credits
+        </button>
       </div>
 
       {/* Status feedback */}
@@ -281,6 +449,32 @@ export function AdminPlansPage() {
           </button>
         </div>
       )}
+
+      {/* SUBSCRIPTION PLANS TAB */}
+      {activeTab === 'plans' && (
+        <>
+          {/* Top Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <CreditCard className="w-6 h-6 text-primary" style={{ width: '24px', height: '24px' }} />
+                <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Subscription Plans</h1>
+              </div>
+              <p className="text-sm muted" style={{ margin: '0.25rem 0 0' }}>
+                Manage pricing tiers, billing cycles, public visibility, and feature entitlements.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <Button variant="secondary" onClick={() => refetch()}>
+                <RefreshCw className="w-4 h-4 mr-1" style={{ width: '16px', height: '16px', verticalAlign: 'middle' }} />
+                Refresh
+              </Button>
+              <Button variant="primary" onClick={() => { resetCreateForm(); setShowCreateModal(true); }}>
+                <Plus className="w-4 h-4 mr-1" style={{ width: '16px', height: '16px', verticalAlign: 'middle' }} />
+                Create Plan
+              </Button>
+            </div>
+          </div>
 
       {/* Loading & Error States */}
       {isLoading && <p className="muted">Loading plans...</p>}
@@ -413,6 +607,424 @@ export function AdminPlansPage() {
             </table>
           </div>
         </Card>
+      )}
+        </>
+      )}
+
+      {/* AI CREDIT PACKS TAB */}
+      {activeTab === 'credit-packs' && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Sparkles className="w-6 h-6 text-primary" style={{ width: '24px', height: '24px' }} />
+                <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>AI Credit Top-Up Packs</h1>
+              </div>
+              <p className="text-sm muted" style={{ margin: '0.25rem 0 0' }}>
+                Configure on-demand credit packs purchased through Paystack. Separate product — no recurring commitment, no 30% surcharge.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <Button variant="secondary" onClick={() => refetchPacks()}>
+                <RefreshCw className="w-4 h-4 mr-1" style={{ width: '16px', height: '16px', verticalAlign: 'middle' }} />
+                Refresh
+              </Button>
+              <Button variant="primary" onClick={() => { resetPackCreateForm(); setShowCreatePackModal(true); }}>
+                <Plus className="w-4 h-4 mr-1" style={{ width: '16px', height: '16px', verticalAlign: 'middle' }} />
+                Create Credit Pack
+              </Button>
+            </div>
+          </div>
+
+          {isPacksLoading && <p className="muted">Loading AI credit packs...</p>}
+          {packsError && <ErrorState error={packsError} onRetry={() => refetchPacks()} />}
+
+          {!isPacksLoading && !packsError && creditPacks && (
+            <Card>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border, #333)', opacity: 0.8, fontSize: '0.85rem' }}>
+                      <th style={{ padding: '0.75rem 1rem' }}>Code</th>
+                      <th style={{ padding: '0.75rem 1rem' }}>Name</th>
+                      <th style={{ padding: '0.75rem 1rem' }}>Credits</th>
+                      <th style={{ padding: '0.75rem 1rem' }}>Price</th>
+                      <th style={{ padding: '0.75rem 1rem' }}>Status</th>
+                      <th style={{ padding: '0.75rem 1rem' }}>Order</th>
+                      <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {creditPacks.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ padding: '2rem', textAlign: 'center' }} className="muted">
+                          No credit packs found. Click "Create Credit Pack" to create the first pack (e.g., STARTER_100, PRO_500).
+                        </td>
+                      </tr>
+                    ) : (
+                      creditPacks.map((pack) => (
+                        <tr key={pack.id} style={{ borderBottom: '1px solid var(--border, #222)' }}>
+                          <td style={{ padding: '0.75rem 1rem', fontWeight: 600 }}>
+                            <code style={{ background: 'var(--card-subtle, #1a1a1a)', padding: '2px 6px', borderRadius: '4px' }}>
+                              {pack.code}
+                            </code>
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem' }}>
+                            <div style={{ fontWeight: 600 }}>{pack.name}</div>
+                            {pack.description && (
+                              <div className="text-xs muted" style={{ fontSize: '0.75rem', opacity: 0.7 }}>
+                                {pack.description}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--brand-color, #4f46e5)' }}>
+                            +{Number(pack.creditAmount || pack.credits).toLocaleString()} credits
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem', fontWeight: 600 }}>
+                            {pack.currency} {Number(pack.priceAmount || pack.price).toFixed(2)}
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem' }}>
+                            <Badge tone={pack.active ? 'success' : 'warning'}>
+                              {pack.active ? 'Active' : 'Inactive'}
+                            </Badge>
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem' }}>{pack.displayOrder}</td>
+                          <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>
+                            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleOpenPackEdit(pack)}
+                                style={{ padding: '4px 8px', fontSize: '0.8rem' }}
+                              >
+                                <Edit2 className="w-3 h-3 mr-1" style={{ width: '12px', height: '12px', verticalAlign: 'middle' }} />
+                                Edit
+                              </Button>
+                              <Button
+                                variant={pack.active ? 'danger' : 'secondary'}
+                                onClick={() => updatePackMutation.mutate({ id: pack.id, body: { active: !pack.active } })}
+                                disabled={updatePackMutation.isPending}
+                                style={{ padding: '4px 8px', fontSize: '0.8rem' }}
+                              >
+                                {pack.active ? 'Deactivate' : 'Activate'}
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+
+      {/* GRANT CREDITS TAB */}
+      {activeTab === 'grant-credits' && (
+        <Card style={{ maxWidth: '600px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+            <Sparkles className="w-6 h-6 text-primary" style={{ width: '24px', height: '24px' }} />
+            <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: 0 }}>Grant Credits to Workspace</h2>
+          </div>
+          <p className="muted" style={{ fontSize: '0.875rem', marginBottom: '1.25rem' }}>
+            Directly credit a workspace's AI balance for testing, customer support, or promotional grants. Every grant creates an immutable ledger entry with the specified reason.
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!grantWorkspaceId.trim()) {
+                setStatusMessage({ type: 'error', text: 'Workspace ID is required.' });
+                return;
+              }
+              const amt = parseFloat(grantAmount);
+              if (isNaN(amt) || amt <= 0) {
+                setStatusMessage({ type: 'error', text: 'Please enter a valid credit amount.' });
+                return;
+              }
+              if (!grantReason.trim()) {
+                setStatusMessage({ type: 'error', text: 'Audit reason is mandatory for credit grants.' });
+                return;
+              }
+              grantCreditsMutation.mutate({
+                workspaceId: grantWorkspaceId.trim(),
+                body: {
+                  creditAmount: amt,
+                  bucket: grantBucket,
+                  reason: grantReason.trim(),
+                },
+              });
+            }}
+            style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
+          >
+            <Field label="Target Workspace ID *">
+              <Input
+                placeholder="e.g. 123e4567-e89b-12d3-a456-426614174000"
+                value={grantWorkspaceId}
+                onChange={(e) => setGrantWorkspaceId(e.target.value)}
+                required
+              />
+            </Field>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <Field label="Credit Bucket *">
+                <Select
+                  value={grantBucket}
+                  onChange={(e) => setGrantBucket(e.target.value as 'PURCHASED' | 'PROMOTIONAL')}
+                >
+                  <option value="PROMOTIONAL">PROMOTIONAL (Complimentary)</option>
+                  <option value="PURCHASED">PURCHASED (Manual Top-Up)</option>
+                </Select>
+              </Field>
+
+              <Field label="Credit Amount *">
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  placeholder="50.00"
+                  value={grantAmount}
+                  onChange={(e) => setGrantAmount(e.target.value)}
+                  required
+                />
+              </Field>
+            </div>
+
+            <Field label="Audit Reason (Mandatory) *">
+              <Textarea
+                placeholder="Describe why these credits are being granted (e.g. Test allocation, Beta tester credit, Service credit)..."
+                value={grantReason}
+                onChange={(e) => setGrantReason(e.target.value)}
+                rows={3}
+                required
+              />
+            </Field>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+              <LoadingButton
+                type="submit"
+                variant="primary"
+                loading={grantCreditsMutation.isPending}
+              >
+                Grant Credits
+              </LoadingButton>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {/* CREATE AI CREDIT PACK MODAL */}
+      {showCreatePackModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+          }}
+        >
+          <Card style={{ width: '100%', maxWidth: '520px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Create AI Credit Pack</h2>
+              <button
+                onClick={() => setShowCreatePackModal(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted, #888)', cursor: 'pointer', fontSize: '1.25rem' }}
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={handleCreatePackSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.75rem' }}>
+                <Field label="Pack Code *">
+                  <Input
+                    placeholder="STARTER_100"
+                    value={packCode}
+                    onChange={(e) => setPackCode(e.target.value)}
+                    required
+                  />
+                </Field>
+                <Field label="Pack Name *">
+                  <Input
+                    placeholder="Starter Pack"
+                    value={packName}
+                    onChange={(e) => setPackName(e.target.value)}
+                    required
+                  />
+                </Field>
+              </div>
+
+              <Field label="Description">
+                <Input
+                  placeholder="100 AI credits for research queries"
+                  value={packDescription}
+                  onChange={(e) => setPackDescription(e.target.value)}
+                />
+              </Field>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+                <Field label="Credits *">
+                  <Input
+                    type="number"
+                    step="1"
+                    min="1"
+                    value={packCredits}
+                    onChange={(e) => setPackCredits(e.target.value)}
+                    required
+                  />
+                </Field>
+                <Field label="Price (GHS) *">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={packPrice}
+                    onChange={(e) => setPackPrice(e.target.value)}
+                    required
+                  />
+                </Field>
+                <Field label="Currency">
+                  <Input
+                    value={packCurrency}
+                    onChange={(e) => setPackCurrency(e.target.value)}
+                  />
+                </Field>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <Field label="Display Order">
+                  <Input
+                    type="number"
+                    value={packDisplayOrder}
+                    onChange={(e) => setPackDisplayOrder(e.target.value)}
+                  />
+                </Field>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1.5rem' }}>
+                  <input
+                    type="checkbox"
+                    id="createPackActive"
+                    checked={packActive}
+                    onChange={(e) => setPackActive(e.target.checked)}
+                  />
+                  <label htmlFor="createPackActive" style={{ cursor: 'pointer' }}>Active for Purchase</label>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <Button type="button" variant="secondary" onClick={() => setShowCreatePackModal(false)}>
+                  Cancel
+                </Button>
+                <LoadingButton type="submit" variant="primary" loading={createPackMutation.isPending}>
+                  Create Pack
+                </LoadingButton>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {/* EDIT AI CREDIT PACK MODAL */}
+      {editingPack && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+          }}
+        >
+          <Card style={{ width: '100%', maxWidth: '520px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Edit AI Credit Pack: {editingPack.code}</h2>
+              <button
+                onClick={() => setEditingPack(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted, #888)', cursor: 'pointer', fontSize: '1.25rem' }}
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={handleEditPackSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <Field label="Pack Name *">
+                <Input
+                  value={editPackName}
+                  onChange={(e) => setEditPackName(e.target.value)}
+                  required
+                />
+              </Field>
+
+              <Field label="Description">
+                <Input
+                  value={editPackDescription}
+                  onChange={(e) => setEditPackDescription(e.target.value)}
+                />
+              </Field>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+                <Field label="Credits *">
+                  <Input
+                    type="number"
+                    step="1"
+                    min="1"
+                    value={editPackCredits}
+                    onChange={(e) => setEditPackCredits(e.target.value)}
+                    required
+                  />
+                </Field>
+                <Field label="Price (GHS) *">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editPackPrice}
+                    onChange={(e) => setEditPackPrice(e.target.value)}
+                    required
+                  />
+                </Field>
+                <Field label="Currency">
+                  <Input
+                    value={editPackCurrency}
+                    onChange={(e) => setEditPackCurrency(e.target.value)}
+                  />
+                </Field>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <Field label="Display Order">
+                  <Input
+                    type="number"
+                    value={editPackDisplayOrder}
+                    onChange={(e) => setEditPackDisplayOrder(e.target.value)}
+                  />
+                </Field>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1.5rem' }}>
+                  <input
+                    type="checkbox"
+                    id="editPackActive"
+                    checked={editPackActive}
+                    onChange={(e) => setEditPackActive(e.target.checked)}
+                  />
+                  <label htmlFor="editPackActive" style={{ cursor: 'pointer' }}>Active for Purchase</label>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <Button type="button" variant="secondary" onClick={() => setEditingPack(null)}>
+                  Cancel
+                </Button>
+                <LoadingButton type="submit" variant="primary" loading={updatePackMutation.isPending}>
+                  Save Changes
+                </LoadingButton>
+              </div>
+            </form>
+          </Card>
+        </div>
       )}
 
       {/* CREATE PLAN MODAL */}

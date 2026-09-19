@@ -43,6 +43,15 @@ public class UserProfileController {
         return profileService.getProfile(user);
     }
 
+    @org.springframework.web.bind.annotation.PatchMapping("/me/profile")
+    public UserProfileResponse updateMyProfile(
+            Authentication authentication,
+            @jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody com.researchassistant.identity.dto.UpdateProfileRequest request
+    ) {
+        User user = userResolver.requireActiveUser(authentication);
+        return profileService.updateProfile(user, request);
+    }
+
     @PostMapping(value = "/me/profile/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public UserProfileResponse uploadProfileImage(
             Authentication authentication,

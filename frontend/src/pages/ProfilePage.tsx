@@ -4,7 +4,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { profileApi } from '../api/endpoints';
 import { Avatar } from '../components/Avatar';
 import { Badge, Button, Card } from '../components/ui';
-import { Camera, Trash2, CheckCircle2, AlertCircle, RefreshCw, X, Shield, Calendar, Mail, User } from 'lucide-react';
+import { Camera, Trash2, CheckCircle2, AlertCircle, RefreshCw, X } from 'lucide-react';
 import type { UserProfileResponse } from '../types/api';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
@@ -26,7 +26,69 @@ export function ProfilePage() {
     staleTime: 60_000,
   });
 
-  // Clean up object URL on unmount or file change
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [locale, setLocale] = useState('en');
+
+  useEffect(() => {
+    if (profile) {
+      setFirstName(profile.firstName || '');
+      setLastName(profile.lastName || '');
+      setPhoneNumber(profile.phoneNumber || '');
+      setLocale(profile.locale || 'en');
+    } else if (auth.user) {
+      setFirstName(auth.user.firstName || '');
+      setLastName(auth.user.lastName || '');
+      setPhoneNumber(auth.user.phoneNumber || '');
+      setLocale(auth.user.locale || 'en');
+    }
+  }, [profile, auth.user]);
+
+  const updateProfileMutation = useMutation({
+    mutationFn: (data: { firstName?: string; lastName?: string; phoneNumber?: string; locale?: string }) =>
+      profileApi.updateProfile(data),
+    onSuccess: (updatedProfile) => {
+      queryClient.setQueryData(['profile'], updatedProfile);
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
+      queryClient.invalidateQueries({ queryKey: ['me'] });
+      queryClient.invalidateQueries({ queryKey: ['topbar-user'] });
+      queryClient.invalidateQueries({ queryKey: ['settings-profile'] });
+      if (auth.user) {
+        auth.updateUser({
+          firstName: updatedProfile.firstName ?? undefined,
+          lastName: updatedProfile.lastName ?? undefined,
+          fullName: updatedProfile.displayName || `${updatedProfile.firstName || ''} ${updatedProfile.lastName || ''}`.trim(),
+          phoneNumber: updatedProfile.phoneNumber ?? undefined,
+          locale: updatedProfile.locale ?? undefined,
+        });
+      }
+      setPhoneNumber(updatedProfile.phoneNumber || '');
+      setSuccessMsg('Profile updated successfully.');
+      setErrorMsg(null);
+    },
+    onError: (err: any) => {
+      const msg = err.response?.data?.validationErrors?.phoneNumber ||
+        err.response?.data?.message ||
+        err.message ||
+        'Failed to update profile.';
+      setErrorMsg(msg);
+      setSuccessMsg(null);
+    },
+  });
+
+  const handleProfileSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    updateProfileMutation.mutate({
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      phoneNumber: phoneNumber.trim(),
+      locale: locale.trim(),
+    });
+  };
+
   useEffect(() => {
     return () => {
       if (previewUrl) {
@@ -301,29 +363,104 @@ export function ProfilePage() {
         {/* Right Card: Account Details & Navigation */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <Card>
-            <h2 style={{ fontSize: '1.2rem', margin: '0 0 16px' }}>Account Information</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <User size={18} className="muted" />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <h2 style={{ fontSize: '1.2rem', margin: 0 }}>Account Information</h2>
+              {updateProfileMutation.isPending && <RefreshCw size={16} className="spin muted" />}
+            </div>
+
+            <form onSubmit={handleProfileSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="grid cols-2" style={{ gap: '12px' }}>
                 <div>
-                  <div className="muted" style={{ fontSize: '0.78rem' }}>Full Name</div>
-                  <div style={{ fontWeight: 500 }}>{displayName}</div>
+                  <label htmlFor="profile-first-name" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+                    First Name
+                  </label>
+                  <input
+                    id="profile-first-name"
+                    type="text"
+                    className="input"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    placeholder="First name"
+                    maxLength={100}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="profile-last-name" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+                    Last Name
+                  </label>
+                  <input
+                    id="profile-last-name"
+                    type="text"
+                    className="input"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    placeholder="Last name"
+                    maxLength={100}
+                    style={{ width: '100%' }}
+                  />
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <Mail size={18} className="muted" />
-                <div>
-                  <div className="muted" style={{ fontSize: '0.78rem' }}>Email Address</div>
-                  <div style={{ fontWeight: 500 }}>{auth.user?.email}</div>
-                </div>
+              <div>
+                <label htmlFor="profile-email" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+                  Email Address
+                </label>
+                <input
+                  id="profile-email"
+                  type="email"
+                  className="input"
+                  value={auth.user?.email || ''}
+                  disabled
+                  style={{ width: '100%', opacity: 0.7, cursor: 'not-allowed' }}
+                />
+                <p className="muted" style={{ fontSize: '0.75rem', margin: '4px 0 0' }}>
+                  Email changes require a separate verified email-change flow.
+                </p>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <Shield size={18} className="muted" />
+              <div>
+                <label htmlFor="profile-phone" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+                  Phone Number
+                </label>
+                <input
+                  id="profile-phone"
+                  type="tel"
+                  className="input"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  placeholder="0542011738 or +233542011738"
+                  maxLength={40}
+                  style={{ width: '100%' }}
+                />
+                <p className="muted" style={{ fontSize: '0.78rem', margin: '4px 0 0', color: 'var(--brand, #155eef)' }}>
+                  Ghana numbers can be entered as 0542011738 or +233542011738.
+                </p>
+              </div>
+
+              <div className="grid cols-2" style={{ gap: '12px' }}>
                 <div>
-                  <div className="muted" style={{ fontSize: '0.78rem' }}>Roles & Access</div>
-                  <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+                  <label htmlFor="profile-locale" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+                    Preferred Locale
+                  </label>
+                  <select
+                    id="profile-locale"
+                    className="input select"
+                    value={locale}
+                    onChange={(e) => setLocale(e.target.value)}
+                    style={{ width: '100%' }}
+                  >
+                    <option value="en">English (en)</option>
+                    <option value="en-GH">English - Ghana (en-GH)</option>
+                    <option value="en-US">English - US (en-US)</option>
+                    <option value="en-GB">English - UK (en-GB)</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: '6px' }}>
+                    Roles & Access
+                  </label>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', minHeight: '38px', flexWrap: 'wrap' }}>
                     {auth.hasCapability('admin') ? (
                       <Badge tone="info">SYSTEM_ADMIN</Badge>
                     ) : (
@@ -334,14 +471,18 @@ export function ProfilePage() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <Calendar size={18} className="muted" />
-                <div>
-                  <div className="muted" style={{ fontSize: '0.78rem' }}>Preferred Locale</div>
-                  <div style={{ fontWeight: 500 }}>{auth.user?.locale || 'English (en)'}</div>
-                </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                <Button
+                  id="profile-save-button"
+                  type="submit"
+                  variant="primary"
+                  disabled={updateProfileMutation.isPending}
+                  style={{ minWidth: '130px' }}
+                >
+                  {updateProfileMutation.isPending ? 'Saving...' : 'Save Changes'}
+                </Button>
               </div>
-            </div>
+            </form>
           </Card>
 
           <Card>

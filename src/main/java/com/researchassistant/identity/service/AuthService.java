@@ -55,6 +55,7 @@ public class AuthService {
     private final TotpLoginChallengeService totpLoginChallengeService;
     private final SystemUserRoleRepository systemUserRoleRepository;
     private final com.researchassistant.workspace.service.PersonalWorkspaceService personalWorkspaceService;
+    private final com.researchassistant.security.totp.RecoveryCodeService recoveryCodeService;
 
     public AuthService(
             AuthenticationManager authenticationManager,
@@ -65,7 +66,8 @@ public class AuthService {
             SecurityAuditService securityAuditService,
             TotpLoginChallengeService totpLoginChallengeService,
             SystemUserRoleRepository systemUserRoleRepository,
-            com.researchassistant.workspace.service.PersonalWorkspaceService personalWorkspaceService
+            com.researchassistant.workspace.service.PersonalWorkspaceService personalWorkspaceService,
+            com.researchassistant.security.totp.RecoveryCodeService recoveryCodeService
     ) {
         this.authenticationManager = authenticationManager;
         this.userRepository = userRepository;
@@ -76,6 +78,7 @@ public class AuthService {
         this.totpLoginChallengeService = totpLoginChallengeService;
         this.systemUserRoleRepository = systemUserRoleRepository;
         this.personalWorkspaceService = personalWorkspaceService;
+        this.recoveryCodeService = recoveryCodeService;
     }
 
     /**
@@ -117,7 +120,19 @@ public class AuthService {
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new AuthenticationFailedException(INVALID_LOGIN);
         }
-        totpService.verifyLoginCode(user, request.totpCode());
+
+        if (request.hasTotpCode()) {
+            totpService.verifyLoginCode(user, request.totpCode());
+        } else if (request.hasRecoveryCode()) {
+            recoveryCodeService.consumeRecoveryCode(user, request.recoveryCode());
+            securityAuditService.record(
+                    user.getId(),
+                    SecurityAuditEventType.RECOVERY_CODE_USED
+            );
+        } else {
+            throw new AuthenticationFailedException("Either authenticator code or recovery code is required.");
+        }
+
         return issueTokenPair(user, httpRequest);
     }
 

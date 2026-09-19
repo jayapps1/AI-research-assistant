@@ -35,13 +35,21 @@ public class BillingPaymentIntent {
     @JoinColumn(name = "initiated_by", nullable = false)
     private User initiatedBy;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "plan_id", nullable = false)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "purchase_type", nullable = false, length = 40)
+    private BillingPurchaseType purchaseType = BillingPurchaseType.SUBSCRIPTION;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "plan_id")
     private SubscriptionPlan plan;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "billing_interval", nullable = false, length = 20)
+    @Column(name = "billing_interval", length = 20)
     private BillingInterval billingInterval;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "ai_credit_purchase_id")
+    private com.researchassistant.billing.aicredit.entity.AiCreditPurchase aiCreditPurchase;
 
     @Column(name = "expected_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal expectedAmount;

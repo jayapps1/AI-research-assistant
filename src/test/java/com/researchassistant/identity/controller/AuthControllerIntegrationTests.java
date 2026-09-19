@@ -84,6 +84,9 @@ class AuthControllerIntegrationTests {
     private TotpRecoveryCodeRepository totpRecoveryCodeRepository;
 
     @Autowired
+    private com.researchassistant.security.totp.RecoveryCodeService recoveryCodeService;
+
+    @Autowired
     private CredentialSecretEncryptor credentialSecretEncryptor;
 
     @Autowired
@@ -377,6 +380,98 @@ class AuthControllerIntegrationTests {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message")
                         .value("Invalid credentials."));
+    }
+
+    @Test
+    void validRecoveryCodeChallengeCompletesAuthenticationAndConsumesCode()
+            throws Exception {
+
+        UserResponse userResponse = createUser();
+        User user = userRepository.findByEmailIgnoreCase(userResponse.email())
+                .orElseThrow();
+        createVerifiedTotpCredential(user, null);
+        java.util.List<String> recoveryCodes = recoveryCodeService.replaceRecoveryCodes(user);
+        String validRecoveryCode = recoveryCodes.get(0);
+
+        LoginChallengeResponse challenge =
+                passwordLoginChallenge(userResponse.email(), PASSWORD);
+
+        // Complete with recovery code
+        String responseJson = mockMvc.perform(post("/api/v1/auth/login/totp-challenge")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "challengeId", challenge.challengeId(),
+                                "recoveryCode", validRecoveryCode
+                        ))))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        AuthTokenResponse tokenResponse = objectMapper.readValue(responseJson, AuthTokenResponse.class);
+        assertThat(tokenResponse.accessToken()).isNotBlank();
+        assertThat(tokenResponse.refreshToken()).isNotBlank();
+
+        // Reusing the same recovery code should fail
+        LoginChallengeResponse challenge2 =
+                passwordLoginChallenge(userResponse.email(), PASSWORD);
+
+        mockMvc.perform(post("/api/v1/auth/login/totp-challenge")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "challengeId", challenge2.challengeId(),
+                                "recoveryCode", validRecoveryCode
+                        ))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message")
+                        .value("Invalid credentials."));
+    }
+
+    @Test
+    void totpChallengeWhenDecryptionFailsReturnsSafeErrorMessage()
+            throws Exception {
+
+        UserResponse userResponse = createUser();
+        User user = userRepository.findByEmailIgnoreCase(userResponse.email())
+                .orElseThrow();
+
+        // Corrupt the encrypted secret so decryption fails
+        TotpCredential credential = new TotpCredential();
+        credential.setUser(user);
+        credential.setEncryptedSecret("invalidIv.invalidCiphertext");
+        credential.setEnabled(true);
+        credential.setVerifiedAt(OffsetDateTime.now().minusMinutes(1));
+        totpCredentialRepository.save(credential);
+
+        LoginChallengeResponse challenge =
+                passwordLoginChallenge(userResponse.email(), PASSWORD);
+
+        mockMvc.perform(post("/api/v1/auth/login/totp-challenge")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "challengeId", challenge.challengeId(),
+                                "totpCode", "123456"
+                        ))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message")
+                        .value("Your authenticator configuration could not be verified. Use a recovery code or reset your authenticator."))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("Credential secret decryption failed"))));
+    }
+
+    @Test
+    void passwordLoginForUserWithoutTotpDoesNotTouchTotp() throws Exception {
+        UserResponse userResponse = createUser();
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", userResponse.email(),
+                                "password", PASSWORD,
+                                "authenticationMethod", "PASSWORD"
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isString())
+                .andExpect(jsonPath("$.refreshToken").isString());
     }
 
     @Test

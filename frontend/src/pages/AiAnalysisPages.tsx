@@ -1,19 +1,29 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { analysisApi, datasetApi, documentApi, ragApi } from '../api/endpoints';
-import { Breadcrumbs, Button, Card, Field, Textarea, Badge, Drawer, Select } from '../components/ui';
+import { analysisApi, billingApi, datasetApi, documentApi, ragApi } from '../api/endpoints';
+import { Breadcrumbs, Button, Card, Field, Textarea, Badge, Drawer, Select, Modal } from '../components/ui';
 import { EmptyState, ErrorState } from '../components/states';
 import { useProjectId } from '../hooks/useProjectId';
+import { useWorkspace } from '../features/workspaces/WorkspaceProvider';
 import { displayValue, pageContent } from '../utils/collections';
 import type { Citation, RagAnswer } from '../types/api';
 
 export function AiAssistantPage() {
   const projectId = useProjectId();
+  const { selectedWorkspaceId: workspaceId } = useWorkspace();
   const [conversationId, setConversationId] = useState('');
   const [answer, setAnswer] = useState<RagAnswer | null>(null);
   const [scopeType, setScopeType] = useState('ALL_PROJECT_DOCUMENTS');
   const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
+  const [showBuyCredits, setShowBuyCredits] = useState(false);
+
+  const creditsQuery = useQuery({
+    queryKey: ['billing', workspaceId, 'ai-credits'],
+    queryFn: () => billingApi.aiCredits(workspaceId),
+    enabled: Boolean(workspaceId),
+  });
+
   const conversations = useQuery({ queryKey: ['rag-conversations', projectId], queryFn: () => ragApi.conversations(projectId), enabled: Boolean(projectId) });
   const documents = useQuery({ queryKey: ['documents', projectId], queryFn: () => documentApi.list(projectId), enabled: Boolean(projectId) });
   const createConversation = useMutation({ mutationFn: () => ragApi.createConversation(projectId, { title: 'Research question' }), onSuccess: (data) => setConversationId(data.id) });
@@ -24,7 +34,10 @@ export function AiAssistantPage() {
       documentIds: scopeType === 'SELECTED_DOCUMENTS' ? selectedDocuments : undefined,
       evidenceLimit: 8,
     }),
-    onSuccess: setAnswer,
+    onSuccess: (data) => {
+      setAnswer(data);
+      creditsQuery.refetch();
+    },
   });
   if (!projectId) return <EmptyState title="Select a project" />;
   return (
@@ -35,6 +48,34 @@ export function AiAssistantPage() {
         <Card><h2>Conversations</h2>{conversations.data?.map((c) => <p key={c.id}><button className="button secondary" type="button" onClick={() => setConversationId(c.id)}>{c.title ?? c.id}</button></p>)}<Button type="button" onClick={() => createConversation.mutate()}>New conversation</Button></Card>
         <Card>
           <h2>Question / answer</h2>
+          {workspaceId ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--surface-subtle, rgba(255,255,255,0.04))', borderRadius: '8px', marginBottom: '14px', border: '1px solid var(--border-color, rgba(255,255,255,0.08))', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>AI Credits:</span>
+                <strong style={{ fontSize: '1rem' }}>
+                  {creditsQuery.data ? Number(creditsQuery.data.totalAvailable).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 }) : '—'}
+                </strong>
+                {creditsQuery.data?.included && (
+                  <Badge tone="info" style={{ fontSize: '0.75rem' }}>
+                    Allowance: {creditsQuery.data.included.remaining != null ? Number(creditsQuery.data.included.remaining).toLocaleString() : 'Unlimited'}
+                  </Badge>
+                )}
+                {creditsQuery.data?.purchased?.remaining ? (
+                  <Badge tone="success" style={{ fontSize: '0.75rem' }}>
+                    Purchased: {Number(creditsQuery.data.purchased.remaining).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
+                  </Badge>
+                ) : null}
+                {creditsQuery.data?.promotional?.remaining ? (
+                  <Badge tone="warning" style={{ fontSize: '0.75rem' }}>
+                    Promo: {Number(creditsQuery.data.promotional.remaining).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
+                  </Badge>
+                ) : null}
+              </div>
+              <Button type="button" variant="secondary" onClick={() => setShowBuyCredits(true)} style={{ fontSize: '0.85rem', padding: '4px 10px' }}>
+                Top Up Credits
+              </Button>
+            </div>
+          ) : null}
           <div className="grid cols-2">
             <Field label="Retrieval scope">
               <Select value={scopeType} onChange={(event) => setScopeType(event.target.value)}>
@@ -59,9 +100,21 @@ export function AiAssistantPage() {
             const err = ask.error as any;
             const message = err?.message || err?.response?.data?.message || '';
             const status = err?.status || err?.response?.status;
-            const code = err?.code || err?.response?.data?.code;
+            const code = err?.code || err?.response?.data?.errorCode || err?.response?.data?.code;
             if (message.includes('AI provider is not configured') || message.includes('Grounded answer generation is not enabled') || code === 'CAPABILITY_UNAVAILABLE') {
               return <div className="alert warning">AI provider is not configured.</div>;
+            }
+            if (status === 402 || code === 'AI_CREDITS_EXHAUSTED' || message.includes('Insufficient AI credits') || message.includes('AI credits exhausted')) {
+              return (
+                <div className="alert warning" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <div>
+                    <strong>AI Credits Exhausted:</strong> Your workspace has insufficient AI credits or monthly allowance for this generation. Top up credits or upgrade your plan to continue.
+                  </div>
+                  <Button type="button" variant="primary" onClick={() => setShowBuyCredits(true)}>
+                    Top Up AI Credits
+                  </Button>
+                </div>
+              );
             }
             if (status === 429 || code === 'QUOTA_EXCEEDED') {
               return <div className="alert warning">AI request quota exceeded for this billing period. Please upgrade your plan.</div>;
@@ -89,7 +142,99 @@ export function AiAssistantPage() {
           </div>
         ) : null}
       </Drawer>
+      {workspaceId ? (
+        <BuyAiCreditsModal
+          open={showBuyCredits}
+          onClose={() => setShowBuyCredits(false)}
+          workspaceId={workspaceId}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function BuyAiCreditsModal({
+  open,
+  onClose,
+  workspaceId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  workspaceId: string;
+}) {
+  const packsQuery = useQuery({
+    queryKey: ['billing', workspaceId, 'ai-credit-packs'],
+    queryFn: () => billingApi.aiCreditPacks(workspaceId),
+    enabled: open && Boolean(workspaceId),
+  });
+
+  const purchaseMutation = useMutation({
+    mutationFn: (packId: string) => billingApi.buyAiCreditPack(workspaceId, packId),
+    onSuccess: (data) => {
+      if (data?.authorizationUrl && /^https:\/\/(checkout|standard)\.paystack\.com\//.test(data.authorizationUrl)) {
+        window.location.href = data.authorizationUrl;
+      }
+    },
+  });
+
+  return (
+    <Modal title="Top Up AI Credits" open={open} onClose={onClose}>
+      <p className="muted" style={{ fontSize: '0.875rem', marginBottom: '16px' }}>
+        AI credits power grounded research queries and document analysis. Credit packs never expire and are consumed after your plan's monthly allowance.
+      </p>
+      {purchaseMutation.isError && (
+        <div className="alert danger" style={{ marginBottom: '12px' }}>
+          {(purchaseMutation.error as any)?.response?.data?.message || 'Failed to initialize payment attempt.'}
+        </div>
+      )}
+      {packsQuery.isLoading ? (
+        <p className="muted">Loading credit packs...</p>
+      ) : packsQuery.data?.length === 0 ? (
+        <p className="muted">No credit packs available at this time.</p>
+      ) : (
+        <div className="grid" style={{ gap: '12px' }}>
+          {packsQuery.data?.map((pack) => (
+            <div
+              key={pack.id}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '14px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color, rgba(255,255,255,0.1))',
+                background: 'var(--surface-card, rgba(255,255,255,0.02))',
+                flexWrap: 'wrap',
+                gap: '12px',
+              }}
+            >
+              <div>
+                <strong style={{ fontSize: '1rem' }}>{pack.name}</strong>
+                <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
+                  {pack.description || `${Number(pack.creditAmount || pack.credits).toLocaleString()} AI Credits`}
+                </p>
+                <Badge tone="info" style={{ marginTop: '6px' }}>
+                  {Number(pack.creditAmount || pack.credits).toLocaleString()} credits
+                </Badge>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: '8px' }}>
+                  {pack.currency} {Number(pack.priceAmount || pack.price).toFixed(2)}
+                </div>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={purchaseMutation.isPending}
+                  onClick={() => purchaseMutation.mutate(pack.id)}
+                >
+                  {purchaseMutation.isPending ? 'Processing...' : 'Buy with Paystack'}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }
 

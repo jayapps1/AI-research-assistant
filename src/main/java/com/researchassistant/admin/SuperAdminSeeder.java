@@ -67,16 +67,26 @@ public class SuperAdminSeeder implements ApplicationRunner {
             user.setStatus(UserStatus.ACTIVE);
             user.setEmailVerified(true);
             user.setLocale("en");
-            user.setPhoneNumber(normalizePhone(properties.phone()));
+            user.setPhoneNumber(com.researchassistant.identity.util.PhoneNumberNormalizer.normalize(properties.phone()));
             user = userRepository.save(user);
             created = true;
         } else {
             if (user.getStatus() != UserStatus.ACTIVE) {
                 user.setStatus(UserStatus.ACTIVE);
             }
-            if ((user.getPhoneNumber() == null || user.getPhoneNumber().isBlank())
-                    && properties.phone() != null && !properties.phone().isBlank()) {
-                user.setPhoneNumber(normalizePhone(properties.phone()));
+            if (user.getPhoneNumber() == null || user.getPhoneNumber().isBlank()) {
+                if (properties.phone() != null && !properties.phone().isBlank()) {
+                    user.setPhoneNumber(com.researchassistant.identity.util.PhoneNumberNormalizer.normalize(properties.phone()));
+                    userRepository.save(user);
+                }
+            } else if (!user.getPhoneNumber().startsWith("+")) {
+                try {
+                    String normalized = com.researchassistant.identity.util.PhoneNumberNormalizer.normalize(user.getPhoneNumber());
+                    user.setPhoneNumber(normalized);
+                    userRepository.save(user);
+                } catch (Exception ex) {
+                    log.warn("Could not normalize existing admin phone {}: {}", user.getPhoneNumber(), ex.getMessage());
+                }
             }
         }
 
@@ -99,9 +109,5 @@ public class SuperAdminSeeder implements ApplicationRunner {
 
     private String normalizeEmail(String email) {
         return email.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private String normalizePhone(String phone) {
-        return phone == null ? null : phone.trim();
     }
 }

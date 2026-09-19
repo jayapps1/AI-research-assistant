@@ -42,9 +42,22 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.researchassistant.ai.orchestration.AiTaskRequest;
+import com.researchassistant.ai.orchestration.AiTaskResult;
+import com.researchassistant.ai.orchestration.AiTaskType;
+import com.researchassistant.ai.provider.AiProviderType;
+import com.researchassistant.ai.usage.AiRequest;
+import com.researchassistant.ai.usage.AiRequestStatus;
+import com.researchassistant.ai.usage.AiUsageRecordingService;
+import com.researchassistant.billing.aicredit.service.AiCreditMeter;
+import com.researchassistant.billing.aicredit.service.AiCreditReservation;
+import com.researchassistant.billing.aicredit.service.AiCreditService;
+
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -69,6 +82,9 @@ public class RagQueryService {
     private final DocumentChunkRepository chunkRepository;
     private final RagResponseMapper mapper;
     private final RagProperties properties;
+    private final ObjectProvider<AiCreditService> creditServiceProvider;
+    private final ObjectProvider<AiCreditMeter> creditMeterProvider;
+    private final ObjectProvider<AiUsageRecordingService> usageRecordingServiceProvider;
 
     public RagQueryService(
             RagAuthorizationService authorizationService,
@@ -84,7 +100,10 @@ public class RagQueryService {
             AnswerCitationRepository citationRepository,
             DocumentChunkRepository chunkRepository,
             RagResponseMapper mapper,
-            RagProperties properties
+            RagProperties properties,
+            ObjectProvider<AiCreditService> creditServiceProvider,
+            ObjectProvider<AiCreditMeter> creditMeterProvider,
+            ObjectProvider<AiUsageRecordingService> usageRecordingServiceProvider
     ) {
         this.authorizationService = authorizationService;
         this.scopeService = scopeService;
@@ -100,6 +119,9 @@ public class RagQueryService {
         this.chunkRepository = chunkRepository;
         this.mapper = mapper;
         this.properties = properties;
+        this.creditServiceProvider = creditServiceProvider;
+        this.creditMeterProvider = creditMeterProvider;
+        this.usageRecordingServiceProvider = usageRecordingServiceProvider;
     }
 
     @Transactional
@@ -138,8 +160,74 @@ public class RagQueryService {
             );
         }
 
+        AiCreditService creditService = creditServiceProvider.getIfAvailable();
+        AiCreditMeter creditMeter = creditMeterProvider.getIfAvailable();
+        AiUsageRecordingService usageRecordingService = usageRecordingServiceProvider.getIfAvailable();
+
+        UUID workspaceId = stage.bundle().scope() != null ? stage.bundle().scope().workspaceId() : null;
+        AiCreditReservation reservation = null;
+        if (creditService != null && creditMeter != null && workspaceId != null) {
+            BigDecimal estimated = creditMeter.estimateReservation("OPENAI", answerGenerator.modelName(), 1500, 4096);
+            reservation = creditService.reserveCredits(workspaceId, estimated);
+        }
+
         updateStatus(stage.query(), RagQueryStatus.GENERATING);
-        GeneratedAnswerDraft draft = answerGenerator.generate(stage.bundle());
+        GeneratedAnswerDraft draft;
+        try {
+            draft = answerGenerator.generate(stage.bundle());
+        } catch (Exception e) {
+            if (creditService != null && reservation != null) {
+                creditService.releaseReservation(reservation);
+            }
+            throw e;
+        }
+
+        if (creditService != null && reservation != null) {
+            if (draft.finishReason() != null && !"stop".equalsIgnoreCase(draft.finishReason()) && (draft.inputTokens() == null || draft.inputTokens() == 0)) {
+                creditService.releaseReservation(reservation);
+            } else {
+                BigDecimal actualCredits = creditMeter != null
+                        ? creditMeter.calculateCredits(draft.provider(), draft.model(), draft.inputTokens(), draft.outputTokens())
+                        : BigDecimal.ZERO;
+                UUID reqId = UUID.randomUUID();
+                if (usageRecordingService != null) {
+                    AiTaskRequest taskReq = new AiTaskRequest(
+                            AiTaskType.GROUNDED_QA,
+                            null,
+                            workspaceId,
+                            stage.bundle().scope() != null ? stage.bundle().scope().projectId() : null,
+                            question,
+                            "",
+                            stage.bundle().scope(),
+                            stage.bundle(),
+                            GeneratedAnswerDraft.class,
+                            true
+                    );
+                    AiTaskResult<GeneratedAnswerDraft> taskResult = new AiTaskResult<>(
+                            reqId,
+                            AiTaskType.GROUNDED_QA,
+                            AiProviderType.OPENAI,
+                            draft.model(),
+                            draft.finishReason() == null || "stop".equalsIgnoreCase(draft.finishReason()) ? AiRequestStatus.COMPLETED : AiRequestStatus.FAILED,
+                            draft,
+                            draft.inputTokens(),
+                            draft.outputTokens(),
+                            (draft.inputTokens() != null ? draft.inputTokens() : 0) + (draft.outputTokens() != null ? draft.outputTokens() : 0),
+                            draft.generationDurationMs() != null ? draft.generationDurationMs() : 0L,
+                            null,
+                            draft.finishReason(),
+                            null,
+                            OffsetDateTime.now(),
+                            OffsetDateTime.now(),
+                            List.of()
+                    );
+                    AiRequest recordedReq = usageRecordingService.recordRequest(user, taskReq, taskResult);
+                    reqId = recordedReq.getId();
+                }
+                creditService.reconcileReservation(reservation, actualCredits, reqId, user);
+            }
+        }
+
         return verifyAndPersistAnswer(stage.query().getId(), draft);
     }
 

@@ -227,4 +227,76 @@ class UserProfileIntegrationTests {
         mockMvc.perform(get("/api/v1/users/" + testUser.getId() + "/avatar"))
                 .andExpect(status().isNotFound());
     }
+
+    @Test
+    void updateProfile_ValidDetails_UpdatesUserAndNormalizesGhanaPhone() throws Exception {
+        com.researchassistant.identity.dto.UpdateProfileRequest request =
+                new com.researchassistant.identity.dto.UpdateProfileRequest(
+                        "Kofi",
+                        "Mensah",
+                        "0542011738",
+                        "en-GH"
+                );
+
+        mockMvc.perform(patch("/api/v1/me/profile")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request))
+                        .header("Authorization", "Bearer " + testToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName", is("Kofi")))
+                .andExpect(jsonPath("$.lastName", is("Mensah")))
+                .andExpect(jsonPath("$.displayName", is("Kofi Mensah")))
+                .andExpect(jsonPath("$.phoneNumber", is("+233542011738")))
+                .andExpect(jsonPath("$.locale", is("en-GH")));
+
+        User updated = userRepository.findById(testUser.getId()).orElseThrow();
+        assertThat(updated.getFirstName()).isEqualTo("Kofi");
+        assertThat(updated.getLastName()).isEqualTo("Mensah");
+        assertThat(updated.getPhoneNumber()).isEqualTo("+233542011738");
+        assertThat(updated.getLocale()).isEqualTo("en-GH");
+    }
+
+    @Test
+    void updateProfile_InvalidPhone_ReturnsBadRequest() throws Exception {
+        com.researchassistant.identity.dto.UpdateProfileRequest request =
+                new com.researchassistant.identity.dto.UpdateProfileRequest(
+                        "Kofi",
+                        "Mensah",
+                        "12345",
+                        "en-GH"
+                );
+
+        mockMvc.perform(patch("/api/v1/me/profile")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request))
+                        .header("Authorization", "Bearer " + testToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.validationErrors.phoneNumber", notNullValue()));
+    }
+
+    @Test
+    void updateProfile_CannotModifySecurityOrStatusFields() throws Exception {
+        String maliciousPayload = """
+                {
+                    "firstName": "Hacker",
+                    "lastName": "Attempt",
+                    "id": "%s",
+                    "status": "SUSPENDED",
+                    "passwordHash": "evilHash",
+                    "emailVerified": false
+                }
+                """.formatted(UUID.randomUUID());
+
+        mockMvc.perform(patch("/api/v1/me/profile")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(maliciousPayload)
+                        .header("Authorization", "Bearer " + testToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName", is("Hacker")));
+
+        User updated = userRepository.findById(testUser.getId()).orElseThrow();
+        assertThat(updated.getId()).isEqualTo(testUser.getId());
+        assertThat(updated.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(updated.getPasswordHash()).isEqualTo(testUser.getPasswordHash());
+    }
 }

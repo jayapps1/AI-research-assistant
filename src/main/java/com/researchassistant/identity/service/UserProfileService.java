@@ -68,6 +68,31 @@ public class UserProfileService {
     }
 
     @Transactional
+    public UserProfileResponse updateProfile(User user, com.researchassistant.identity.dto.UpdateProfileRequest request) {
+        if (request.firstName() != null) {
+            user.setFirstName(request.firstName().trim().isEmpty() ? null : request.firstName().trim());
+        }
+        if (request.lastName() != null) {
+            user.setLastName(request.lastName().trim().isEmpty() ? null : request.lastName().trim());
+        }
+        if (request.phoneNumber() != null) {
+            if (request.phoneNumber().isBlank()) {
+                user.setPhoneNumber(null);
+            } else {
+                String normalized = com.researchassistant.identity.util.PhoneNumberNormalizer.normalize(request.phoneNumber());
+                user.setPhoneNumber(normalized);
+            }
+        }
+        if (request.locale() != null && !request.locale().isBlank()) {
+            user.setLocale(request.locale().trim());
+        }
+
+        User savedUser = userRepository.save(user);
+
+        return getProfile(savedUser);
+    }
+
+    @Transactional
     public UserProfileResponse uploadProfileImage(User user, MultipartFile file) {
         ProfileImageSecurityValidator.ValidatedImageMetadata validated = validator.validate(file);
 

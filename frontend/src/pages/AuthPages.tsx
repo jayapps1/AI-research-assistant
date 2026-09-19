@@ -22,7 +22,8 @@ const totpOnlySchema = z.object({
 });
 
 const totpChallengeSchema = z.object({
-  totpCode: z.string().regex(/^\d{6}$/, 'Enter the 6-digit authenticator code'),
+  totpCode: z.string().optional(),
+  recoveryCode: z.string().optional(),
 });
 
 const registerSchema = z.object({
@@ -38,10 +39,11 @@ export function LoginPage() {
   const location = useLocation();
   const [error, setError] = useState<string | null>(null);
   const [method, setMethod] = useState<'PASSWORD' | 'TOTP'>('PASSWORD');
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
   const [challenge, setChallenge] = useState<{ id: string; email: string; expiresIn: number } | null>(null);
   const form = useForm<z.infer<typeof loginSchema>>({ resolver: zodResolver(loginSchema), defaultValues: { email: '', password: '' } });
   const totpForm = useForm<z.infer<typeof totpOnlySchema>>({ resolver: zodResolver(totpOnlySchema), defaultValues: { email: '', totpCode: '' } });
-  const challengeForm = useForm<z.infer<typeof totpChallengeSchema>>({ resolver: zodResolver(totpChallengeSchema), defaultValues: { totpCode: '' } });
+  const challengeForm = useForm<z.infer<typeof totpChallengeSchema>>({ resolver: zodResolver(totpChallengeSchema), defaultValues: { totpCode: '', recoveryCode: '' } });
   if (auth.isAuthenticated) return <Navigate to={paths.dashboard} replace />;
 
   const destination = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? paths.dashboard;
@@ -52,7 +54,11 @@ export function LoginPage() {
         <form className="form" onSubmit={challengeForm.handleSubmit(async (values) => {
           setError(null);
           try {
-            await auth.completeTotpChallenge({ challengeId: challenge.id, totpCode: values.totpCode });
+            if (useRecoveryCode) {
+              await auth.completeTotpChallenge({ challengeId: challenge.id, recoveryCode: values.recoveryCode });
+            } else {
+              await auth.completeTotpChallenge({ challengeId: challenge.id, totpCode: values.totpCode });
+            }
             navigate(destination, { replace: true });
           } catch (err) {
             setError(authErrorMessage(err, 'Invalid or expired authenticator code.'));
@@ -70,26 +76,48 @@ export function LoginPage() {
             </p>
           </div>
           {error ? <div className="alert danger" role="alert">{error}</div> : null}
-          <Field label="Authenticator code" error={challengeForm.formState.errors.totpCode?.message}>
-            <Input
-              inputMode="numeric"
-              pattern="[0-9]*"
-              autoComplete="one-time-code"
-              maxLength={6}
-              {...challengeForm.register('totpCode', {
-                onChange: (e) => {
-                  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
-                },
-              })}
-            />
-          </Field>
-          <div className="auth-row">
+          {!useRecoveryCode ? (
+            <Field label="Authenticator code" error={challengeForm.formState.errors.totpCode?.message}>
+              <Input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                autoComplete="one-time-code"
+                maxLength={6}
+                placeholder="6-digit code"
+                {...challengeForm.register('totpCode', {
+                  onChange: (e) => {
+                    e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                  },
+                })}
+              />
+            </Field>
+          ) : (
+            <Field label="Recovery code" error={challengeForm.formState.errors.recoveryCode?.message}>
+              <Input
+                autoComplete="off"
+                placeholder="e.g. ABCD-EFGH-JKLM"
+                {...challengeForm.register('recoveryCode')}
+              />
+            </Field>
+          )}
+          <div className="auth-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Link to="/forgot-password">Lost authenticator? Use a recovery code</Link>
+            <button
+              type="button"
+              className="button-link"
+              style={{ background: 'none', border: 'none', color: 'var(--brand, #155eef)', cursor: 'pointer', padding: 0, fontSize: '0.875rem' }}
+              onClick={() => {
+                setUseRecoveryCode(!useRecoveryCode);
+                setError(null);
+              }}
+            >
+              {useRecoveryCode ? 'Use 6-digit code' : 'Enter recovery code'}
+            </button>
           </div>
           <Button type="submit" disabled={challengeForm.formState.isSubmitting}>
             {challengeForm.formState.isSubmitting ? 'Verifying...' : 'Verify & Sign In'}
           </Button>
-          <Button type="button" variant="secondary" onClick={() => { setChallenge(null); setError(null); challengeForm.reset(); }}>
+          <Button type="button" variant="secondary" onClick={() => { setChallenge(null); setError(null); setUseRecoveryCode(false); challengeForm.reset(); }}>
             Back
           </Button>
         </form>
@@ -380,6 +408,9 @@ function authErrorMessage(error: unknown, fallback: string) {
   }
   if (error instanceof Error) {
     const msg = error.message;
+    if (/credential secret decryption failed|decryption failed|could not be verified/i.test(msg)) {
+      return 'Your authenticator configuration could not be verified. Use a recovery code or reset your authenticator.';
+    }
     if (/stack trace|exception|\bat\b\s+[a-z0-9_$.]+|\bjava\./i.test(msg)) {
       return fallback;
     }

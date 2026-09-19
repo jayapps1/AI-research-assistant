@@ -74,6 +74,7 @@ export interface User {
   status?: string;
   emailVerified?: boolean;
   locale?: string;
+  phoneNumber?: string | null;
   roles?: string[];
   systemRoles?: string[];
   totpEnabled?: boolean;
@@ -94,13 +95,27 @@ export interface ProfileImageInfo {
 }
 
 export interface UserProfileResponse {
-  userId: UUID;
+  id?: UUID;
+  userId?: UUID;
   email: string;
   firstName: string | null;
   lastName: string | null;
-  fullName: string | null;
-  avatarUrl: string | null;
-  profileImage: ProfileImageInfo | null;
+  fullName?: string | null;
+  displayName?: string | null;
+  phoneNumber?: string | null;
+  locale?: string | null;
+  avatarUrl?: string | null;
+  profileImage?: ProfileImageInfo | null;
+  systemRoles?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UpdateProfileRequest {
+  firstName?: string | null;
+  lastName?: string | null;
+  phoneNumber?: string | null;
+  locale?: string | null;
 }
 
 export interface AuthTokenResponse {
@@ -586,5 +601,83 @@ export interface PaymentAttemptDetail {
   completedAt?: string | null;
   providerVerifiedAt?: string | null;
 }
+
+export interface AiCreditBalance {
+  included: {
+    limitMode: 'LIMITED' | 'UNLIMITED' | 'DISABLED';
+    limit?: number | null;
+    used?: number;
+    remaining?: number | null;
+    periodStart?: string;
+    periodEnd?: string;
+  };
+  promotional: {
+    remaining: number;
+  };
+  purchased: {
+    remaining: number;
+  };
+  totalAvailable: number;
+}
+
+export interface AiCreditPack {
+  id: UUID;
+  code: string;
+  name: string;
+  description?: string;
+  creditAmount: number;
+  priceAmount: number;
+  credits?: number;
+  price?: number;
+  currency: string;
+  active: boolean;
+  displayOrder: number;
+  createdAt: string;
+}
+
+export interface AiCreditLedgerItem {
+  id: UUID;
+  bucket: 'PURCHASED' | 'PROMOTIONAL';
+  type: string;
+  creditAmount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  sourceType: string;
+  sourceId?: string;
+  aiRequestId?: string;
+  paymentIntentId?: string;
+  paymentAttemptId?: string;
+  purchaseId?: string;
+  createdByName?: string;
+  createdAt: string;
+}
+
+export interface CreateAiCreditPackRequest {
+  code: string;
+  name: string;
+  description?: string;
+  creditAmount: number;
+  priceAmount: number;
+  currency?: string;
+  active?: boolean;
+  displayOrder?: number;
+}
+
+export interface UpdateAiCreditPackRequest {
+  name?: string;
+  description?: string;
+  creditAmount?: number;
+  priceAmount?: number;
+  currency?: string;
+  active?: boolean;
+  displayOrder?: number;
+}
+
+export interface AdminGrantAiCreditsRequest {
+  creditAmount: number;
+  bucket: 'PURCHASED' | 'PROMOTIONAL';
+  reason: string;
+}
+
 
 

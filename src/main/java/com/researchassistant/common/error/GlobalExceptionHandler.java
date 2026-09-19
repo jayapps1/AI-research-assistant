@@ -359,6 +359,27 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(com.researchassistant.billing.aicredit.exception.AiCreditsExhaustedException.class)
+    public ResponseEntity<ApiErrorResponse> handleAiCreditsExhausted(
+            com.researchassistant.billing.aicredit.exception.AiCreditsExhaustedException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.PAYMENT_REQUIRED,
+                "AI_CREDITS_EXHAUSTED",
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of(
+                        "workspaceId", exception.getWorkspaceId() != null ? exception.getWorkspaceId().toString() : "",
+                        "includedRemaining", exception.getIncludedRemaining().toPlainString(),
+                        "promotionalRemaining", exception.getPromotionalRemaining().toPlainString(),
+                        "purchasedRemaining", exception.getPurchasedRemaining().toPlainString(),
+                        "totalAvailable", exception.getTotalAvailable().toPlainString(),
+                        "canPurchaseCredits", String.valueOf(exception.isCanPurchaseCredits())
+                )
+        );
+    }
+
     @ExceptionHandler(com.researchassistant.subscription.FeatureNotEntitledException.class)
     public ResponseEntity<ApiErrorResponse> handleFeatureNotEntitled(
             com.researchassistant.subscription.FeatureNotEntitledException exception,
@@ -385,6 +406,19 @@ public class GlobalExceptionHandler {
         );
     }
 
+
+    @ExceptionHandler(com.researchassistant.identity.exception.InvalidPhoneNumberException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidPhoneNumber(
+            com.researchassistant.identity.exception.InvalidPhoneNumberException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                "Request validation failed.",
+                request.getRequestURI(),
+                Map.of("phoneNumber", exception.getMessage())
+        );
+    }
 
     /**
      * Handles request-body validation failures.

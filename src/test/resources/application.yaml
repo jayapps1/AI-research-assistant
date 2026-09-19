@@ -47,12 +47,12 @@ spring:
 app:
   security:
     jwt:
-      secret: ${app.security.jwt.secret:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      secret: ${JWT_SECRET:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       issuer: research-assistant-api
       access-token-minutes: 15
       refresh-token-days: 30
     credentials:
-      encryption-key: ${app.security.credentials.encryption-key:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      encryption-key: ${CREDENTIAL_ENCRYPTION_KEY:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
     totp:
       issuer: "AI Research Assistant"
 

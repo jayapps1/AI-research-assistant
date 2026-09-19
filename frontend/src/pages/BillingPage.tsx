@@ -69,6 +69,34 @@ export function BillingPage() {
     },
   });
 
+  const aiCreditsQuery = useQuery({
+    queryKey: ['billing', workspaceId, 'ai-credits'],
+    queryFn: () => billingApi.aiCredits(workspaceId),
+    enabled: Boolean(workspaceId),
+  });
+
+  const aiCreditPacksQuery = useQuery({
+    queryKey: ['billing', workspaceId, 'ai-credit-packs'],
+    queryFn: () => billingApi.aiCreditPacks(workspaceId),
+    enabled: Boolean(workspaceId),
+  });
+
+  const [ledgerPage, setLedgerPage] = useState(0);
+  const aiCreditLedgerQuery = useQuery({
+    queryKey: ['billing', workspaceId, 'ai-credit-ledger', ledgerPage],
+    queryFn: () => billingApi.aiCreditLedger(workspaceId, ledgerPage, 10),
+    enabled: Boolean(workspaceId),
+  });
+
+  const buyCreditPackMutation = useMutation({
+    mutationFn: (packId: string) => billingApi.buyAiCreditPack(workspaceId, packId),
+    onSuccess: (data) => {
+      if (data?.authorizationUrl && /^https:\/\/(checkout|standard)\.paystack\.com\//.test(data.authorizationUrl)) {
+        window.location.href = data.authorizationUrl;
+      }
+    },
+  });
+
   // 1. WORKSPACE REQUIREMENT: CLEAN EMPTY STATE WHEN NO WORKSPACE IS SELECTED
   if (!workspaceId) {
     return (
@@ -428,6 +456,193 @@ export function BillingPage() {
           </div>
         )}
       </div>
+
+      {/* AI CREDITS & TOP-UP SECTION */}
+      <Card className="billing-credits-card" style={{ marginBottom: '24px' }}>
+        <div className="card-header-iconic" style={{ marginBottom: '16px' }}>
+          <Sparkles size={24} className="text-brand" />
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+              <div>
+                <h3 style={{ margin: 0 }}>AI Credits & On-Demand Top-Up</h3>
+                <p className="muted" style={{ margin: '4px 0 0' }}>
+                  Empirical credit wallet for AI research generation, grounded document retrieval, and analysis.
+                </p>
+              </div>
+              <Badge tone="info">NO 30% SURCHARGE ON CREDIT PACKS</Badge>
+            </div>
+          </div>
+        </div>
+
+        {/* WALLET BALANCES GRID */}
+        {aiCreditsQuery.isLoading ? (
+          <p className="muted">Loading credit balances...</p>
+        ) : (
+          <div className="grid cols-4" style={{ gap: '14px', marginBottom: '20px' }}>
+            <div style={{ padding: '14px', borderRadius: '8px', background: 'var(--surface-subtle, rgba(255,255,255,0.03))', border: '1px solid var(--border-color, rgba(255,255,255,0.08))' }}>
+              <span className="muted" style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Available</span>
+              <div style={{ fontSize: '1.75rem', fontWeight: 700, margin: '4px 0' }}>
+                {Number(aiCreditsQuery.data?.totalAvailable ?? 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
+              </div>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Ready for generation tasks</span>
+            </div>
+
+            <div style={{ padding: '14px', borderRadius: '8px', background: 'var(--surface-subtle, rgba(255,255,255,0.03))', border: '1px solid var(--border-color, rgba(255,255,255,0.08))' }}>
+              <span className="muted" style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Plan Monthly Allowance</span>
+              <div style={{ fontSize: '1.75rem', fontWeight: 700, margin: '4px 0' }}>
+                {aiCreditsQuery.data?.included?.remaining != null
+                  ? Number(aiCreditsQuery.data.included.remaining).toLocaleString()
+                  : (aiCreditsQuery.data?.included?.limitMode === 'UNLIMITED' ? 'Unlimited' : '0')}
+              </div>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {aiCreditsQuery.data?.included?.limit ? `Limit: ${Number(aiCreditsQuery.data.included.limit).toLocaleString()} / mo` : 'Reset monthly with plan'}
+              </span>
+            </div>
+
+            <div style={{ padding: '14px', borderRadius: '8px', background: 'var(--surface-subtle, rgba(255,255,255,0.03))', border: '1px solid var(--border-color, rgba(255,255,255,0.08))' }}>
+              <span className="muted" style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Purchased Packs</span>
+              <div style={{ fontSize: '1.75rem', fontWeight: 700, margin: '4px 0' }}>
+                {Number(aiCreditsQuery.data?.purchased?.remaining ?? 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
+              </div>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Never expire while active</span>
+            </div>
+
+            <div style={{ padding: '14px', borderRadius: '8px', background: 'var(--surface-subtle, rgba(255,255,255,0.03))', border: '1px solid var(--border-color, rgba(255,255,255,0.08))' }}>
+              <span className="muted" style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Promotional / Admin</span>
+              <div style={{ fontSize: '1.75rem', fontWeight: 700, margin: '4px 0' }}>
+                {Number(aiCreditsQuery.data?.promotional?.remaining ?? 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
+              </div>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Complimentary grants</span>
+            </div>
+          </div>
+        )}
+
+        <div className="alert info" style={{ marginBottom: '20px', fontSize: '0.875rem' }}>
+          <strong>Order of consumption:</strong> When running AI generations, the system automatically uses your <strong>(1) Included monthly allowance</strong> first, then <strong>(2) Promotional credits</strong>, and finally <strong>(3) Purchased credits</strong>. Pre-reservations prevent concurrent exhaustion and only exact token credits are deducted.
+        </div>
+
+        {/* TOP-UP PACKS */}
+        <h4 style={{ margin: '0 0 12px', fontSize: '1.05rem' }}>Buy AI Credit Top-Up Packs</h4>
+        {buyCreditPackMutation.isError && (
+          <div className="alert danger" style={{ marginBottom: '12px' }}>
+            {(buyCreditPackMutation.error as any)?.response?.data?.message || 'Failed to initialize pack purchase.'}
+          </div>
+        )}
+        {aiCreditPacksQuery.isLoading ? (
+          <p className="muted">Loading available packs...</p>
+        ) : (aiCreditPacksQuery.data ?? []).length === 0 ? (
+          <p className="muted">No credit packs available for purchase.</p>
+        ) : (
+          <div className="grid cols-3" style={{ gap: '16px', marginBottom: '24px' }}>
+            {(aiCreditPacksQuery.data ?? []).map((pack) => (
+              <div
+                key={pack.id}
+                style={{
+                  padding: '16px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border-color, rgba(255,255,255,0.1))',
+                  background: 'var(--surface-card, rgba(255,255,255,0.02))',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                    <h4 style={{ margin: 0, fontSize: '1.1rem' }}>{pack.name}</h4>
+                    <Badge tone="success">{pack.currency} {Number(pack.priceAmount || pack.price).toFixed(2)}</Badge>
+                  </div>
+                  <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
+                    {pack.description || `${Number(pack.creditAmount || pack.credits).toLocaleString()} AI credits`}
+                  </p>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--brand-color, #4f46e5)', marginBottom: '14px' }}>
+                    +{Number(pack.creditAmount || pack.credits).toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 400, color: 'var(--text-muted)' }}>credits</span>
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="primary"
+                  className="w-full"
+                  disabled={buyCreditPackMutation.isPending}
+                  onClick={() => buyCreditPackMutation.mutate(pack.id)}
+                >
+                  {buyCreditPackMutation.isPending ? 'Redirecting to Paystack...' : `Buy for ${pack.currency} ${Number(pack.priceAmount || pack.price).toFixed(2)}`}
+                  <ArrowRight size={14} />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* LEDGER AUDIT TABLE */}
+        <h4 style={{ margin: '0 0 12px', fontSize: '1.05rem' }}>AI Credit Ledger & Usage History</h4>
+        {aiCreditLedgerQuery.isLoading ? (
+          <p className="muted">Loading credit transactions...</p>
+        ) : (aiCreditLedgerQuery.data?.content ?? []).length === 0 ? (
+          <p className="muted">No credit transactions recorded yet.</p>
+        ) : (
+          <>
+            <div className="admin-table-container" style={{ marginTop: '8px' }}>
+              <table className="admin-data-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Bucket</th>
+                    <th>Amount</th>
+                    <th>Balance Before</th>
+                    <th>Balance After</th>
+                    <th>Source / Request</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(aiCreditLedgerQuery.data?.content ?? []).map((entry) => (
+                    <tr key={entry.id}>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {entry.createdAt ? new Date(entry.createdAt).toLocaleString() : '—'}
+                      </td>
+                      <td>
+                        <Badge
+                          tone={
+                            entry.type.includes('GRANT') || entry.type.includes('PURCHASE')
+                              ? 'success'
+                              : entry.type.includes('RELEASE')
+                                ? 'info'
+                                : 'warning'
+                          }
+                        >
+                          {entry.type}
+                        </Badge>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>{entry.bucket}</span>
+                      </td>
+                      <td style={{ fontWeight: 600 }}>
+                        {Number(entry.creditAmount) > 0 ? `+${Number(entry.creditAmount).toFixed(2)}` : Number(entry.creditAmount).toFixed(2)}
+                      </td>
+                      <td>{Number(entry.balanceBefore).toFixed(2)}</td>
+                      <td>{Number(entry.balanceAfter).toFixed(2)}</td>
+                      <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        {entry.sourceType}{entry.aiRequestId ? ` · Req ${entry.aiRequestId.slice(0, 8)}...` : ''}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {(aiCreditLedgerQuery.data?.totalPages ?? 1) > 1 && (
+              <div style={{ marginTop: '14px' }}>
+                <Pagination
+                  page={ledgerPage}
+                  totalPages={aiCreditLedgerQuery.data?.totalPages ?? 1}
+                  onPageChange={setLedgerPage}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </Card>
 
       {/* PAYMENT HISTORY */}
       <Card className="billing-history-card">

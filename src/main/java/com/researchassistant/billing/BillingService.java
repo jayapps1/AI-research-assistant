@@ -16,6 +16,8 @@ import com.researchassistant.notification.NotificationType;
 import com.researchassistant.subscription.*;
 import com.researchassistant.workspace.entity.Workspace;
 import com.researchassistant.workspace.repository.WorkspaceRepository;
+import com.researchassistant.billing.aicredit.service.AiCreditPurchaseService;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -48,6 +50,7 @@ public class BillingService {
     private final SecureRandom random = new SecureRandom();
 
     private final BillingPriceCalculator priceCalculator;
+    private final ObjectProvider<AiCreditPurchaseService> creditPurchaseServiceProvider;
 
     public BillingService(WorkspaceRepository workspaceRepository, SubscriptionPlanRepository planRepository,
                           WorkspaceSubscriptionRepository subscriptionRepository, PaymentTransactionRepository transactionRepository,
@@ -58,7 +61,8 @@ public class BillingService {
                           FreeSubscriptionProvisioningService freeSubscriptionProvisioningService,
                           SubscriptionPlanPriceRepository planPriceRepository,
                           MoneyMinorUnitConverter moneyMinorUnitConverter,
-                          BillingPriceCalculator priceCalculator) {
+                          BillingPriceCalculator priceCalculator,
+                          ObjectProvider<AiCreditPurchaseService> creditPurchaseServiceProvider) {
         this.workspaceRepository = workspaceRepository;
         this.planRepository = planRepository;
         this.subscriptionRepository = subscriptionRepository;
@@ -75,6 +79,7 @@ public class BillingService {
         this.planPriceRepository = planPriceRepository;
         this.moneyMinorUnitConverter = moneyMinorUnitConverter;
         this.priceCalculator = priceCalculator;
+        this.creditPurchaseServiceProvider = creditPurchaseServiceProvider;
     }
 
     public InitializePaymentResponse initialize(UUID workspaceId, User user, String planCode, BillingInterval interval) {
@@ -276,12 +281,16 @@ public class BillingService {
 
     private BillingDtos.PaymentAttemptDetailResponse toDetailResponse(PaymentAttempt attempt) {
         BillingPaymentIntent intent = attempt.getPaymentIntent();
+        String planCode = intent.getPlan() != null ? intent.getPlan().getCode()
+                : (intent.getAiCreditPurchase() != null ? intent.getAiCreditPurchase().getPackCode() : "AI_CREDIT_PACK");
+        String planName = intent.getPlan() != null ? intent.getPlan().getName()
+                : (intent.getAiCreditPurchase() != null ? intent.getAiCreditPurchase().getPackName() : "AI Credit Pack");
         return new BillingDtos.PaymentAttemptDetailResponse(
                 attempt.getId(),
                 intent.getId(),
                 intent.getWorkspace().getId(),
-                intent.getPlan().getCode(),
-                intent.getPlan().getName(),
+                planCode,
+                planName,
                 attempt.getExpectedAmount(),
                 attempt.getCurrency(),
                 attempt.getAttemptNumber(),
@@ -339,7 +348,9 @@ public class BillingService {
                 .stream()
                 .map(a -> new PaymentAttemptSummary(a.getAttemptNumber(), a.getStatus(), safeFailure(a), a.getCreatedAt(), a.getCompletedAt()))
                 .toList();
-        return new PaymentIntentResponse(intent.getId(), intent.getWorkspace().getId(), intent.getStatus(), intent.getPlan().getCode(), intent.getBillingInterval(),
+        String planCode = intent.getPlan() != null ? intent.getPlan().getCode()
+                : (intent.getAiCreditPurchase() != null ? intent.getAiCreditPurchase().getPackCode() : "AI_CREDIT_PACK");
+        return new PaymentIntentResponse(intent.getId(), intent.getWorkspace().getId(), intent.getStatus(), planCode, intent.getBillingInterval(),
                 intent.getExpectedAmount(), intent.getCurrency(), attempts);
     }
 
@@ -356,11 +367,22 @@ public class BillingService {
     private boolean attemptMetadataMatches(PaymentAttempt attempt, PaystackVerificationData data) {
         if (data.metadata() == null || data.metadata().isNull() || data.metadata().isMissingNode()) return false;
         BillingPaymentIntent intent = attempt.getPaymentIntent();
+        if (intent.getPurchaseType() == BillingPurchaseType.AI_CREDIT_PACK) {
+            boolean baseMatch = intent.getId().toString().equals(data.metadata().path("internalPaymentIntentId").asText())
+                    && attempt.getId().toString().equals(data.metadata().path("internalPaymentAttemptId").asText())
+                    && intent.getWorkspace().getId().toString().equals(data.metadata().path("workspaceId").asText());
+            if (!baseMatch) return false;
+            String packCode = data.metadata().path("packCode").asText();
+            if (packCode != null && !packCode.isBlank() && intent.getAiCreditPurchase() != null) {
+                return intent.getAiCreditPurchase().getPackCode().equalsIgnoreCase(packCode);
+            }
+            return true;
+        }
         return intent.getId().toString().equals(data.metadata().path("internalPaymentIntentId").asText())
                 && attempt.getId().toString().equals(data.metadata().path("internalPaymentAttemptId").asText())
                 && intent.getWorkspace().getId().toString().equals(data.metadata().path("workspaceId").asText())
-                && intent.getPlan().getCode().equalsIgnoreCase(data.metadata().path("planCode").asText())
-                && intent.getBillingInterval().name().equalsIgnoreCase(data.metadata().path("billingInterval").asText());
+                && (intent.getPlan() == null || intent.getPlan().getCode().equalsIgnoreCase(data.metadata().path("planCode").asText()))
+                && (intent.getBillingInterval() == null || intent.getBillingInterval().name().equalsIgnoreCase(data.metadata().path("billingInterval").asText()));
     }
 
     private PaymentAttemptInitializationResponse initializeAttempt(BillingPaymentIntent intent, User user, boolean retry) {
@@ -409,11 +431,15 @@ public class BillingService {
         if (intent.getStatus() != PaymentIntentStatus.PAID) {
             intent.setStatus(PaymentIntentStatus.PAID);
             intent.setSettledAt(OffsetDateTime.now());
-            subscriptionChangeService.activatePlan(intent.getWorkspace().getId(), intent.getPlan().getCode(),
-                    intent.getBillingInterval(), attempt.getProviderReference(), actorId, "PAYMENT_SUCCESS", SubscriptionAccessSource.PAID);
-            auditEventService.record(actorId, "USER", intent.getWorkspace(), null, AuditEventType.SUBSCRIPTION_UPGRADED,
-                    "WorkspaceSubscription", intent.getWorkspace().getId(), "{\"plan\":\"" + intent.getPlan().getCode() + "\"}");
-            notifyPayment(attempt, NotificationType.PAYMENT_SUCCESS, "Payment succeeded", "Your workspace has been upgraded to " + intent.getPlan().getName() + ".");
+            if (intent.getPurchaseType() == BillingPurchaseType.AI_CREDIT_PACK && intent.getAiCreditPurchase() != null) {
+                creditPurchaseServiceProvider.getObject().fulfillPurchase(intent.getAiCreditPurchase().getId(), attempt, actorId);
+            } else if (intent.getPlan() != null) {
+                subscriptionChangeService.activatePlan(intent.getWorkspace().getId(), intent.getPlan().getCode(),
+                        intent.getBillingInterval(), attempt.getProviderReference(), actorId, "PAYMENT_SUCCESS", SubscriptionAccessSource.PAID);
+                auditEventService.record(actorId, "USER", intent.getWorkspace(), null, AuditEventType.SUBSCRIPTION_UPGRADED,
+                        "WorkspaceSubscription", intent.getWorkspace().getId(), "{\"plan\":\"" + intent.getPlan().getCode() + "\"}");
+                notifyPayment(attempt, NotificationType.PAYMENT_SUCCESS, "Payment succeeded", "Your workspace has been upgraded to " + intent.getPlan().getName() + ".");
+            }
         } else if (existingSuccesses > 0) {
             attempt.setRequiresReview(true);
             intent.setStatus(PaymentIntentStatus.REQUIRES_REVIEW);

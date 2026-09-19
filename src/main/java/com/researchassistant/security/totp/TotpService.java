@@ -40,6 +40,10 @@ public class TotpService {
     private static final String HMAC_ALGORITHM = "HmacSHA1";
     private static final String INVALID_CREDENTIALS =
             "Invalid credentials.";
+    private static final String UNVERIFIED_AUTHENTICATOR =
+            "Your authenticator configuration could not be verified. Use a recovery code or reset your authenticator.";
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(TotpService.class);
 
     private final TotpCredentialRepository totpCredentialRepository;
     private final CredentialSecretEncryptor credentialSecretEncryptor;
@@ -270,7 +274,14 @@ public class TotpService {
             throw new AuthenticationFailedException(INVALID_CREDENTIALS);
         }
 
-        String secret = credentialSecretEncryptor.decrypt(encryptedSecret);
+        String secret;
+        try {
+            secret = credentialSecretEncryptor.decrypt(encryptedSecret);
+        } catch (Exception exception) {
+            String correlationId = java.util.UUID.randomUUID().toString();
+            log.warn("TOTP secret decryption failed [correlationId={}]: unable to decrypt credential with configured key", correlationId);
+            throw new AuthenticationFailedException(UNVERIFIED_AUTHENTICATOR);
+        }
 
         byte[] secretBytes = decodeBase32(secret);
         long currentTimestep = Instant.now().getEpochSecond()

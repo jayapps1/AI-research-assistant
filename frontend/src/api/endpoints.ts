@@ -3,8 +3,13 @@ import type {
   AdminPaymentItem,
   AdminPlanEntitlement,
   AdminSubscriptionPlan,
+  AiCreditBalance,
+  AiCreditLedgerItem,
+  AiCreditPack,
+  AdminGrantAiCreditsRequest,
   AuthTokenResponse,
   Citation,
+  CreateAiCreditPackRequest,
   CreateSubscriptionPlanRequest,
   DatasetImportPreview,
   DatasetImportStart,
@@ -28,6 +33,8 @@ import type {
   ResearchProgressResponse,
   ResearchProject,
   TotpEnrollmentResponse,
+  UpdateAiCreditPackRequest,
+  UpdateProfileRequest,
   UpdateSubscriptionPlanRequest,
   User,
   UserDashboardResponse,
@@ -43,7 +50,7 @@ export const authApi = {
     api.post<User>('/auth/register', body).then((r) => r.data),
   login: (body: { email: string; password?: string; totpCode?: string; authenticationMethod?: 'PASSWORD' | 'TOTP' | 'PASSWORD_AND_TOTP' }) =>
     api.post<LoginResponse>('/auth/login', body).then((r) => r.data),
-  completeTotpLoginChallenge: (body: { challengeId: string; totpCode: string }) =>
+  completeTotpLoginChallenge: (body: { challengeId: string; totpCode?: string; recoveryCode?: string }) =>
     api.post<AuthTokenResponse>('/auth/login/totp-challenge', body).then((r) => r.data),
   logout: (refreshToken: string) => api.post('/auth/logout', { refreshToken }).then((r) => r.data),
   logoutAll: () => api.post('/auth/logout-all').then((r) => r.data),
@@ -222,6 +229,14 @@ export const billingApi = {
   getAttempt: (attemptId: string) => api.get<PaymentAttemptDetail>(`/billing/payment-attempts/${attemptId}`).then((r) => r.data),
   priceBreakdown: (planCode: string, interval = 'MONTHLY') =>
     api.get<PlanPriceBreakdown>(`/billing/plans/${planCode}/breakdown`, { params: { interval } }).then((r) => r.data),
+  aiCredits: (workspaceId: string) =>
+    api.get<AiCreditBalance>(`/workspaces/${workspaceId}/ai-credits`).then((r) => r.data),
+  aiCreditPacks: (workspaceId: string) =>
+    api.get<AiCreditPack[]>(`/workspaces/${workspaceId}/billing/ai-credit-packs`).then((r) => r.data),
+  buyAiCreditPack: (workspaceId: string, packId: string) =>
+    api.post<PaymentAttemptInitialization>(`/workspaces/${workspaceId}/billing/ai-credits/purchase`, { packId }).then((r) => r.data),
+  aiCreditLedger: (workspaceId: string, page = 0, size = 15) =>
+    api.get<PageResponse<AiCreditLedgerItem>>(`/workspaces/${workspaceId}/ai-credits/ledger`, { params: { page, size } }).then((r) => r.data),
 };
 
 export const notificationApi = {
@@ -248,6 +263,16 @@ export const adminApi = {
   payments: (page = 0, size = 20) => api.get<PageResponse<AdminPaymentItem>>('/admin/payments', { params: { page, size } }).then((r) => r.data),
   complimentaryAccess: () => api.get<PageResponse<Record<string, unknown>>>('/admin/complimentary-access').then((r) => r.data),
   grantComplimentaryAccess: (body: Record<string, unknown>) => api.post('/admin/complimentary-access', body).then((r) => r.data),
+  aiCreditPacks: () =>
+    api.get<AiCreditPack[]>('/admin/billing/ai-credit-packs').then((r) => r.data),
+  createAiCreditPack: (body: CreateAiCreditPackRequest) =>
+    api.post<AiCreditPack>('/admin/billing/ai-credit-packs', body).then((r) => r.data),
+  updateAiCreditPack: (packId: string, body: UpdateAiCreditPackRequest) =>
+    api.patch<AiCreditPack>(`/admin/billing/ai-credit-packs/${packId}`, body).then((r) => r.data),
+  grantAiCredits: (workspaceId: string, body: AdminGrantAiCreditsRequest) =>
+    api.post<AiCreditBalance>(`/admin/workspaces/${workspaceId}/ai-credits/grant`, body).then((r) => r.data),
+  workspaceAiCredits: (workspaceId: string) =>
+    api.get<AiCreditBalance>(`/admin/workspaces/${workspaceId}/ai-credits`).then((r) => r.data),
 };
 
 export const publicApi = {
@@ -268,6 +293,8 @@ export const dashboardApi = {
 
 export const profileApi = {
   getProfile: () => api.get<UserProfileResponse>('/me/profile').then((r) => r.data),
+  updateProfile: (data: UpdateProfileRequest) =>
+    api.patch<UserProfileResponse>('/me/profile', data).then((r) => r.data),
   uploadImage: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);

@@ -2,6 +2,7 @@ package com.researchassistant.usage;
 
 public enum UsageMetricType {
     AI_GENERATION_REQUEST,
+    AI_GENERATION_CREDIT,
     AI_INPUT_TOKEN,
     AI_OUTPUT_TOKEN,
     AI_TOTAL_TOKEN,

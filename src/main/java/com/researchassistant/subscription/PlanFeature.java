@@ -2,6 +2,7 @@ package com.researchassistant.subscription;
 
 public enum PlanFeature {
     AI_GENERATION,
+    AI_GENERATION_CREDITS_MONTHLY,
     AI_EMBEDDINGS,
     AI_TOKENS,
     SEMANTIC_SEARCH,

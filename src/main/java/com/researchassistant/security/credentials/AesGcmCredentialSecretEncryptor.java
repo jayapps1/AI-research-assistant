@@ -78,7 +78,7 @@ public class AesGcmCredentialSecretEncryptor
         String[] parts = encryptedSecret.split("\\.", 2);
 
         if (parts.length != 2) {
-            throw new IllegalStateException(
+            throw new CredentialDecryptionException(
                     "Credential secret ciphertext is malformed."
             );
         }
@@ -98,7 +98,7 @@ public class AesGcmCredentialSecretEncryptor
 
             return new String(plaintext, StandardCharsets.UTF_8);
         } catch (IllegalArgumentException | GeneralSecurityException exception) {
-            throw new IllegalStateException(
+            throw new CredentialDecryptionException(
                     "Credential secret decryption failed.",
                     exception
             );
