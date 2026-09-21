@@ -19,6 +19,8 @@ public interface RagQueryEvidenceRepository
             int evidenceOrdinal
     );
 
+    boolean existsByDocumentId(UUID documentId);
+
     @EntityGraph(attributePaths = {
             "query",
             "query.conversation",

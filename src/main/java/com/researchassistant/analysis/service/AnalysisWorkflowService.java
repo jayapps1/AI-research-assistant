@@ -17,6 +17,8 @@ import com.researchassistant.researchdesign.entity.*;
 import com.researchassistant.researchdesign.repository.*;
 import com.researchassistant.security.audit.SecurityAuditEventType;
 import com.researchassistant.security.audit.SecurityAuditService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -50,6 +52,7 @@ public class AnalysisWorkflowService {
     private final ProjectAuthorizationService authorizationService;
     private final CacheInvalidationService cacheInvalidationService;
     private final SecurityAuditService auditService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AnalysisWorkflowService(AnalysisRunRepository runRepository, AnalysisResultRepository resultRepository,
             ResearchFindingRepository findingRepository, FindingDiscussionRepository discussionRepository,
@@ -452,17 +455,38 @@ public class AnalysisWorkflowService {
         report.setProject(project);
         report.setTitle(required(request.title(), "Report title is required."));
         report.setType(request.type() == null ? ResearchReportType.FINAL_YEAR_PROJECT : request.type());
-        report.setTemplate(loadTemplate(request.templateId(), report.getType()));
+        ResearchReportTemplate template = request.templateId() != null
+                ? loadTemplate(request.templateId(), report.getType())
+                : project.getReportTemplate() != null
+                        ? project.getReportTemplate()
+                        : loadTemplate(null, report.getType());
+        report.setTemplate(template);
         report.setInstitutionName(optional(request.institutionName()));
         report.setDepartmentName(optional(request.departmentName()));
         report.setAuthorName(optional(request.authorName()));
         report.setSupervisorName(optional(request.supervisorName()));
         report.setDegreeProgram(optional(request.degreeProgram()));
         report.setSubmissionYear(request.submissionYear());
-        report.setCitationStyle(request.citationStyle() == null ? CitationStyle.APA_7 : request.citationStyle());
+        CitationStyle citationStyle = request.citationStyle() != null
+                ? request.citationStyle()
+                : project.getCitationStyle() != null
+                        ? project.getCitationStyle()
+                        : template != null && template.getDefaultCitationStyle() != null
+                                ? template.getDefaultCitationStyle()
+                                : CitationStyle.APA_7;
+        report.setCitationStyle(citationStyle);
         report.setOrigin(defaultOrigin(request.origin()));
         report.setCreatedBy(user);
         ResearchReport saved = reportRepository.save(report);
+        if (saved.getTemplate() != null && saved.getTemplate().getConfigurationJson() != null && !saved.getTemplate().getConfigurationJson().isBlank()) {
+            try {
+                assembleFromTemplate(saved, user, saved.getTemplate().getConfigurationJson());
+            } catch (Exception e) {
+                createDefaultChapters(saved, user);
+            }
+        } else {
+            createDefaultChapters(saved, user);
+        }
         auditService.record(user.getId(), SecurityAuditEventType.REPORT_CREATED);
         return ReportResponse.from(saved);
     }
@@ -500,9 +524,136 @@ public class AnalysisWorkflowService {
     public ReportResponse assembleReport(UUID reportId, User user) {
         ResearchReport report = loadReportForEdit(reportId, user);
         if (!chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(reportId).isEmpty()) return ReportResponse.from(report);
-        createDefaultChapters(report, user);
+
+        if (report.getTemplate() != null && report.getTemplate().getConfigurationJson() != null && !report.getTemplate().getConfigurationJson().isBlank()) {
+            try {
+                assembleFromTemplate(report, user, report.getTemplate().getConfigurationJson());
+            } catch (Exception e) {
+                createDefaultChapters(report, user);
+            }
+        } else {
+            createDefaultChapters(report, user);
+        }
+
         auditService.record(user.getId(), SecurityAuditEventType.REPORT_ASSEMBLED);
         return ReportResponse.from(report);
+    }
+
+    private void assembleFromTemplate(ResearchReport report, User user, String configurationJson) throws Exception {
+        JsonNode root = objectMapper.readTree(configurationJson);
+        JsonNode chaptersNode = root.get("chapters");
+        if (chaptersNode == null || !chaptersNode.isArray()) {
+            createDefaultChapters(report, user);
+            return;
+        }
+
+        int chOrder = 1;
+        for (JsonNode chNode : chaptersNode) {
+            ResearchReportChapter chapter = new ResearchReportChapter();
+            chapter.setReport(report);
+            String typeStr = chNode.has("type") ? chNode.get("type").asText() : "CUSTOM";
+            try {
+                chapter.setType(ReportChapterType.valueOf(typeStr));
+            } catch (Exception ignored) {
+                chapter.setType(ReportChapterType.CUSTOM);
+            }
+            chapter.setTitle(chNode.has("title") ? chNode.get("title").asText() : "Chapter " + chOrder);
+            if (chNode.has("chapterNumber") && !chNode.get("chapterNumber").isNull()) {
+                chapter.setChapterNumber(chNode.get("chapterNumber").asInt());
+            }
+            chapter.setDisplayOrder(chOrder++);
+            ResearchReportChapter savedChapter = chapterRepository.save(chapter);
+
+            JsonNode sectionsNode = chNode.get("sections");
+            if (sectionsNode != null && sectionsNode.isArray()) {
+                int secOrder = 1;
+                for (JsonNode secNode : sectionsNode) {
+                    ResearchReportSection sec = new ResearchReportSection();
+                    sec.setChapter(savedChapter);
+                    String secTypeStr = secNode.has("type") ? secNode.get("type").asText() : "CUSTOM";
+                    try {
+                        sec.setType(ReportSectionType.valueOf(secTypeStr));
+                    } catch (Exception ignored) {
+                        sec.setType(ReportSectionType.CUSTOM);
+                    }
+                    sec.setHeading(secNode.has("heading") ? secNode.get("heading").asText() : "Section " + secOrder);
+                    sec.setDisplayOrder(secOrder++);
+                    sec.setOrigin(ContentOrigin.USER);
+                    sec.setCreatedBy(user);
+                    sectionRepository.save(sec);
+                }
+            } else {
+                createSeedSection(savedChapter, user);
+            }
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<TemplateResponse> listTemplates(User user) {
+        return templateRepository.findAll().stream().map(TemplateResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public SectionCapabilitiesResponse getSectionCapabilities(UUID projectId, User user) {
+        authorizationService.requireProjectViewer(projectId, user);
+        long datasetCount = datasetRepository.countByProjectId(projectId);
+        long resultCount = resultRepository.countByProjectId(projectId);
+        long findingCount = findingRepository.countByProjectId(projectId);
+
+        boolean hasData = datasetCount > 0 || resultCount > 0;
+        boolean hasFindings = findingCount > 0;
+
+        List<SectionCapability> capabilities = new ArrayList<>();
+        capabilities.add(new SectionCapability("LITERATURE_REVIEW", "READY", "Thematic synthesis, comparative analysis, and research gaps across sources", false, false));
+        capabilities.add(new SectionCapability("PROBLEM_STATEMENT", "READY", "Formulate empirical gap, context, and problem magnitude", false, false));
+        capabilities.add(new SectionCapability("BACKGROUND", "READY", "Broader scholarly and contextual foundation", false, false));
+        capabilities.add(new SectionCapability("RESEARCH_GAP", "READY", "Synthesized omissions and methodological limitations", false, false));
+        capabilities.add(new SectionCapability("OBJECTIVES", "READY", "Hierarchical research aims derived from topic and problem", false, false));
+        capabilities.add(new SectionCapability("RESEARCH_QUESTIONS", "READY", "Empirically answerable research questions aligned with aims", false, false));
+        capabilities.add(new SectionCapability("HYPOTHESES", "READY", "Directional or null hypotheses grounded in theoretical literature", false, false));
+        capabilities.add(new SectionCapability("CONCEPTUAL_FRAMEWORK", "READY", "Key constructs, variables, and hypothesized interrelationships", false, false));
+        capabilities.add(new SectionCapability("THEORETICAL_FRAMEWORK", "READY", "Grounding theoretical paradigms and explanatory models", false, false));
+        capabilities.add(new SectionCapability("METHODOLOGY", "READY", "Research design, population, and sampling strategy proposal", false, false));
+        capabilities.add(new SectionCapability("POPULATION_SAMPLING", "READY", "Sampling frame, sample size determination, and selection criteria", false, false));
+        capabilities.add(new SectionCapability("DATA_COLLECTION_METHOD", "READY", "Procedures for empirical data collection", false, false));
+        capabilities.add(new SectionCapability("RESEARCH_INSTRUMENT", "READY", "Questionnaire or interview guide draft based on literature", false, false));
+        capabilities.add(new SectionCapability("FINDINGS", hasData ? "READY" : "DATA_REQUIRED", "Empirical results synthesized from actual research data", true, false));
+        capabilities.add(new SectionCapability("DISCUSSION", hasFindings ? "READY" : "FINDINGS_REQUIRED", "Interpretation of empirical findings contextualized against literature", true, true));
+        capabilities.add(new SectionCapability("CONCLUSION", hasFindings ? "READY" : "FINDINGS_REQUIRED", "Synthesized conclusions directly addressing research objectives", true, true));
+        capabilities.add(new SectionCapability("RECOMMENDATIONS", hasFindings ? "READY" : "FINDINGS_REQUIRED", "Actionable practical, policy, and future research recommendations", true, true));
+        capabilities.add(new SectionCapability("ABSTRACT", "READY", "Synthesis of background, problem, aim, methodology, and conclusions", false, false));
+        capabilities.add(new SectionCapability("CUSTOM", "READY", "Custom researcher-defined section", false, false));
+
+        return new SectionCapabilitiesResponse(projectId, capabilities);
+    }
+
+    @Transactional(readOnly = true)
+    public TableOfContentsResponse generateTableOfContents(UUID reportId, User user) {
+        ResearchReport report = loadReport(reportId);
+        authorizationService.requireProjectViewer(report.getProject().getId(), user);
+        List<ResearchReportChapter> chapters = chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(reportId);
+
+        StringBuilder md = new StringBuilder();
+        md.append("# TABLE OF CONTENTS\n\n");
+
+        List<TableOfContentsItem> chapterItems = new ArrayList<>();
+        for (ResearchReportChapter ch : chapters) {
+            List<ResearchReportSection> sections = sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(ch.getId());
+            List<TableOfContentsSectionItem> sectionItems = new ArrayList<>();
+
+            md.append("### ").append(ch.getTitle()).append("\n");
+            int secIndex = 1;
+            for (ResearchReportSection sec : sections) {
+                sectionItems.add(new TableOfContentsSectionItem(sec.getHeading(), sec.getDisplayOrder(), sec.getType()));
+                String prefix = ch.getChapterNumber() != null ? ch.getChapterNumber() + "." + secIndex : "-";
+                md.append(prefix).append(" ").append(sec.getHeading()).append("\n");
+                secIndex++;
+            }
+            md.append("\n");
+            chapterItems.add(new TableOfContentsItem(ch.getTitle(), ch.getChapterNumber(), ch.getDisplayOrder(), sectionItems));
+        }
+
+        return new TableOfContentsResponse(reportId, report.getTitle(), chapterItems, md.toString());
     }
 
     @Transactional(readOnly = true)

@@ -209,6 +209,21 @@ public class AnalysisWorkflowController {
         return service.validateReport(reportId, user(authentication));
     }
 
+    @GetMapping("/report-templates")
+    public java.util.List<TemplateResponse> listTemplates(Authentication authentication) {
+        return service.listTemplates(user(authentication));
+    }
+
+    @GetMapping("/projects/{projectId}/section-capabilities")
+    public SectionCapabilitiesResponse getSectionCapabilities(Authentication authentication, @PathVariable UUID projectId) {
+        return service.getSectionCapabilities(projectId, user(authentication));
+    }
+
+    @GetMapping("/reports/{reportId}/table-of-contents")
+    public TableOfContentsResponse getTableOfContents(Authentication authentication, @PathVariable UUID reportId) {
+        return service.generateTableOfContents(reportId, user(authentication));
+    }
+
     @PostMapping("/reports/{reportId}/finalize")
     public ReportResponse finalizeReport(Authentication authentication, @PathVariable UUID reportId) {
         return service.finalizeReport(reportId, user(authentication));

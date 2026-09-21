@@ -92,8 +92,8 @@ describe('SecuritySettingsPage Component', () => {
     });
 
     // Type 6 digits into OtpInput
-    const input = screen.getByRole('textbox');
-    fireEvent.change(input, { target: { value: '123456' } });
+    const boxes = screen.getAllByTestId('otp-box');
+    fireEvent.change(boxes[0], { target: { value: '123456' } });
 
     // Click confirm enrollment button
     const confirmBtn = screen.getByRole('button', { name: /verify and enable/i });

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Bell,
@@ -49,25 +49,22 @@ const researchNav = [
 
 const projectSections = [
   ['Overview', ''],
+  ['Sources', 'sources'],
   ['Research', 'research'],
-  ['Documents', 'documents'],
-  ['Literature', 'research#Literature Review'],
-  ['Methodology', 'research#Methodology'],
-  ['Instruments', 'research#Instruments'],
-  ['Data', 'data'],
+  ['AI Assistant', 'assistant'],
+  ['Writing', 'writing'],
   ['Analysis', 'analysis'],
-  ['AI Assistant', 'ai'],
-  ['Findings', 'findings'],
   ['Report', 'report'],
+  ['Tasks', 'tasks'],
   ['References', 'references'],
-  ['Collaboration', 'collaboration'],
-  ['Activity', 'activity'],
+  ['Advanced Workflow', 'research/advanced'],
   ['Settings', 'settings'],
 ] as const;
 
 export function AppShell() {
   const [open, setOpen] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const auth = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -78,7 +75,7 @@ export function AppShell() {
     new URLSearchParams(location.search).get('projectId') ??
     '';
 
-  // Close drawer on Escape key
+  // Close drawer and menu on Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -88,6 +85,26 @@ export function AppShell() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Close avatar dropdown when clicking outside
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setAvatarOpen(false);
+      }
+    }
+    if (avatarOpen) {
+      document.addEventListener('pointerdown', handlePointerDown);
+    }
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [avatarOpen]);
+
+  // Close avatar dropdown on history navigation
+  useEffect(() => {
+    const handlePopState = () => setAvatarOpen(false);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   const userName =
@@ -118,6 +135,7 @@ export function AppShell() {
           >
             {open ? <X size={18} /> : <Menu size={18} />}
           </Button>
+
           <span className="brand-mark">RA</span>
           <span className="brand-title">AI Research Assistant</span>
         </div>
@@ -144,11 +162,12 @@ export function AppShell() {
           </Button>
 
           {/* User Avatar Menu */}
-          <div className="user-menu-wrapper">
+          <div className="user-menu-wrapper" ref={menuRef}>
             <button
               type="button"
               className="avatar-btn"
               aria-label="Account menu"
+              aria-haspopup="menu"
               aria-expanded={avatarOpen}
               onClick={() => setAvatarOpen((v) => !v)}
             >
@@ -183,21 +202,30 @@ export function AppShell() {
                 <button
                   type="button"
                   className="dropdown-item"
-                  onClick={() => navigate(paths.profile)}
+                  onClick={() => {
+                    setAvatarOpen(false);
+                    navigate(paths.profile);
+                  }}
                 >
                   <User size={15} /> Profile
                 </button>
                 <button
                   type="button"
                   className="dropdown-item"
-                  onClick={() => navigate(paths.security)}
+                  onClick={() => {
+                    setAvatarOpen(false);
+                    navigate(paths.security);
+                  }}
                 >
                   <Shield size={15} /> Security Settings
                 </button>
                 <button
                   type="button"
                   className="dropdown-item"
-                  onClick={() => navigate(paths.billing)}
+                  onClick={() => {
+                    setAvatarOpen(false);
+                    navigate(paths.billing);
+                  }}
                 >
                   <CreditCard size={15} /> Billing & Plans
                 </button>
@@ -207,7 +235,10 @@ export function AppShell() {
                     <button
                       type="button"
                       className="dropdown-item text-brand"
-                      onClick={() => navigate(paths.admin)}
+                      onClick={() => {
+                        setAvatarOpen(false);
+                        navigate(paths.admin);
+                      }}
                     >
                       <Shield size={15} /> System Admin Console
                     </button>
@@ -217,7 +248,10 @@ export function AppShell() {
                 <button
                   type="button"
                   className="dropdown-item text-danger"
-                  onClick={auth.logout}
+                  onClick={() => {
+                    setAvatarOpen(false);
+                    auth.logout();
+                  }}
                 >
                   <LogOut size={15} /> Logout
                 </button>

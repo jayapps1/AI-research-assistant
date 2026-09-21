@@ -113,8 +113,8 @@ public class PaystackClient {
 
     private String callbackUrl(String reference) {
         String base = properties.callbackBaseUrl() == null ? "" : properties.callbackBaseUrl();
-        return base.endsWith("/") ? base + "api/v1/billing/paystack/callback?reference=" + reference
-                : base + "/api/v1/billing/paystack/callback?reference=" + reference;
+        return base.endsWith("/") ? base + "api/v1/billing/paystack/callback"
+                : base + "/api/v1/billing/paystack/callback";
     }
 
     private void requireConfigured() {

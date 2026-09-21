@@ -142,6 +142,35 @@ public class ResearchProjectController {
         return projectService.archiveProject(projectId, user);
     }
 
+    @PostMapping("/projects/{projectId}/trash")
+    public ResearchProjectResponse trashProject(
+            Authentication authentication,
+            @PathVariable UUID projectId
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return projectService.trashProject(projectId, user);
+    }
+
+    @PostMapping("/projects/{projectId}/restore")
+    public ResearchProjectResponse restoreProject(
+            Authentication authentication,
+            @PathVariable UUID projectId
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return projectService.restoreProject(projectId, user);
+    }
+
+    @DeleteMapping("/projects/{projectId}/permanent")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void permanentlyDeleteProject(
+            Authentication authentication,
+            @PathVariable UUID projectId,
+            @RequestBody(required = false) PermanentDeleteRequest request
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        projectService.permanentlyDeleteProject(projectId, user, request == null ? null : request.confirmation());
+    }
+
     @GetMapping("/projects/{projectId}/members")
     public List<ProjectMemberResponse> listMembers(
             Authentication authentication,
@@ -200,4 +229,6 @@ public class ResearchProjectController {
                 : Math.min(size, MAX_PAGE_SIZE);
         return PageRequest.of(safePage, safeSize);
     }
+
+    public record PermanentDeleteRequest(String confirmation) {}
 }

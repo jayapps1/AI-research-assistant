@@ -30,6 +30,8 @@ public interface DocumentProcessingJobRepository
             DocumentProcessingStatus status
     );
 
+    void deleteByDocumentVersionId(UUID documentVersionId);
+
     @Query(
             value = """
                     select *

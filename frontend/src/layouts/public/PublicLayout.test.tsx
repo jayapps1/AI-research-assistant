@@ -2,13 +2,24 @@ import { screen } from '@testing-library/react';
 import { render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PublicHeader } from './PublicHeader';
 import { PublicFooter } from './PublicFooter';
 import { PublicLayout } from './PublicLayout';
 import { AuthProvider } from '../../auth/AuthProvider';
 import { ThemeProvider } from '../../app/ThemeProvider';
 import { setTokens, clearTokens } from '../../api/tokens';
+
+vi.mock('../../api/public', () => ({
+  publicApi: {
+    getSiteSettings: vi.fn().mockResolvedValue({
+      siteName: 'AI Research Assistant',
+      registrationEnabled: true,
+      publicPricingEnabled: true,
+      defaultMetaTitle: 'Academic Research Platform',
+    }),
+  },
+}));
 
 describe('PublicLayout & PublicHeader', () => {
   beforeEach(() => {

@@ -11,5 +11,7 @@ public interface DocumentPageRepository extends JpaRepository<DocumentPage, UUID
 
     List<DocumentPage> findAllByDocumentVersionIdOrderByPageNumber(UUID versionId);
 
+    long countByDocumentVersionId(UUID versionId);
+
     void deleteByDocumentVersionId(UUID versionId);
 }

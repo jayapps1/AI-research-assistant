@@ -32,6 +32,9 @@ public class AiUsageCost {
     @Column(name = "input_cost", precision = 12, scale = 6)
     private BigDecimal inputCost;
 
+    @Column(name = "cached_input_cost", precision = 12, scale = 6)
+    private BigDecimal cachedInputCost;
+
     @Column(name = "output_cost", precision = 12, scale = 6)
     private BigDecimal outputCost;
 
@@ -69,6 +72,9 @@ public class AiUsageCost {
 
     public BigDecimal getInputCost() { return inputCost; }
     public void setInputCost(BigDecimal inputCost) { this.inputCost = inputCost; }
+
+    public BigDecimal getCachedInputCost() { return cachedInputCost; }
+    public void setCachedInputCost(BigDecimal cachedInputCost) { this.cachedInputCost = cachedInputCost; }
 
     public BigDecimal getOutputCost() { return outputCost; }
     public void setOutputCost(BigDecimal outputCost) { this.outputCost = outputCost; }

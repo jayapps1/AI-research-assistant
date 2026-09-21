@@ -4,5 +4,6 @@ public enum ResearchProjectStatus {
     DRAFT,
     ACTIVE,
     COMPLETED,
-    ARCHIVED
+    ARCHIVED,
+    TRASHED
 }

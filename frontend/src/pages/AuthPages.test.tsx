@@ -44,7 +44,6 @@ describe('LoginPage', () => {
     await userEvent.click(screen.getByRole('tab', { name: /authenticator code/i }));
     await userEvent.type(screen.getByLabelText(/^email/i), 'researcher@example.com');
     await userEvent.type(screen.getByLabelText(/authenticator code/i), '123456');
-    await userEvent.click(screen.getByRole('button', { name: /sign in with authenticator/i }));
 
     await waitFor(() => expect(login).toHaveBeenCalledWith({
       email: 'researcher@example.com',
@@ -108,7 +107,6 @@ describe('LoginPage', () => {
     expect(screen.queryByLabelText(/^password/i)).not.toBeInTheDocument();
 
     await userEvent.type(screen.getByLabelText(/authenticator code/i), '654321');
-    await userEvent.click(screen.getByRole('button', { name: /verify & sign in/i }));
 
     await waitFor(() => expect(complete).toHaveBeenCalledWith({
       challengeId: 'challenge-1',
@@ -123,7 +121,6 @@ describe('LoginPage', () => {
     await userEvent.click(screen.getByRole('tab', { name: /authenticator code/i }));
     await userEvent.type(screen.getByLabelText(/^email/i), 'researcher@example.com');
     await userEvent.type(screen.getByLabelText(/authenticator code/i), '123456');
-    await userEvent.click(screen.getByRole('button', { name: /sign in with authenticator/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Too many requests. Try again shortly.');
     expect(screen.getByRole('alert')).not.toHaveTextContent(/exception|stack/i);
@@ -154,7 +151,7 @@ describe('LoginPage', () => {
     await userEvent.type(screen.getByLabelText(/^password/i), 'correct-password');
     await userEvent.click(screen.getByRole('button', { name: /^sign in$/i }));
 
-    expect(await screen.findByRole('link', { name: /use a recovery code/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /use a recovery code/i })).toBeInTheDocument();
   });
 
   it('logs in SYSTEM_ADMIN user and exposes admin capabilities', async () => {
@@ -187,7 +184,7 @@ describe('TotpPage', () => {
 
   it('renders the dedicated password plus TOTP verification fallback form', () => {
     renderApp(<TotpPage />);
-    expect(screen.getByLabelText(/6-digit code/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /verify and continue/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/authenticator code/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /verify & sign in/i })).toBeInTheDocument();
   });
 });

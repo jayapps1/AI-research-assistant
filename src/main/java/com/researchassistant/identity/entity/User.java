@@ -125,6 +125,16 @@ public class User {
     private UserStatus status = UserStatus.ACTIVE;
 
     /**
+     * Configured authentication policy for the account.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(
+            name = "authentication_method",
+            length = 32
+    )
+    private AuthenticationMethod authenticationMethod = AuthenticationMethod.PASSWORD;
+
+    /**
      * Indicates whether the account owner has confirmed
      * ownership of the registered email address.
      */

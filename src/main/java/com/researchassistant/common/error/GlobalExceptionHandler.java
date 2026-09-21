@@ -54,12 +54,43 @@ public class GlobalExceptionHandler {
 
         return buildResponse(
                 HttpStatus.UNAUTHORIZED,
+                exception.getErrorCode() != null ? exception.getErrorCode() : HttpStatus.UNAUTHORIZED.name(),
                 exception.getMessage(),
                 request.getRequestURI(),
                 Map.of()
         );
     }
 
+    @ExceptionHandler(com.researchassistant.ai.exception.AiDevelopmentBudgetExceededException.class)
+    public ResponseEntity<ApiErrorResponse> handleAiDevelopmentBudgetExceeded(
+            com.researchassistant.ai.exception.AiDevelopmentBudgetExceededException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.TOO_MANY_REQUESTS,
+                "AI_DEVELOPMENT_BUDGET_EXCEEDED",
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of(
+                        "budgetLimitUsd", String.valueOf(exception.getBudgetLimitUsd() != null ? exception.getBudgetLimitUsd() : java.math.BigDecimal.ZERO),
+                        "currentSpendUsd", String.valueOf(exception.getCurrentSpendUsd() != null ? exception.getCurrentSpendUsd() : java.math.BigDecimal.ZERO)
+                )
+        );
+    }
+
+    @ExceptionHandler(com.researchassistant.billing.exception.InvalidPaymentReferenceException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidPaymentReference(
+            com.researchassistant.billing.exception.InvalidPaymentReferenceException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                exception.getErrorCode() != null ? exception.getErrorCode() : "INVALID_PAYMENT_REFERENCE",
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
 
     /**
      * Converts duplicate-resource failures into HTTP 409 Conflict.
@@ -244,13 +275,57 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiErrorResponse> handleHttpMessageNotReadable(
+            org.springframework.http.converter.HttpMessageNotReadableException exception,
+            HttpServletRequest request
+    ) {
+        logException("INVALID_REQUEST_PAYLOAD", exception, request);
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                "INVALID_REQUEST_PAYLOAD",
+                "Invalid request payload or malformed field values.",
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
     @ExceptionHandler(RagCapabilityUnavailableException.class)
     public ResponseEntity<ApiErrorResponse> handleRagCapabilityUnavailable(
             RagCapabilityUnavailableException exception,
             HttpServletRequest request
     ) {
+        logException("AI_PROVIDER_NOT_CONFIGURED", exception, request);
         return buildResponse(
                 HttpStatus.SERVICE_UNAVAILABLE,
+                "AI_PROVIDER_NOT_CONFIGURED",
+                "AI service is currently unavailable or disabled.",
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(com.researchassistant.ai.exception.AiGenerationException.class)
+    public ResponseEntity<ApiErrorResponse> handleAiGeneration(
+            com.researchassistant.ai.exception.AiGenerationException exception,
+            HttpServletRequest request
+    ) {
+        logException(exception.getCode(), exception, request);
+        HttpStatus status = switch (exception.getCode()) {
+            case "AI_PROVIDER_NOT_CONFIGURED", "AI_PROVIDER_AUTHENTICATION_FAILED", "AI_PROVIDER_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
+            case "AI_PROVIDER_ACCESS_DENIED" -> HttpStatus.FORBIDDEN;
+            case "AI_MODEL_UNAVAILABLE" -> HttpStatus.BAD_GATEWAY;
+            case "AI_PROVIDER_RATE_LIMITED", "AI_PROVIDER_QUOTA_EXHAUSTED", "AI_PROVIDER_BILLING_UNAVAILABLE" -> HttpStatus.TOO_MANY_REQUESTS;
+            case "AI_PROVIDER_TIMEOUT" -> HttpStatus.GATEWAY_TIMEOUT;
+            case "AI_PROVIDER_REQUEST_INVALID" -> HttpStatus.BAD_REQUEST;
+            case "AI_CREDITS_EXHAUSTED" -> HttpStatus.PAYMENT_REQUIRED;
+            case "AI_INSUFFICIENT_EVIDENCE", "AI_CITATION_VERIFICATION_FAILED" -> HttpStatus.UNPROCESSABLE_ENTITY;
+            case "AI_RESPONSE_INVALID" -> HttpStatus.BAD_GATEWAY;
+            default -> HttpStatus.INTERNAL_SERVER_ERROR;
+        };
+        return buildResponse(
+                status,
+                exception.getCode(),
                 exception.getMessage(),
                 request.getRequestURI(),
                 Map.of()
@@ -288,8 +363,10 @@ public class GlobalExceptionHandler {
             RagVerificationException exception,
             HttpServletRequest request
     ) {
+        logException("AI_CITATION_VERIFICATION_FAILED", exception, request);
         return buildResponse(
-                HttpStatus.CONFLICT,
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "AI_CITATION_VERIFICATION_FAILED",
                 exception.getMessage(),
                 request.getRequestURI(),
                 Map.of()
@@ -398,8 +475,31 @@ public class GlobalExceptionHandler {
             IllegalStateException exception,
             HttpServletRequest request
     ) {
+        String msg = exception.getMessage() != null ? exception.getMessage() : "";
+        if (msg.toLowerCase().contains("paystack") && (msg.toLowerCase().contains("secret key") || msg.toLowerCase().contains("not configured") || msg.toLowerCase().contains("disabled"))) {
+            logException("PAYMENT_PROVIDER_NOT_CONFIGURED", exception, request);
+            return buildResponse(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "PAYMENT_PROVIDER_NOT_CONFIGURED",
+                    "Paystack payment gateway is not configured for this environment.",
+                    request.getRequestURI(),
+                    Map.of()
+            );
+        }
+        if (msg.toLowerCase().contains("openai") && (msg.toLowerCase().contains("disabled") || msg.toLowerCase().contains("unavailable"))) {
+            logException("AI_PROVIDER_NOT_CONFIGURED", exception, request);
+            return buildResponse(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "AI_PROVIDER_NOT_CONFIGURED",
+                    "AI service is currently unavailable or disabled.",
+                    request.getRequestURI(),
+                    Map.of()
+            );
+        }
+        logException("ILLEGAL_STATE", exception, request);
         return buildResponse(
                 HttpStatus.CONFLICT,
+                "ILLEGAL_STATE",
                 exception.getMessage(),
                 request.getRequestURI(),
                 Map.of()
@@ -460,12 +560,21 @@ public class GlobalExceptionHandler {
             Exception exception,
             HttpServletRequest request
     ) {
-
+        logException("INTERNAL_SERVER_ERROR", exception, request);
         return buildResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR,
+                "INTERNAL_SERVER_ERROR",
                 "An unexpected internal error occurred.",
                 request.getRequestURI(),
                 Map.of()
+        );
+    }
+
+    private void logException(String code, Throwable t, HttpServletRequest request) {
+        String correlationId = MDC.get("requestId");
+        org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class).error(
+                "API Error [code={}, correlationId={}, uri={}]: {}",
+                code, correlationId, request.getRequestURI(), t.getMessage(), t
         );
     }
 

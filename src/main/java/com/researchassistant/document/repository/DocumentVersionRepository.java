@@ -28,4 +28,7 @@ public interface DocumentVersionRepository
             where v.document.project.workspace.id = :workspaceId
             """)
     long sumFileSizeBytesByWorkspaceId(@Param("workspaceId") UUID workspaceId);
+
+    @Query("select coalesce(sum(v.fileSizeBytes), 0) from DocumentVersion v")
+    long sumTotalFileSizeBytes();
 }

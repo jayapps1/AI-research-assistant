@@ -66,6 +66,29 @@ public class ResearchProject {
     @Column(name = "description")
     private String description;
 
+    @Column(name = "research_aim", columnDefinition = "TEXT")
+    private String researchAim;
+
+    @Column(name = "study_area", length = 255)
+    private String studyArea;
+
+    @Column(name = "research_type", length = 100)
+    private String researchType;
+
+    @Column(name = "keywords", length = 500)
+    private String keywords;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "report_template_id")
+    private com.researchassistant.analysis.entity.ResearchReportTemplate reportTemplate;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "citation_style", length = 60)
+    private com.researchassistant.analysis.entity.CitationStyle citationStyle = com.researchassistant.analysis.entity.CitationStyle.APA_7;
+
+    @Column(name = "citation_style_locked", nullable = false)
+    private boolean citationStyleLocked;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     private ResearchProjectStatus status = ResearchProjectStatus.DRAFT;

@@ -26,12 +26,14 @@ export function ProfilePage() {
     staleTime: 60_000,
   });
 
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [locale, setLocale] = useState('en');
+  const [firstName, setFirstName] = useState(() => profile?.firstName || auth.user?.firstName || '');
+  const [lastName, setLastName] = useState(() => profile?.lastName || auth.user?.lastName || '');
+  const [phoneNumber, setPhoneNumber] = useState(() => profile?.phoneNumber || auth.user?.phoneNumber || '');
+  const [locale, setLocale] = useState(() => profile?.locale || auth.user?.locale || 'en');
+  const [prevProfile, setPrevProfile] = useState(profile);
 
-  useEffect(() => {
+  if (profile !== prevProfile) {
+    setPrevProfile(profile);
     if (profile) {
       setFirstName(profile.firstName || '');
       setLastName(profile.lastName || '');
@@ -43,7 +45,7 @@ export function ProfilePage() {
       setPhoneNumber(auth.user.phoneNumber || '');
       setLocale(auth.user.locale || 'en');
     }
-  }, [profile, auth.user]);
+  }
 
   const updateProfileMutation = useMutation({
     mutationFn: (data: { firstName?: string; lastName?: string; phoneNumber?: string; locale?: string }) =>

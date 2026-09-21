@@ -71,10 +71,16 @@ public class DocumentTextExtractionService {
         embeddingRepository.deleteByChunkDocumentVersionId(version.getId());
         chunkRepository.deleteByDocumentVersionId(version.getId());
         pageRepository.deleteByDocumentVersionId(version.getId());
-        extractionRepository.deleteByDocumentVersionId(version.getId());
+        chunkRepository.flush();
+        pageRepository.flush();
 
-        DocumentTextExtraction extraction = new DocumentTextExtraction();
-        extraction.setDocumentVersion(version);
+        DocumentTextExtraction extraction = extractionRepository
+                .findByDocumentVersionId(version.getId())
+                .orElseGet(() -> {
+                    DocumentTextExtraction e = new DocumentTextExtraction();
+                    e.setDocumentVersion(version);
+                    return e;
+                });
         extraction.setStatus(TextExtractionStatus.RUNNING);
         extraction.setExtractor("unknown");
         extraction.setStartedAt(now);

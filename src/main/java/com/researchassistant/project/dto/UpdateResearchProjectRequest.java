@@ -7,6 +7,27 @@ public record UpdateResearchProjectRequest(
         String title,
 
         @Size(max = 5000, message = "Project description must not exceed 5000 characters")
-        String description
+        String description,
+
+        @Size(max = 5000, message = "Research aim must not exceed 5000 characters")
+        String researchAim,
+
+        @Size(max = 255, message = "Study area must not exceed 255 characters")
+        String studyArea,
+
+        @Size(max = 100, message = "Research type must not exceed 100 characters")
+        String researchType,
+
+        @Size(max = 500, message = "Keywords must not exceed 500 characters")
+        String keywords,
+
+        java.util.UUID reportTemplateId,
+
+        com.researchassistant.analysis.entity.CitationStyle citationStyle,
+
+        Boolean citationStyleLocked
 ) {
+    public UpdateResearchProjectRequest(String title, String description) {
+        this(title, description, null, null, null, null, null, null, null);
+    }
 }

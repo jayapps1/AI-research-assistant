@@ -60,6 +60,9 @@ public class AiRequest {
     @Column(name = "input_tokens")
     private Integer inputTokens;
 
+    @Column(name = "cached_input_tokens")
+    private Integer cachedInputTokens;
+
     @Column(name = "output_tokens")
     private Integer outputTokens;
 
@@ -129,6 +132,9 @@ public class AiRequest {
 
     public Integer getInputTokens() { return inputTokens; }
     public void setInputTokens(Integer inputTokens) { this.inputTokens = inputTokens; }
+
+    public Integer getCachedInputTokens() { return cachedInputTokens; }
+    public void setCachedInputTokens(Integer cachedInputTokens) { this.cachedInputTokens = cachedInputTokens; }
 
     public Integer getOutputTokens() { return outputTokens; }
     public void setOutputTokens(Integer outputTokens) { this.outputTokens = outputTokens; }

@@ -4,11 +4,14 @@ import com.researchassistant.document.dto.DocumentProcessingJobResponse;
 import com.researchassistant.document.dto.DocumentResponse;
 import com.researchassistant.document.dto.DocumentVersionResponse;
 import com.researchassistant.document.dto.PageResponse;
+import com.researchassistant.document.dto.UpdateDocumentMetadataRequest;
 import com.researchassistant.document.entity.DocumentStatus;
 import com.researchassistant.document.entity.DocumentType;
 import com.researchassistant.document.service.DocumentService;
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.identity.service.AuthenticatedUserResolver;
+
+import jakarta.validation.Valid;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -16,9 +19,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -105,6 +111,16 @@ public class DocumentController {
         return documentService.getDocument(documentId, user);
     }
 
+    @PatchMapping("/documents/{documentId}")
+    public DocumentResponse updateDocumentMetadata(
+            Authentication authentication,
+            @PathVariable UUID documentId,
+            @Valid @RequestBody UpdateDocumentMetadataRequest request
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return documentService.updateMetadata(documentId, user, request);
+    }
+
     @PostMapping(
             value = "/documents/{documentId}/versions",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE
@@ -135,6 +151,25 @@ public class DocumentController {
     ) {
         User user = authenticatedUserResolver.requireActiveUser(authentication);
         return documentService.archiveDocument(documentId, user);
+    }
+
+    @DeleteMapping("/documents/{documentId}")
+    public DocumentResponse moveDocumentToTrash(
+            Authentication authentication,
+            @PathVariable UUID documentId
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return documentService.archiveDocument(documentId, user);
+    }
+
+    @DeleteMapping("/documents/{documentId}/permanent")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void permanentlyDeleteDocument(
+            Authentication authentication,
+            @PathVariable UUID documentId
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        documentService.permanentlyDeleteDocument(documentId, user);
     }
 
     @PostMapping("/documents/{documentId}/restore")

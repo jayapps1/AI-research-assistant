@@ -8,6 +8,13 @@ import { useWorkspace } from '../features/workspaces/WorkspaceProvider';
 import { displayValue, pageContent } from '../utils/collections';
 import type { Citation, RagAnswer } from '../types/api';
 
+function aiUserMessage(code: string | null | undefined, fallback: string) {
+  if (code === 'AI_PROVIDER_REQUEST_INVALID') {
+    return 'The AI provider rejected this request configuration. Please try again shortly or contact support if it continues.';
+  }
+  return fallback;
+}
+
 export function AiAssistantPage() {
   const projectId = useProjectId();
   const { selectedWorkspaceId: workspaceId } = useWorkspace();
@@ -119,6 +126,9 @@ export function AiAssistantPage() {
             if (status === 429 || code === 'QUOTA_EXCEEDED') {
               return <div className="alert warning">AI request quota exceeded for this billing period. Please upgrade your plan.</div>;
             }
+            if (code === 'AI_PROVIDER_REQUEST_INVALID') {
+              return <div className="alert warning">{aiUserMessage(code, message)}</div>;
+            }
             return <ErrorState title="AI request failed" error={ask.error} />;
           })() : null}
           <QuestionForm disabled={!conversationId || ask.isPending} onAsk={(question) => ask.mutate(question)} />
@@ -171,7 +181,7 @@ function BuyAiCreditsModal({
   const purchaseMutation = useMutation({
     mutationFn: (packId: string) => billingApi.buyAiCreditPack(workspaceId, packId),
     onSuccess: (data) => {
-      if (data?.authorizationUrl && /^https:\/\/(checkout|standard)\.paystack\.com\//.test(data.authorizationUrl)) {
+      if (data?.authorizationUrl && /^https:\/\/(checkout|standard)\.paystack\.(com|co)\//.test(data.authorizationUrl)) {
         window.location.href = data.authorizationUrl;
       }
     },

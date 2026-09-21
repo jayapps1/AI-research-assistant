@@ -6,6 +6,7 @@ import com.researchassistant.billing.PaymentTransactionRepository;
 import com.researchassistant.billing.PaymentTransactionStatus;
 import com.researchassistant.dataset.repository.ResearchDatasetRepository;
 import com.researchassistant.document.repository.DocumentRepository;
+import com.researchassistant.document.repository.DocumentVersionRepository;
 import com.researchassistant.identity.entity.UserStatus;
 import com.researchassistant.identity.repository.UserRepository;
 import com.researchassistant.notification.NotificationDeliveryRepository;
@@ -28,7 +29,11 @@ public class AdminDashboardService {
     private final PaymentTransactionRepository paymentTransactionRepository;
     private final NotificationDeliveryRepository notificationDeliveryRepository;
     private final DocumentRepository documentRepository;
+    private final DocumentVersionRepository documentVersionRepository;
     private final ResearchDatasetRepository datasetRepository;
+    private final com.researchassistant.ai.usage.AiProviderBudgetService budgetService;
+    private final com.researchassistant.ai.usage.AiUsageCostRepository costRepository;
+    private final com.researchassistant.ai.usage.AiModelPricingRepository pricingRepository;
 
     public AdminDashboardService(UserRepository userRepository, WorkspaceRepository workspaceRepository,
                                  ResearchProjectRepository projectRepository, AiRequestRepository aiRequestRepository,
@@ -36,7 +41,11 @@ public class AdminDashboardService {
                                  PaymentTransactionRepository paymentTransactionRepository,
                                  NotificationDeliveryRepository notificationDeliveryRepository,
                                  DocumentRepository documentRepository,
-                                 ResearchDatasetRepository datasetRepository) {
+                                 DocumentVersionRepository documentVersionRepository,
+                                 ResearchDatasetRepository datasetRepository,
+                                 com.researchassistant.ai.usage.AiProviderBudgetService budgetService,
+                                 com.researchassistant.ai.usage.AiUsageCostRepository costRepository,
+                                 com.researchassistant.ai.usage.AiModelPricingRepository pricingRepository) {
         this.userRepository = userRepository;
         this.workspaceRepository = workspaceRepository;
         this.projectRepository = projectRepository;
@@ -45,8 +54,13 @@ public class AdminDashboardService {
         this.paymentTransactionRepository = paymentTransactionRepository;
         this.notificationDeliveryRepository = notificationDeliveryRepository;
         this.documentRepository = documentRepository;
+        this.documentVersionRepository = documentVersionRepository;
         this.datasetRepository = datasetRepository;
+        this.budgetService = budgetService;
+        this.costRepository = costRepository;
+        this.pricingRepository = pricingRepository;
     }
+
 
     public Map<String, Object> dashboard() {
         OffsetDateTime now = OffsetDateTime.now();
@@ -78,6 +92,10 @@ public class AdminDashboardService {
         data.put("aiRequestsThisMonth", aiRequestsThisMonth);
         data.put("aiTokensTotal", aiTokensTotal);
         data.put("aiFailures", aiFailures);
+        data.put("aiBudget", budgetService.getBudgetStatus());
+        data.put("aiTotalSpendUsd", costRepository.sumTotalCostByCurrency("USD"));
+        data.put("totalStorageBytes", documentVersionRepository.sumTotalFileSizeBytes());
+        data.put("aiPricing", pricingRepository.findAll());
         data.put("testPayments", (long) payments.size());
         data.put("successfulPayments", successfulPayments);
         data.put("failedPayments", failedPayments);
@@ -100,4 +118,3 @@ public class AdminDashboardService {
         return data;
     }
 }
-

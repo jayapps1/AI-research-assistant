@@ -93,7 +93,12 @@ public class AuthService {
 
         User user = authenticate(request);
 
-        if (request.requestedAuthenticationMethod() == AuthenticationMethod.PASSWORD
+        AuthenticationMethod userMethod = user.getAuthenticationMethod() == null
+                ? AuthenticationMethod.PASSWORD
+                : user.getAuthenticationMethod();
+
+        if (userMethod == AuthenticationMethod.PASSWORD_AND_TOTP
+                && request.requestedAuthenticationMethod() == AuthenticationMethod.PASSWORD
                 && totpService.hasEnabledCredential(user)) {
             TotpLoginChallengeService.CreatedChallenge challenge =
                     totpLoginChallengeService.create(user);
@@ -156,6 +161,7 @@ public class AuthService {
             case PASSWORD -> authenticatePassword(request);
             case TOTP -> authenticateTotp(request);
             case PASSWORD_AND_TOTP -> authenticatePasswordAndTotp(request);
+            case PASSWORD_OR_TOTP -> authenticatePasswordOrTotp(request);
         };
     }
 
@@ -181,15 +187,29 @@ public class AuthService {
             throw new AuthenticationFailedException(INVALID_LOGIN);
         }
 
-        return userRepository.getReferenceById(
-                authenticatedUser.getUserId()
-        );
+        return userRepository.findById(authenticatedUser.getUserId())
+                .orElseThrow(() -> new AuthenticationFailedException(INVALID_LOGIN));
     }
 
     private User authenticateTotp(LoginRequest request) {
 
         User user = loadActiveUserByEmail(request.email());
-        totpService.verifyLoginCode(user, request.totpCode());
+        if (user.getAuthenticationMethod() == AuthenticationMethod.PASSWORD_AND_TOTP) {
+            throw new AuthenticationFailedException("Password authentication is required for accounts with two-factor authentication.");
+        }
+        if (user.getAuthenticationMethod() == AuthenticationMethod.PASSWORD) {
+            throw new AuthenticationFailedException("TOTP_NOT_CONFIGURED", INVALID_LOGIN);
+        }
+
+        if (request.recoveryCode() != null && !request.recoveryCode().isBlank()) {
+            recoveryCodeService.consumeRecoveryCode(user, request.recoveryCode());
+            securityAuditService.record(
+                    user.getId(),
+                    SecurityAuditEventType.RECOVERY_CODE_USED
+            );
+        } else {
+            totpService.verifyLoginCode(user, request.totpCode());
+        }
 
         return user;
     }
@@ -200,6 +220,16 @@ public class AuthService {
         totpService.verifyLoginCode(user, request.totpCode());
 
         return user;
+    }
+
+    private User authenticatePasswordOrTotp(LoginRequest request) {
+
+        if ((request.totpCode() != null && !request.totpCode().isBlank())
+                || (request.recoveryCode() != null && !request.recoveryCode().isBlank())) {
+            return authenticateTotp(request);
+        }
+
+        return authenticatePassword(request);
     }
 
     /**

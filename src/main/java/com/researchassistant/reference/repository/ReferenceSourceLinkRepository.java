@@ -7,4 +7,5 @@ import java.util.UUID;
 
 public interface ReferenceSourceLinkRepository extends JpaRepository<ReferenceSourceLink, UUID> {
     List<ReferenceSourceLink> findAllByReferenceId(UUID referenceId);
+    boolean existsByDocumentId(UUID documentId);
 }

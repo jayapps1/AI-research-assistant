@@ -79,7 +79,7 @@ class SuperAdminSeederTests {
                 user.getEmail().equals("nanagyachie@gmail.com")
                         && user.getStatus() == UserStatus.ACTIVE
                         && user.isEmailVerified()
-                        && "0542011738".equals(user.getPhoneNumber())
+                        && "+233542011738".equals(user.getPhoneNumber())
                         && "{bcrypt}encoded".equals(user.getPasswordHash())
                         && !"seed-password".equals(user.getPasswordHash())
         ));
@@ -195,6 +195,8 @@ class SuperAdminSeederTests {
         user.setEmail("nanagyachie@gmail.com");
         user.setPasswordHash(passwordHash);
         user.setStatus(UserStatus.ACTIVE);
+        user.setAuthenticationMethod(com.researchassistant.identity.entity.AuthenticationMethod.PASSWORD_OR_TOTP);
+        user.setPhoneNumber("+233542011738");
         return user;
     }
 }

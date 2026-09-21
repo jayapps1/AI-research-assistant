@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { authApi } from '../api/endpoints';
 import { clearTokens, getRefreshToken, setTokens } from '../api/tokens';
 import type { AuthTokenResponse, LoginChallengeResponse, LoginResponse, User } from '../types/api';
@@ -10,7 +11,8 @@ interface LoginInput {
   email: string;
   password?: string;
   totpCode?: string;
-  authenticationMethod?: 'PASSWORD' | 'TOTP' | 'PASSWORD_AND_TOTP';
+  recoveryCode?: string;
+  authenticationMethod?: 'PASSWORD' | 'TOTP' | 'PASSWORD_AND_TOTP' | 'PASSWORD_OR_TOTP';
 }
 
 interface AuthContextValue {
@@ -29,6 +31,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(() => restoreUser());
   const [status, setStatus] = useState<AuthStatus>(() => (getRefreshToken() ? 'authenticated' : 'anonymous'));
 
@@ -36,10 +39,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onExpired = () => {
       setUser(null);
       setStatus('anonymous');
+      queryClient.clear();
+      sessionStorage.removeItem('raa.workspaceId');
     };
     window.addEventListener('raa:session-expired', onExpired);
     return () => window.removeEventListener('raa:session-expired', onExpired);
-  }, []);
+  }, [queryClient]);
 
   const persistUser = useCallback((nextUser: User | null) => {
     setUser(nextUser);
@@ -53,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: input.email,
         password: input.password,
         totpCode: input.totpCode,
+        recoveryCode: input.recoveryCode,
         authenticationMethod: input.authenticationMethod ?? 'PASSWORD',
       });
       if (isLoginChallenge(response)) {
@@ -87,19 +93,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     const refreshToken = getRefreshToken();
     clearTokens();
+    sessionStorage.removeItem('raa.workspaceId');
+    if (user?.id) {
+      sessionStorage.removeItem(`selectedWorkspace:${user.id}`);
+    }
+    queryClient.clear();
     persistUser(null);
     setStatus('anonymous');
     if (refreshToken) {
       await authApi.logout(refreshToken).catch(() => undefined);
     }
-  }, [persistUser]);
+  }, [persistUser, queryClient, user]);
 
   const logoutAll = useCallback(async () => {
     await authApi.logoutAll().catch(() => undefined);
     clearTokens();
+    sessionStorage.removeItem('raa.workspaceId');
+    if (user?.id) {
+      sessionStorage.removeItem(`selectedWorkspace:${user.id}`);
+    }
+    queryClient.clear();
     persistUser(null);
     setStatus('anonymous');
-  }, [persistUser]);
+  }, [persistUser, queryClient, user]);
 
   const hasCapability = useCallback(
     (capability: string) => {
@@ -131,6 +147,10 @@ export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) throw new Error('useAuth must be used within AuthProvider');
   return context;
+}
+
+export function useOptionalAuth() {
+  return useContext(AuthContext);
 }
 
 function isLoginChallenge(response: LoginResponse): response is LoginChallengeResponse {

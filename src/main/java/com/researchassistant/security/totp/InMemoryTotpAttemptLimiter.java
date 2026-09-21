@@ -42,7 +42,7 @@ public class InMemoryTotpAttemptLimiter implements TotpAttemptLimiter {
         }
 
         if (window.count() >= MAX_ATTEMPTS) {
-            throw new AuthenticationFailedException(INVALID_CREDENTIALS);
+            throw new AuthenticationFailedException("RATE_LIMITED", INVALID_CREDENTIALS);
         }
     }
 

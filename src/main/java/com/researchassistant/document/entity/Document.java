@@ -79,6 +79,45 @@ public class Document {
     @Column(name = "title", nullable = false, length = 500)
     private String title;
 
+    @Column(name = "bibliographic_title", length = 1000)
+    private String bibliographicTitle;
+
+    @Column(name = "authors", columnDefinition = "TEXT")
+    private String authors;
+
+    @Column(name = "publication_year")
+    private Integer publicationYear;
+
+    @Column(name = "journal", length = 500)
+    private String journal;
+
+    @Column(name = "conference", length = 500)
+    private String conference;
+
+    @Column(name = "publisher", length = 500)
+    private String publisher;
+
+    @Column(name = "volume", length = 100)
+    private String volume;
+
+    @Column(name = "issue", length = 100)
+    private String issue;
+
+    @Column(name = "pages", length = 100)
+    private String pages;
+
+    @Column(name = "doi", length = 500)
+    private String doi;
+
+    @Column(name = "url", length = 1000)
+    private String url;
+
+    @Column(name = "source_type", length = 80)
+    private String sourceType;
+
+    @Column(name = "keywords", columnDefinition = "TEXT")
+    private String keywords;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "type", nullable = false, length = 40)
     private DocumentType type;

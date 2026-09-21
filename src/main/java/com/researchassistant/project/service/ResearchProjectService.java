@@ -36,9 +36,13 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.persistence.EntityManager;
+
 import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -54,6 +58,13 @@ public class ResearchProjectService {
     private final SecurityAuditService auditService;
     private final CacheInvalidationService cacheInvalidationService;
     private final QuotaService quotaService;
+    private final com.researchassistant.analysis.repository.ResearchReportTemplateRepository templateRepository;
+    private final EntityManager entityManager;
+    private static final UUID TTU_COMPUTER_SCIENCE_TEMPLATE_ID = UUID.fromString("00000000-0000-0000-0000-000000000517");
+    private static final UUID GENERAL_FIVE_CHAPTER_TEMPLATE_ID = UUID.fromString("00000000-0000-0000-0000-000000000518");
+    private static final UUID QUANTITATIVE_SURVEY_TEMPLATE_ID = UUID.fromString("00000000-0000-0000-0000-000000000519");
+    private static final UUID QUALITATIVE_TEMPLATE_ID = UUID.fromString("00000000-0000-0000-0000-000000000520");
+    private static final UUID MIXED_METHODS_TEMPLATE_ID = UUID.fromString("00000000-0000-0000-0000-000000000521");
 
     public ResearchProjectService(
             ResearchProjectRepository projectRepository,
@@ -64,7 +75,9 @@ public class ResearchProjectService {
             ProjectAuthorizationService authorizationService,
             SecurityAuditService auditService,
             CacheInvalidationService cacheInvalidationService,
-            QuotaService quotaService
+            QuotaService quotaService,
+            com.researchassistant.analysis.repository.ResearchReportTemplateRepository templateRepository,
+            EntityManager entityManager
     ) {
         this.projectRepository = projectRepository;
         this.membershipRepository = membershipRepository;
@@ -75,6 +88,8 @@ public class ResearchProjectService {
         this.auditService = auditService;
         this.cacheInvalidationService = cacheInvalidationService;
         this.quotaService = quotaService;
+        this.templateRepository = templateRepository;
+        this.entityManager = entityManager;
     }
 
     public ResearchProjectResponse createProject(
@@ -101,6 +116,25 @@ public class ResearchProjectService {
         project.setWorkspace(workspace);
         project.setTitle(normalizeRequiredTitle(request.title()));
         project.setDescription(normalizeOptionalText(request.description()));
+        project.setResearchAim(normalizeOptionalText(request.researchAim()));
+        project.setStudyArea(normalizeOptionalText(request.studyArea()));
+        project.setResearchType(normalizeOptionalText(request.researchType()));
+        project.setKeywords(normalizeOptionalText(request.keywords()));
+        com.researchassistant.analysis.entity.ResearchReportTemplate template = resolveTemplate(
+                request.reportTemplateId(),
+                request.researchType()
+        );
+        project.setReportTemplate(template);
+        if (request.citationStyle() != null) {
+            project.setCitationStyle(request.citationStyle());
+        } else if (template != null && template.getDefaultCitationStyle() != null) {
+            project.setCitationStyle(template.getDefaultCitationStyle());
+        }
+        if (request.citationStyleLocked() != null) {
+            project.setCitationStyleLocked(request.citationStyleLocked());
+        } else if (template != null) {
+            project.setCitationStyleLocked(template.isCitationStyleLocked());
+        }
         project.setStatus(ResearchProjectStatus.DRAFT);
         project.setCreatedBy(currentUser);
         project.setNextDocumentNumber(1L);
@@ -264,6 +298,32 @@ public class ResearchProjectService {
         if (request.description() != null) {
             project.setDescription(normalizeOptionalText(request.description()));
         }
+        if (request.researchAim() != null) {
+            project.setResearchAim(normalizeOptionalText(request.researchAim()));
+        }
+        if (request.studyArea() != null) {
+            project.setStudyArea(normalizeOptionalText(request.studyArea()));
+        }
+        if (request.researchType() != null) {
+            project.setResearchType(normalizeOptionalText(request.researchType()));
+        }
+        if (request.keywords() != null) {
+            project.setKeywords(normalizeOptionalText(request.keywords()));
+        }
+        if (request.reportTemplateId() != null) {
+            com.researchassistant.analysis.entity.ResearchReportTemplate template = resolveTemplate(request.reportTemplateId(), project.getResearchType());
+            project.setReportTemplate(template);
+            if (!project.isCitationStyleLocked() && template != null && template.getDefaultCitationStyle() != null) {
+                project.setCitationStyle(template.getDefaultCitationStyle());
+                project.setCitationStyleLocked(template.isCitationStyleLocked());
+            }
+        }
+        if (request.citationStyle() != null && !project.isCitationStyleLocked()) {
+            project.setCitationStyle(request.citationStyle());
+        }
+        if (request.citationStyleLocked() != null) {
+            project.setCitationStyleLocked(request.citationStyleLocked());
+        }
 
         auditService.record(
                 currentUser.getId(),
@@ -361,6 +421,90 @@ public class ResearchProjectService {
                 project,
                 context.projectMembership().orElse(null)
         );
+    }
+
+    public ResearchProjectResponse trashProject(UUID projectId, User currentUser) {
+        ProjectAuthorizationContext context =
+                authorizationService.requireProjectAdminAccess(projectId, currentUser);
+
+        ResearchProject project = context.project();
+        project.setStatus(ResearchProjectStatus.TRASHED);
+
+        auditService.record(currentUser.getId(), SecurityAuditEventType.RESEARCH_PROJECT_TRASHED);
+        cacheInvalidationService.evictProjectMetadata(projectId);
+
+        return toProjectResponse(project, context.projectMembership().orElse(null));
+    }
+
+    public ResearchProjectResponse restoreProject(UUID projectId, User currentUser) {
+        ProjectAuthorizationContext context =
+                authorizationService.requireProjectAdminAccess(projectId, currentUser);
+
+        ResearchProject project = context.project();
+        if (project.getStatus() == ResearchProjectStatus.TRASHED
+                || project.getStatus() == ResearchProjectStatus.ARCHIVED) {
+            project.setStatus(ResearchProjectStatus.ACTIVE);
+        }
+
+        auditService.record(currentUser.getId(), SecurityAuditEventType.RESEARCH_PROJECT_RESTORED);
+        cacheInvalidationService.evictProjectMetadata(projectId);
+
+        return toProjectResponse(project, context.projectMembership().orElse(null));
+    }
+
+    public void permanentlyDeleteProject(UUID projectId, User currentUser, String confirmation) {
+        ProjectAuthorizationContext context =
+                authorizationService.requireProjectAdminAccess(projectId, currentUser);
+
+        ResearchProject project = context.project();
+        if (project.getStatus() != ResearchProjectStatus.TRASHED) {
+            throw new InvalidProjectOperationException("Only trashed projects can be permanently deleted.");
+        }
+        String token = confirmation == null ? "" : confirmation.trim();
+        if (!"DELETE".equals(token) && !project.getTitle().equals(token)) {
+            throw new InvalidProjectOperationException("Permanent delete confirmation did not match.");
+        }
+
+        Map<String, Long> dependencies = projectDependencyCounts(projectId);
+        List<String> blocking = dependencies.entrySet().stream()
+                .filter(entry -> entry.getValue() > 0)
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .toList();
+        if (!blocking.isEmpty()) {
+            throw new InvalidProjectOperationException(
+                    "Permanent delete is not safe while project artifacts exist: " + String.join(", ", blocking)
+            );
+        }
+
+        membershipRepository.deleteAll(membershipRepository.findAllByProjectIdAndStatus(projectId, ProjectMembershipStatus.ACTIVE));
+        projectRepository.delete(project);
+        auditService.record(currentUser.getId(), SecurityAuditEventType.RESEARCH_PROJECT_PERMANENTLY_DELETED);
+        cacheInvalidationService.evictProjectMetadata(projectId);
+    }
+
+    private Map<String, Long> projectDependencyCounts(UUID projectId) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        counts.put("documents", countRows("documents", projectId));
+        counts.put("rag_conversations", countRows("rag_conversations", projectId));
+        counts.put("research_objectives", countRows("research_objectives", projectId));
+        counts.put("research_questions", countRows("research_questions", projectId));
+        counts.put("research_hypotheses", countRows("research_hypotheses", projectId));
+        counts.put("research_problems", countRows("research_problems", projectId));
+        counts.put("research_datasets", countRows("research_datasets", projectId));
+        counts.put("analysis_runs", countRows("analysis_runs", projectId));
+        counts.put("research_reports", countRows("research_reports", projectId));
+        counts.put("project_references", countRows("project_references", projectId));
+        counts.put("project_tasks", countRows("project_tasks", projectId));
+        counts.put("project_activities", countRows("project_activities", projectId));
+        return counts;
+    }
+
+    private long countRows(String tableName, UUID projectId) {
+        Object value = entityManager
+                .createNativeQuery("select count(*) from " + tableName + " where project_id = :projectId")
+                .setParameter("projectId", projectId)
+                .getSingleResult();
+        return ((Number) value).longValue();
     }
 
     @Transactional(readOnly = true)
@@ -551,6 +695,24 @@ public class ResearchProjectService {
         );
     }
 
+    private com.researchassistant.analysis.entity.ResearchReportTemplate resolveTemplate(UUID requestedTemplateId, String researchType) {
+        if (requestedTemplateId != null) {
+            return templateRepository.findById(requestedTemplateId).orElse(null);
+        }
+        UUID defaultTemplateId = switch (normalizeOptionalText(researchType) == null ? "" : normalizeOptionalText(researchType)) {
+            case "SOFTWARE_SYSTEM_PROJECT" -> TTU_COMPUTER_SCIENCE_TEMPLATE_ID;
+            case "QUANTITATIVE_SURVEY", "EXPERIMENTAL_RESEARCH" -> QUANTITATIVE_SURVEY_TEMPLATE_ID;
+            case "QUALITATIVE_RESEARCH", "CASE_STUDY" -> QUALITATIVE_TEMPLATE_ID;
+            case "MIXED_METHODS" -> MIXED_METHODS_TEMPLATE_ID;
+            default -> GENERAL_FIVE_CHAPTER_TEMPLATE_ID;
+        };
+        return templateRepository.findById(defaultTemplateId)
+                .or(() -> templateRepository.findFirstByTypeAndSystemTemplateTrueOrderByCreatedAtAsc(
+                        com.researchassistant.analysis.entity.ResearchReportType.RESEARCH_REPORT
+                ))
+                .orElse(null);
+    }
+
     private ResearchProjectResponse toProjectResponse(
             ResearchProject project,
             ProjectMembership currentUserMembership
@@ -560,6 +722,14 @@ public class ResearchProjectService {
                 project.getWorkspace().getId(),
                 project.getTitle(),
                 project.getDescription(),
+                project.getResearchAim(),
+                project.getStudyArea(),
+                project.getResearchType(),
+                project.getKeywords(),
+                project.getReportTemplate() == null ? null : project.getReportTemplate().getId(),
+                project.getReportTemplate() == null ? null : project.getReportTemplate().getName(),
+                project.getCitationStyle() == null ? com.researchassistant.analysis.entity.CitationStyle.APA_7 : project.getCitationStyle(),
+                project.isCitationStyleLocked(),
                 project.getStatus(),
                 project.getCreatedBy().getId(),
                 currentUserMembership == null

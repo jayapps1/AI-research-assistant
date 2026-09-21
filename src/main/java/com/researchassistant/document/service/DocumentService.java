@@ -5,6 +5,7 @@ import com.researchassistant.document.config.DocumentProperties;
 import com.researchassistant.document.dto.DocumentProcessingJobResponse;
 import com.researchassistant.document.dto.DocumentResponse;
 import com.researchassistant.document.dto.DocumentVersionResponse;
+import com.researchassistant.document.dto.UpdateDocumentMetadataRequest;
 import com.researchassistant.document.entity.Document;
 import com.researchassistant.document.entity.DocumentProcessingJob;
 import com.researchassistant.document.entity.DocumentProcessingJobType;
@@ -19,8 +20,12 @@ import com.researchassistant.document.exception.DocumentUploadException;
 import com.researchassistant.document.exception.DocumentVersionNotFoundException;
 import com.researchassistant.document.exception.InvalidDocumentOperationException;
 import com.researchassistant.document.exception.UnsupportedDocumentTypeException;
+import com.researchassistant.document.repository.DocumentChunkEmbeddingRepository;
+import com.researchassistant.document.repository.DocumentChunkRepository;
+import com.researchassistant.document.repository.DocumentPageRepository;
 import com.researchassistant.document.repository.DocumentProcessingJobRepository;
 import com.researchassistant.document.repository.DocumentRepository;
+import com.researchassistant.document.repository.DocumentTextExtractionRepository;
 import com.researchassistant.document.repository.DocumentVersionRepository;
 import com.researchassistant.document.processing.DocumentProcessingPipelineService;
 import com.researchassistant.document.security.FileScanStatus;
@@ -36,6 +41,10 @@ import com.researchassistant.project.service.ProjectAuthorizationService;
 import com.researchassistant.security.audit.SecurityAuditEventType;
 import com.researchassistant.security.audit.SecurityAuditService;
 
+import com.researchassistant.analysis.repository.DiscussionEvidenceRepository;
+import com.researchassistant.analysis.repository.ResearchReportCitationRepository;
+import com.researchassistant.rag.repository.RagQueryEvidenceRepository;
+import com.researchassistant.reference.repository.ReferenceSourceLinkRepository;
 import com.researchassistant.subscription.PlanFeature;
 import com.researchassistant.usage.QuotaService;
 import com.researchassistant.usage.UsageMetricType;
@@ -54,6 +63,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.text.Normalizer;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -88,6 +98,14 @@ public class DocumentService {
     private final CacheInvalidationService cacheInvalidationService;
     private final FileSecurityScanner fileSecurityScanner;
     private final QuotaService quotaService;
+    private final DocumentPageRepository pageRepository;
+    private final DocumentChunkRepository chunkRepository;
+    private final DocumentChunkEmbeddingRepository chunkEmbeddingRepository;
+    private final DocumentTextExtractionRepository textExtractionRepository;
+    private final RagQueryEvidenceRepository ragQueryEvidenceRepository;
+    private final DiscussionEvidenceRepository discussionEvidenceRepository;
+    private final ResearchReportCitationRepository reportCitationRepository;
+    private final ReferenceSourceLinkRepository referenceSourceLinkRepository;
 
     public DocumentService(
             DocumentRepository documentRepository,
@@ -102,7 +120,15 @@ public class DocumentService {
             DocumentProcessingPipelineService processingPipelineService,
             CacheInvalidationService cacheInvalidationService,
             FileSecurityScanner fileSecurityScanner,
-            QuotaService quotaService
+            QuotaService quotaService,
+            DocumentPageRepository pageRepository,
+            DocumentChunkRepository chunkRepository,
+            DocumentChunkEmbeddingRepository chunkEmbeddingRepository,
+            DocumentTextExtractionRepository textExtractionRepository,
+            RagQueryEvidenceRepository ragQueryEvidenceRepository,
+            DiscussionEvidenceRepository discussionEvidenceRepository,
+            ResearchReportCitationRepository reportCitationRepository,
+            ReferenceSourceLinkRepository referenceSourceLinkRepository
     ) {
         this.documentRepository = documentRepository;
         this.versionRepository = versionRepository;
@@ -117,6 +143,14 @@ public class DocumentService {
         this.cacheInvalidationService = cacheInvalidationService;
         this.fileSecurityScanner = fileSecurityScanner;
         this.quotaService = quotaService;
+        this.pageRepository = pageRepository;
+        this.chunkRepository = chunkRepository;
+        this.chunkEmbeddingRepository = chunkEmbeddingRepository;
+        this.textExtractionRepository = textExtractionRepository;
+        this.ragQueryEvidenceRepository = ragQueryEvidenceRepository;
+        this.discussionEvidenceRepository = discussionEvidenceRepository;
+        this.reportCitationRepository = reportCitationRepository;
+        this.referenceSourceLinkRepository = referenceSourceLinkRepository;
     }
 
     public DocumentResponse uploadDocument(
@@ -301,6 +335,68 @@ public class DocumentService {
         return toDocumentResponse(context.document());
     }
 
+    public DocumentResponse updateMetadata(
+            UUID documentId,
+            User user,
+            UpdateDocumentMetadataRequest request
+    ) {
+        DocumentAuthorizationContext context =
+                documentAuthorizationService.requireDocumentEditor(documentId, user);
+        Document document = context.document();
+        if (request.title() != null) {
+            String title = normalizeOptional(request.title());
+            if (title == null) {
+                throw new InvalidDocumentOperationException("Document title is required.");
+            }
+            document.setTitle(title);
+        }
+        if (request.bibliographicTitle() != null) {
+            document.setBibliographicTitle(normalizeOptional(request.bibliographicTitle()));
+        }
+        if (request.authors() != null) {
+            document.setAuthors(normalizeOptional(request.authors()));
+        }
+        if (request.publicationYear() != null) {
+            document.setPublicationYear(request.publicationYear());
+        }
+        if (request.journal() != null) {
+            document.setJournal(normalizeOptional(request.journal()));
+        }
+        if (request.conference() != null) {
+            document.setConference(normalizeOptional(request.conference()));
+        }
+        if (request.publisher() != null) {
+            document.setPublisher(normalizeOptional(request.publisher()));
+        }
+        if (request.volume() != null) {
+            document.setVolume(normalizeOptional(request.volume()));
+        }
+        if (request.issue() != null) {
+            document.setIssue(normalizeOptional(request.issue()));
+        }
+        if (request.pages() != null) {
+            document.setPages(normalizeOptional(request.pages()));
+        }
+        if (request.doi() != null) {
+            document.setDoi(normalizeOptional(request.doi()));
+        }
+        if (request.url() != null) {
+            document.setUrl(normalizeOptional(request.url()));
+        }
+        if (request.sourceType() != null) {
+            document.setSourceType(normalizeOptional(request.sourceType()));
+        }
+        if (request.keywords() != null) {
+            document.setKeywords(normalizeOptional(request.keywords()));
+        }
+        auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_RENAMED);
+        cacheInvalidationService.evictDocumentMetadata(
+                document.getId(),
+                document.getProject().getId()
+        );
+        return toDocumentResponse(document);
+    }
+
     @Transactional(readOnly = true)
     public List<DocumentVersionResponse> listVersions(
             UUID documentId,
@@ -323,7 +419,7 @@ public class DocumentService {
         document.setStatus(DocumentStatus.ARCHIVED);
         document.setArchivedAt(OffsetDateTime.now());
 
-        auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_ARCHIVED);
+        auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_TRASHED);
         cacheInvalidationService.evictDocumentMetadata(
                 document.getId(),
                 document.getProject().getId()
@@ -356,6 +452,45 @@ public class DocumentService {
         return toDocumentResponse(document);
     }
 
+    public void permanentlyDeleteDocument(UUID documentId, User user) {
+        DocumentAuthorizationContext context =
+                documentAuthorizationService
+                        .requireDocumentLeadOrWorkspaceAdmin(documentId, user);
+        Document document = context.document();
+        if (document.getStatus() != DocumentStatus.ARCHIVED) {
+            throw new InvalidDocumentOperationException(
+                    "Only trashed documents can be permanently deleted."
+            );
+        }
+        validatePermanentDeleteAllowed(document);
+
+        List<DocumentVersion> versions =
+                versionRepository.findAllByDocumentIdOrderByVersionNumberDesc(documentId);
+        List<String> storageKeys = new ArrayList<>();
+        for (DocumentVersion version : versions) {
+            storageKeys.add(version.getStorageKey());
+            chunkEmbeddingRepository.deleteByChunkDocumentVersionId(version.getId());
+            chunkRepository.deleteByDocumentVersionId(version.getId());
+            pageRepository.deleteByDocumentVersionId(version.getId());
+            textExtractionRepository.deleteByDocumentVersionId(version.getId());
+            jobRepository.deleteByDocumentVersionId(version.getId());
+        }
+        document.setCurrentVersion(null);
+        versionRepository.deleteAll(versions);
+        documentRepository.delete(document);
+        documentRepository.flush();
+
+        for (String storageKey : storageKeys) {
+            storageService.delete(storageKey);
+        }
+
+        auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_PERMANENTLY_DELETED);
+        cacheInvalidationService.evictDocumentMetadata(
+                documentId,
+                context.projectContext().project().getId()
+        );
+    }
+
     public DocumentProcessingJobResponse retryProcessing(
             UUID documentId,
             User user
@@ -368,9 +503,9 @@ public class DocumentService {
 
         DocumentVersion version = context.document().getCurrentVersion();
         if (version == null
-                || version.getStatus() != DocumentVersionStatus.FAILED) {
+                || (version.getStatus() != DocumentVersionStatus.FAILED && version.getStatus() != DocumentVersionStatus.PROCESSING)) {
             throw new InvalidDocumentOperationException(
-                    "Only failed current-version processing can be retried."
+                    "Only failed or processing current-version documents can be retried."
             );
         }
 
@@ -386,6 +521,10 @@ public class DocumentService {
                 Math.toIntExact(previousAttempts + 1)
         );
 
+        if (properties.processing().autoProcessAfterUpload()) {
+            processingPipelineService.processVersion(version);
+        }
+
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_PROCESSING_RETRIED);
         cacheInvalidationService.evictDocumentMetadata(
                 context.document().getId(),
@@ -394,6 +533,7 @@ public class DocumentService {
 
         return toJobResponse(job);
     }
+
 
     public DocumentResponse reprocessCurrentVersion(
             UUID documentId,
@@ -667,6 +807,18 @@ public class DocumentService {
         return normalized.isEmpty() ? null : normalized;
     }
 
+    private void validatePermanentDeleteAllowed(Document document) {
+        UUID documentId = document.getId();
+        if (ragQueryEvidenceRepository.existsByDocumentId(documentId)
+                || discussionEvidenceRepository.existsByDocumentId(documentId)
+                || reportCitationRepository.existsByDocumentId(documentId)
+                || referenceSourceLinkRepository.existsByDocumentId(documentId)) {
+            throw new InvalidDocumentOperationException(
+                    "This source is referenced by research evidence or citations and cannot be permanently deleted."
+            );
+        }
+    }
+
     private DocumentStatus statusFromCurrentVersion(DocumentVersion version) {
         if (version == null) {
             return DocumentStatus.FAILED;
@@ -680,18 +832,38 @@ public class DocumentService {
     }
 
     private DocumentResponse toDocumentResponse(Document document) {
+        DocumentVersion currentVersion = document.getCurrentVersion();
         return new DocumentResponse(
                 document.getId(),
                 document.getProject().getId(),
                 document.getDocumentNumber(),
                 document.getDocumentCode(),
                 document.getTitle(),
+                document.getBibliographicTitle(),
+                document.getAuthors(),
+                document.getPublicationYear(),
+                document.getJournal(),
+                document.getConference(),
+                document.getPublisher(),
+                document.getVolume(),
+                document.getIssue(),
+                document.getPages(),
+                document.getDoi(),
+                document.getUrl(),
+                document.getSourceType(),
+                document.getKeywords(),
                 document.getType(),
                 document.getStatus(),
-                document.getCurrentVersion() == null
+                currentVersion == null
                         ? null
-                        : toVersionResponse(document.getCurrentVersion()),
+                        : toVersionResponse(currentVersion),
                 document.getCreatedBy().getId(),
+                currentVersion == null
+                        ? null
+                        : Math.toIntExact(pageRepository.countByDocumentVersionId(currentVersion.getId())),
+                currentVersion == null
+                        ? null
+                        : chunkRepository.countByDocumentVersionId(currentVersion.getId()),
                 document.getCreatedAt(),
                 document.getUpdatedAt(),
                 document.getArchivedAt()
@@ -709,6 +881,7 @@ public class DocumentService {
                 version.getScanStatus(),
                 version.isQuarantined(),
                 version.getStatus(),
+                version.getUploadedBy().getId(),
                 version.getUploadedAt()
         );
     }

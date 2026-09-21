@@ -110,11 +110,25 @@ export function AdminDashboardPage() {
 
   const testPayments = Number(data.testPayments ?? 0);
   const successfulPayments = Number(data.successfulPayments ?? 0);
-  const failedPayments = Number(data.failedPayments ?? 0);
   const pendingPayments = Number(data.pendingPayments ?? 0);
-
+  const failedPayments = Number(data.failedPayments ?? 0);
   const documentsCount = Number(data.documentsCount ?? 0);
   const datasetsCount = Number(data.datasetsCount ?? 0);
+
+  const totalStorageBytes = Number(data.totalStorageBytes ?? 0);
+  const formattedStorage = totalStorageBytes > 1024 * 1024 * 1024
+    ? `${(totalStorageBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+    : totalStorageBytes > 1024 * 1024
+    ? `${(totalStorageBytes / (1024 * 1024)).toFixed(2)} MB`
+    : `${(totalStorageBytes / 1024).toFixed(1)} KB`;
+
+  const aiBudget = (data.aiBudget as Record<string, any>) ?? {};
+  const aiTotalSpendUsd = Number(data.aiTotalSpendUsd ?? aiBudget.currentSpendUsd ?? 0);
+  const budgetLimitUsd = Number(aiBudget.limitUsd ?? 4.00);
+  const remainingBudgetUsd = Number(aiBudget.remainingUsd ?? Math.max(0, budgetLimitUsd - aiTotalSpendUsd));
+  const spendPercentage = Number(aiBudget.spendPercentage ?? (budgetLimitUsd > 0 ? (aiTotalSpendUsd / budgetLimitUsd) * 100 : 0));
+  const budgetStatus = aiBudget.thresholdStatus ?? 'NORMAL';
+
 
   const grants = pageContent(complimentaryQuery.data) as Record<string, unknown>[];
 
@@ -284,12 +298,65 @@ export function AdminDashboardPage() {
               <span>Documents: <strong>{documentsCount}</strong></span>
             </div>
             <div className="resource-badge">
+              <FileText size={16} />
+              <span>Storage Used: <strong>{formattedStorage}</strong></span>
+            </div>
+            <div className="resource-badge">
               <Database size={16} />
               <span>Datasets: <strong>{datasetsCount}</strong></span>
             </div>
           </div>
         </Card>
+
+        {/* AI COST & DEV BUDGET */}
+        <Card className="admin-feature-card">
+          <div className="card-header-iconic">
+            <Sparkles size={22} className="text-brand" />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h3 style={{ margin: 0 }}>AI Cost & Development Budget</h3>
+                <Badge tone={budgetStatus === 'EXCEEDED' ? 'danger' : budgetStatus.startsWith('WARNING') ? 'warning' : 'success'}>
+                  {budgetStatus}
+                </Badge>
+              </div>
+              <p className="muted">Application-side spending guard to protect prepaid development funds ($4.00 ceiling)</p>
+            </div>
+          </div>
+
+          <div className="admin-status-pill-row">
+            <div className="admin-mini-stat">
+              <span className="mini-stat-label">Budget Limit</span>
+              <span className="mini-stat-value">${budgetLimitUsd.toFixed(2)}</span>
+            </div>
+            <div className="admin-mini-stat">
+              <span className="mini-stat-label">Total Spent</span>
+              <span className="mini-stat-value" style={{ color: budgetStatus === 'EXCEEDED' ? 'var(--danger-text)' : 'inherit' }}>
+                ${aiTotalSpendUsd.toFixed(4)}
+              </span>
+            </div>
+            <div className="admin-mini-stat">
+              <span className="mini-stat-label">Remaining</span>
+              <span className="mini-stat-value text-success">${remainingBudgetUsd.toFixed(4)}</span>
+            </div>
+            <div className="admin-mini-stat">
+              <span className="mini-stat-label">Budget Used</span>
+              <span className="mini-stat-value">{spendPercentage.toFixed(1)}%</span>
+            </div>
+          </div>
+
+          <div className="alert info" style={{ marginTop: '16px', fontSize: '0.84rem' }}>
+            <Activity size={15} style={{ flexShrink: 0 }} />
+            <div>
+              <strong>Credit Valuation Rule:</strong> 1 Platform AI Credit = $0.001 USD of calculated provider usage.
+              <br />
+              <span className="muted" style={{ fontSize: '0.8rem' }}>
+                gpt-5.6-luna: $0.20/1M input (200 cr/M), $0.02/1M cached (20 cr/M), $1.20/1M output (1,200 cr/M)
+              </span>
+            </div>
+          </div>
+        </Card>
       </div>
+
 
       {/* ROW 3: SYSTEM HEALTH STATUS & RECENT COMPLIMENTARY GRANTS */}
       <div className="admin-sections-grid">

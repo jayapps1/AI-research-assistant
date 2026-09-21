@@ -30,8 +30,11 @@ import type {
   RagAnswer,
   RagConversation,
   RecoveryCodesResponse,
+  ReportTemplateItem,
   ResearchProgressResponse,
   ResearchProject,
+  SectionCapabilitiesResponse,
+  TableOfContentsResponse,
   TotpEnrollmentResponse,
   UpdateAiCreditPackRequest,
   UpdateProfileRequest,
@@ -48,7 +51,7 @@ import type {
 export const authApi = {
   register: (body: { email: string; password: string; firstName?: string; lastName?: string; locale?: string }) =>
     api.post<User>('/auth/register', body).then((r) => r.data),
-  login: (body: { email: string; password?: string; totpCode?: string; authenticationMethod?: 'PASSWORD' | 'TOTP' | 'PASSWORD_AND_TOTP' }) =>
+  login: (body: { email: string; password?: string; totpCode?: string; recoveryCode?: string; authenticationMethod?: 'PASSWORD' | 'TOTP' | 'PASSWORD_AND_TOTP' | 'PASSWORD_OR_TOTP' }) =>
     api.post<LoginResponse>('/auth/login', body).then((r) => r.data),
   completeTotpLoginChallenge: (body: { challengeId: string; totpCode?: string; recoveryCode?: string }) =>
     api.post<AuthTokenResponse>('/auth/login/totp-challenge', body).then((r) => r.data),
@@ -80,9 +83,26 @@ export const projectApi = {
     api.get<PageResponse<ResearchProject>>(`/workspaces/${workspaceId}/projects`, { params: { page, size, ...filters } }).then((r) => r.data),
   mine: (page = 0, size = 20, filters?: { q?: string; status?: string }) =>
     api.get<PageResponse<ResearchProject>>('/projects/mine', { params: { page, size, ...filters } }).then((r) => r.data),
-  create: (workspaceId: string, body: { title: string; description?: string }) =>
+  create: (workspaceId: string, body: {
+    title: string;
+    description?: string;
+    researchAim?: string;
+    studyArea?: string;
+    researchType?: string;
+    keywords?: string;
+    reportTemplateId?: string;
+    citationStyle?: string;
+    citationStyleLocked?: boolean;
+  }) =>
     api.post<ResearchProject>(`/workspaces/${workspaceId}/projects`, { ...body, workspaceId }).then((r) => r.data),
   get: (projectId: string) => api.get<ResearchProject>(`/projects/${projectId}`).then((r) => r.data),
+  update: (projectId: string, body: Record<string, unknown>) =>
+    api.patch<ResearchProject>(`/projects/${projectId}`, body).then((r) => r.data),
+  archive: (projectId: string) => api.post<ResearchProject>(`/projects/${projectId}/archive`).then((r) => r.data),
+  trash: (projectId: string) => api.post<ResearchProject>(`/projects/${projectId}/trash`).then((r) => r.data),
+  restore: (projectId: string) => api.post<ResearchProject>(`/projects/${projectId}/restore`).then((r) => r.data),
+  permanentDelete: (projectId: string, confirmation: string) =>
+    api.delete<void>(`/projects/${projectId}/permanent`, { data: { confirmation } }).then((r) => r.data),
   members: (projectId: string) => api.get<ProjectMember[]>(`/projects/${projectId}/members`).then((r) => r.data),
   invite: (projectId: string, body: { email: string; role: string }) => api.post(`/projects/${projectId}/invitations`, body).then((r) => r.data),
   invitations: (projectId: string) => api.get<Record<string, unknown>[]>(`/projects/${projectId}/invitations`).then((r) => r.data),
@@ -108,6 +128,24 @@ export const documentApi = {
     api.get<PageResponse<DocumentItem>>(`/projects/${projectId}/documents`, { params: { page, size, ...filters } }).then((r) => r.data),
   mine: (page = 0, size = 20, filters?: { status?: string }) =>
     api.get<PageResponse<DocumentItem>>('/documents/mine', { params: { page, size, ...filters } }).then((r) => r.data),
+  get: (documentId: string) => api.get<DocumentItem>(`/documents/${documentId}`).then((r) => r.data),
+  updateMetadata: (documentId: string, body: Partial<{
+    title: string;
+    bibliographicTitle: string;
+    authors: string;
+    publicationYear: number;
+    journal: string;
+    conference: string;
+    publisher: string;
+    volume: string;
+    issue: string;
+    pages: string;
+    doi: string;
+    url: string;
+    sourceType: string;
+    keywords: string;
+  }>) =>
+    api.patch<DocumentItem>(`/documents/${documentId}`, body).then((r) => r.data),
   upload: (projectId: string, file: File, title?: string) => {
     const body = new FormData();
     body.append('file', file);
@@ -122,15 +160,48 @@ export const documentApi = {
   versions: (documentId: string) => api.get<Record<string, unknown>[]>(`/documents/${documentId}/versions`).then((r) => r.data),
   processing: (documentId: string) => api.get<Record<string, unknown>>(`/documents/${documentId}/processing`).then((r) => r.data),
   retryProcessing: (documentId: string) => api.post(`/documents/${documentId}/processing/retry`).then((r) => r.data),
+  archive: (documentId: string) => api.post<DocumentItem>(`/documents/${documentId}/archive`).then((r) => r.data),
+  delete: (documentId: string) => api.delete<DocumentItem>(`/documents/${documentId}`).then((r) => r.data),
+  restore: (documentId: string) => api.post<DocumentItem>(`/documents/${documentId}/restore`).then((r) => r.data),
+  permanentDelete: (documentId: string) => api.delete<void>(`/documents/${documentId}/permanent`).then((r) => r.data),
+  download: (documentId: string) =>
+    api.get<Blob>(`/documents/${documentId}/download`, { responseType: 'blob' }).then((r) => ({
+      blob: r.data,
+      filename: filenameFromContentDisposition(r.headers['content-disposition']) ?? 'document',
+    })),
   downloadUrl: (documentId: string) => `${api.defaults.baseURL}/documents/${documentId}/download`,
+};
+
+function filenameFromContentDisposition(value?: string) {
+  if (!value) return null;
+  const match = /filename="?([^";]+)"?/i.exec(value);
+  return match ? match[1] : null;
+}
+
+export const researchDesignApi = {
+  get: (projectId: string) =>
+    api.get<Record<string, unknown>>(`/projects/${projectId}/research-design`).then((r) => r.data),
+  save: (
+    projectId: string,
+    body: { problemStatement?: string; objectives?: string[]; questions?: string[]; hypotheses?: string[] },
+  ) =>
+    api.put<Record<string, unknown>>(`/projects/${projectId}/research-design`, body).then((r) => r.data),
 };
 
 export const researchApi = {
   methodologies: (projectId: string) => api.get<Record<string, unknown>[]>(`/projects/${projectId}/methodologies`).then((r) => r.data),
+  createMethodology: (projectId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/projects/${projectId}/methodologies`, body).then((r) => r.data),
+  generateMethodology: (projectId: string) => api.post<Record<string, unknown>>(`/projects/${projectId}/methodologies/generate`).then((r) => r.data),
   conceptualFrameworks: (projectId: string) => api.get<Record<string, unknown>[]>(`/projects/${projectId}/conceptual-frameworks`).then((r) => r.data),
+  createConceptualFramework: (projectId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/projects/${projectId}/conceptual-frameworks`, body).then((r) => r.data),
+  generateConceptualFramework: (projectId: string) => api.post<Record<string, unknown>>(`/projects/${projectId}/conceptual-frameworks/generate`).then((r) => r.data),
   theoreticalFrameworks: (projectId: string) => api.get<Record<string, unknown>[]>(`/projects/${projectId}/theoretical-frameworks`).then((r) => r.data),
+  createTheoreticalFramework: (projectId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/projects/${projectId}/theoretical-frameworks`, body).then((r) => r.data),
+  generateTheoreticalFramework: (projectId: string) => api.post<Record<string, unknown>>(`/projects/${projectId}/theoretical-frameworks/generate`).then((r) => r.data),
   ethicsReadiness: (projectId: string) => api.get<Record<string, unknown>>(`/projects/${projectId}/ethics-readiness`).then((r) => r.data),
   participants: (projectId: string) => api.get<PageResponse<Record<string, unknown>>>(`/projects/${projectId}/participants`).then((r) => r.data),
+  validateResearchDesign: (projectId: string) => api.get<Record<string, unknown>>(`/projects/${projectId}/research-design/validate`).then((r) => r.data),
+  reviewResearchDesign: (projectId: string) => api.post<Record<string, unknown>>(`/projects/${projectId}/research-design/review`).then((r) => r.data),
 };
 
 export const ragApi = {
@@ -188,11 +259,18 @@ export const datasetApi = {
 };
 
 export const reportApi = {
+  templates: () => api.get<ReportTemplateItem[]>('/report-templates').then((r) => r.data),
+  sectionCapabilities: (projectId: string) =>
+    api.get<SectionCapabilitiesResponse>(`/projects/${projectId}/section-capabilities`).then((r) => r.data),
+  tableOfContents: (reportId: string) =>
+    api.get<TableOfContentsResponse>(`/reports/${reportId}/table-of-contents`).then((r) => r.data),
   reports: (projectId: string, page = 0, size = 20) => api.get<PageResponse<Record<string, unknown>>>(`/projects/${projectId}/reports`, { params: { page, size } }).then((r) => r.data),
   createReport: (projectId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/projects/${projectId}/reports`, body).then((r) => r.data),
   report: (reportId: string) => api.get<Record<string, unknown>>(`/reports/${reportId}`).then((r) => r.data),
   chapters: (reportId: string) => api.get<Record<string, unknown>[]>(`/reports/${reportId}/chapters`).then((r) => r.data),
+  createChapter: (reportId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/reports/${reportId}/chapters`, body).then((r) => r.data),
   sections: (chapterId: string) => api.get<Record<string, unknown>[]>(`/report-chapters/${chapterId}/sections`).then((r) => r.data),
+  createSection: (chapterId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/report-chapters/${chapterId}/sections`, body).then((r) => r.data),
   updateSection: (sectionId: string, body: Record<string, unknown>) => api.patch<Record<string, unknown>>(`/report-sections/${sectionId}`, body).then((r) => r.data),
   generateSection: (sectionId: string) => api.post<Record<string, unknown>>(`/report-sections/${sectionId}/generate`).then((r) => r.data),
   validate: (reportId: string) => api.post<Record<string, unknown>>(`/reports/${reportId}/validate`).then((r) => r.data),
@@ -249,8 +327,22 @@ export const notificationApi = {
 export const adminApi = {
   dashboard: () => api.get<Record<string, unknown>>('/admin/dashboard').then((r) => r.data),
   operations: () => api.get<Record<string, unknown>>('/admin/operations/status').then((r) => r.data),
-  users: () => api.get<PageResponse<Record<string, unknown>>>('/admin/users').then((r) => r.data),
-  workspaces: () => api.get<PageResponse<Record<string, unknown>>>('/admin/workspaces').then((r) => r.data),
+  users: (page = 0, size = 20) => api.get<PageResponse<Record<string, unknown>>>('/admin/users', { params: { page, size } }).then((r) => r.data),
+  suspendUser: (userId: string) => api.post(`/admin/users/${userId}/suspend`).then((r) => r.data),
+  reactivateUser: (userId: string) => api.post(`/admin/users/${userId}/reactivate`).then((r) => r.data),
+  workspaces: (page = 0, size = 20) => api.get<PageResponse<Record<string, unknown>>>('/admin/workspaces', { params: { page, size } }).then((r) => r.data),
+  projects: (page = 0, size = 20) => api.get<PageResponse<Record<string, unknown>>>('/admin/projects', { params: { page, size } }).then((r) => r.data),
+  documents: (page = 0, size = 20) => api.get<PageResponse<Record<string, unknown>>>('/admin/documents', { params: { page, size } }).then((r) => r.data),
+  processingJobs: (page = 0, size = 20) => api.get<PageResponse<Record<string, unknown>>>('/admin/processing-jobs', { params: { page, size } }).then((r) => r.data),
+  researchTemplates: () => api.get<Record<string, unknown>[]>('/admin/research-templates').then((r) => r.data),
+  reportTemplates: () => api.get<Record<string, unknown>[]>('/admin/report-templates').then((r) => r.data),
+  aiOperations: (page = 0, size = 20) => api.get<PageResponse<Record<string, unknown>>>('/admin/ai-operations', { params: { page, size } }).then((r) => r.data),
+  aiUsage: () => api.get<Record<string, unknown>>('/admin/ai-usage').then((r) => r.data),
+  storage: () => api.get<Record<string, unknown>>('/admin/storage').then((r) => r.data),
+  referenceStyles: () => api.get<Record<string, unknown>[]>('/admin/references/styles').then((r) => r.data),
+  systemHealth: () => api.get<Record<string, unknown>>('/admin/system-health').then((r) => r.data),
+  settings: () => api.get<Record<string, unknown>>('/admin/settings').then((r) => r.data),
+  auditEvents: (page = 0, size = 25) => api.get<PageResponse<Record<string, unknown>>>('/admin/audit-events', { params: { page, size } }).then((r) => r.data),
   plans: () => api.get<AdminSubscriptionPlan[]>('/admin/subscription-plans').then((r) => r.data),
   getPlan: (planId: string) => api.get<AdminSubscriptionPlan>(`/admin/subscription-plans/${planId}`).then((r) => r.data),
   createPlan: (body: CreateSubscriptionPlanRequest) => api.post<AdminSubscriptionPlan>('/admin/subscription-plans', body).then((r) => r.data),
@@ -309,4 +401,3 @@ export const profileApi = {
   deleteImage: () => api.delete<UserProfileResponse>('/me/profile/image').then((r) => r.data),
   getAvatarUrl: (userId: string) => `/api/v1/users/${userId}/avatar`,
 };
-

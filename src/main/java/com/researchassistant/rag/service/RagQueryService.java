@@ -66,7 +66,7 @@ import java.util.stream.Collectors;
 public class RagQueryService {
 
     private static final String INSUFFICIENT_EVIDENCE_TEXT =
-            "I could not find enough evidence in the selected research sources to answer this question.";
+            "The selected research sources do not contain enough evidence to generate this section.";
 
     private final RagAuthorizationService authorizationService;
     private final RetrievalScopeService scopeService;
@@ -179,6 +179,9 @@ public class RagQueryService {
             if (creditService != null && reservation != null) {
                 creditService.releaseReservation(reservation);
             }
+            if (e instanceof com.researchassistant.ai.exception.AiGenerationException aiEx) {
+                markFailed(stage.query(), aiEx.getCode(), aiEx.getMessage());
+            }
             throw e;
         }
 
@@ -203,24 +206,39 @@ public class RagQueryService {
                             GeneratedAnswerDraft.class,
                             true
                     );
-                    AiTaskResult<GeneratedAnswerDraft> taskResult = new AiTaskResult<>(
-                            reqId,
-                            AiTaskType.GROUNDED_QA,
-                            AiProviderType.OPENAI,
-                            draft.model(),
-                            draft.finishReason() == null || "stop".equalsIgnoreCase(draft.finishReason()) ? AiRequestStatus.COMPLETED : AiRequestStatus.FAILED,
-                            draft,
-                            draft.inputTokens(),
-                            draft.outputTokens(),
-                            (draft.inputTokens() != null ? draft.inputTokens() : 0) + (draft.outputTokens() != null ? draft.outputTokens() : 0),
-                            draft.generationDurationMs() != null ? draft.generationDurationMs() : 0L,
-                            null,
-                            draft.finishReason(),
-                            null,
-                            OffsetDateTime.now(),
-                            OffsetDateTime.now(),
-                            List.of()
-                    );
+                    boolean isSuccess = draft.finishReason() == null || "stop".equalsIgnoreCase(draft.finishReason());
+                    int inTokens = draft.inputTokens() != null ? draft.inputTokens() : 0;
+                    int outTokens = draft.outputTokens() != null ? draft.outputTokens() : 0;
+                    long latMs = draft.generationDurationMs() != null ? draft.generationDurationMs() : 0L;
+                    AiTaskResult<GeneratedAnswerDraft> taskResult = isSuccess
+                            ? AiTaskResult.success(
+                                    reqId,
+                                    AiTaskType.GROUNDED_QA,
+                                    AiProviderType.OPENAI,
+                                    draft.model(),
+                                    draft,
+                                    inTokens,
+                                    outTokens,
+                                    inTokens + outTokens,
+                                    null,
+                                    latMs,
+                                    null,
+                                    OffsetDateTime.now(),
+                                    OffsetDateTime.now(),
+                                    java.util.Collections.emptyList()
+                            )
+                            : AiTaskResult.failure(
+                                    reqId,
+                                    AiTaskType.GROUNDED_QA,
+                                    AiProviderType.OPENAI,
+                                    draft.model(),
+                                    null,
+                                    draft.finishReason(),
+                                    latMs,
+                                    OffsetDateTime.now(),
+                                    OffsetDateTime.now(),
+                                    java.util.Collections.emptyList()
+                            );
                     AiRequest recordedReq = usageRecordingService.recordRequest(user, taskReq, taskResult);
                     reqId = recordedReq.getId();
                 }

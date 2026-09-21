@@ -21,20 +21,20 @@ public class AiUsageRecordingService {
 
     private final AiRequestRepository requestRepository;
     private final AiUsageCostRepository costRepository;
-    private final AiModelPricingRepository pricingRepository;
+    private final AiProviderCostCalculator costCalculator;
     private final WorkspaceRepository workspaceRepository;
     private final ResearchProjectRepository projectRepository;
 
     public AiUsageRecordingService(
             AiRequestRepository requestRepository,
             AiUsageCostRepository costRepository,
-            AiModelPricingRepository pricingRepository,
+            AiProviderCostCalculator costCalculator,
             WorkspaceRepository workspaceRepository,
             ResearchProjectRepository projectRepository
     ) {
         this.requestRepository = requestRepository;
         this.costRepository = costRepository;
-        this.pricingRepository = pricingRepository;
+        this.costCalculator = costCalculator;
         this.workspaceRepository = workspaceRepository;
         this.projectRepository = projectRepository;
     }
@@ -58,6 +58,7 @@ public class AiUsageRecordingService {
         record.setInputTokens(result.inputTokens());
         record.setOutputTokens(result.outputTokens());
         record.setTotalTokens(result.totalTokens());
+        record.setCachedInputTokens(result.cachedInputTokens());
         record.setLatencyMs(result.latencyMs());
         record.setProviderRequestId(result.providerRequestId());
         record.setFailureCategory(result.failureCategory());
@@ -76,42 +77,23 @@ public class AiUsageRecordingService {
             return;
         }
 
-        Optional<AiModelPricing> pricingOpt = pricingRepository
-                .findFirstByProviderAndModelAndActiveIsTrueAndEffectiveFromBeforeOrderByEffectiveFromDesc(
-                        request.getProvider(),
-                        request.getModel(),
-                        OffsetDateTime.now()
-                );
+        AiProviderCostCalculator.CostBreakdown breakdown = costCalculator.calculateGenerationCost(
+                request.getProvider() != null ? request.getProvider().name() : null,
+                request.getModel(),
+                request.getInputTokens(),
+                request.getOutputTokens(),
+                request.getCachedInputTokens()
+        );
 
         AiUsageCost cost = new AiUsageCost();
         cost.setRequest(request);
-
-        if (pricingOpt.isPresent()) {
-            AiModelPricing pricing = pricingOpt.get();
-            cost.setCurrency(pricing.getCurrency());
-            cost.setSource(AiCostSource.CONFIGURED_PRICING);
-            cost.setPricingVersion(pricing.getId().toString());
-
-            BigDecimal inputCost = BigDecimal.ZERO;
-            BigDecimal outputCost = BigDecimal.ZERO;
-
-            if (request.getInputTokens() != null && pricing.getInputPricePerMillion() != null) {
-                inputCost = BigDecimal.valueOf(request.getInputTokens())
-                        .multiply(pricing.getInputPricePerMillion())
-                        .divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);
-            }
-            if (request.getOutputTokens() != null && pricing.getOutputPricePerMillion() != null) {
-                outputCost = BigDecimal.valueOf(request.getOutputTokens())
-                        .multiply(pricing.getOutputPricePerMillion())
-                        .divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);
-            }
-
-            cost.setInputCost(inputCost);
-            cost.setOutputCost(outputCost);
-            cost.setTotalCost(inputCost.add(outputCost));
-        } else {
-            cost.setSource(AiCostSource.UNAVAILABLE);
-        }
+        cost.setCurrency(breakdown.currency());
+        cost.setSource(breakdown.source());
+        cost.setPricingVersion(breakdown.pricingVersion());
+        cost.setInputCost(breakdown.inputCost());
+        cost.setCachedInputCost(breakdown.cachedInputCost());
+        cost.setOutputCost(breakdown.outputCost());
+        cost.setTotalCost(breakdown.totalCost());
 
         costRepository.save(cost);
     }

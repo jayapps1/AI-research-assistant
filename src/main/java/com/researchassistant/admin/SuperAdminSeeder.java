@@ -68,25 +68,37 @@ public class SuperAdminSeeder implements ApplicationRunner {
             user.setEmailVerified(true);
             user.setLocale("en");
             user.setPhoneNumber(com.researchassistant.identity.util.PhoneNumberNormalizer.normalize(properties.phone()));
+            user.setAuthenticationMethod(com.researchassistant.identity.entity.AuthenticationMethod.PASSWORD_OR_TOTP);
             user = userRepository.save(user);
             created = true;
         } else {
+            boolean modified = false;
             if (user.getStatus() != UserStatus.ACTIVE) {
                 user.setStatus(UserStatus.ACTIVE);
+                modified = true;
+            }
+            if (user.getAuthenticationMethod() != com.researchassistant.identity.entity.AuthenticationMethod.PASSWORD_OR_TOTP) {
+                user.setAuthenticationMethod(com.researchassistant.identity.entity.AuthenticationMethod.PASSWORD_OR_TOTP);
+                modified = true;
             }
             if (user.getPhoneNumber() == null || user.getPhoneNumber().isBlank()) {
                 if (properties.phone() != null && !properties.phone().isBlank()) {
                     user.setPhoneNumber(com.researchassistant.identity.util.PhoneNumberNormalizer.normalize(properties.phone()));
-                    userRepository.save(user);
+                    modified = true;
                 }
             } else if (!user.getPhoneNumber().startsWith("+")) {
                 try {
                     String normalized = com.researchassistant.identity.util.PhoneNumberNormalizer.normalize(user.getPhoneNumber());
-                    user.setPhoneNumber(normalized);
-                    userRepository.save(user);
+                    if (!normalized.equals(user.getPhoneNumber())) {
+                        user.setPhoneNumber(normalized);
+                        modified = true;
+                    }
                 } catch (Exception ex) {
                     log.warn("Could not normalize existing admin phone {}: {}", user.getPhoneNumber(), ex.getMessage());
                 }
+            }
+            if (modified) {
+                userRepository.save(user);
             }
         }
 

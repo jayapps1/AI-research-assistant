@@ -9,4 +9,5 @@ import java.util.UUID;
 
 public interface ResearchDatasetRepository extends JpaRepository<ResearchDataset, UUID> {
     Page<ResearchDataset> findAllByProjectId(UUID projectId, Pageable pageable);
+    long countByProjectId(UUID projectId);
 }

@@ -17,9 +17,11 @@ const MembersPage = lazy(() => import('./pages/CollaborationPages').then((m) => 
 const TasksPage = lazy(() => import('./pages/CollaborationPages').then((m) => ({ default: m.TasksPage })));
 const CommentsReviewsPage = lazy(() => import('./pages/CollaborationPages').then((m) => ({ default: m.CommentsReviewsPage })));
 const ActivityPage = lazy(() => import('./pages/CollaborationPages').then((m) => ({ default: m.ActivityPage })));
-const DocumentsPage = lazy(() => import('./pages/ResearchPages').then((m) => ({ default: m.DocumentsPage })));
-const ResearchWorkflowPage = lazy(() => import('./pages/ResearchPages').then((m) => ({ default: m.ResearchWorkflowPage })));
-const AiAssistantPage = lazy(() => import('./pages/AiAnalysisPages').then((m) => ({ default: m.AiAssistantPage })));
+const SourcesPage = lazy(() => import('./pages/SourcesPage').then((m) => ({ default: m.SourcesPage })));
+const ResearchAssistantPage = lazy(() => import('./pages/ResearchAssistantPage').then((m) => ({ default: m.ResearchAssistantPage })));
+const WritingPage = lazy(() => import('./pages/WritingPage').then((m) => ({ default: m.WritingPage })));
+const ResearchPage = lazy(() => import('./pages/ResearchPage').then((m) => ({ default: m.ResearchPage })));
+const AdvancedWorkflowPage = lazy(() => import('./pages/AdvancedWorkflowPage').then((m) => ({ default: m.AdvancedWorkflowPage })));
 const DatasetWorkbenchPage = lazy(() => import('./pages/ResearchWorkbenches').then((m) => ({ default: m.DatasetWorkbenchPage })));
 const AnalysisPage = lazy(() => import('./pages/ResearchWorkbenches').then((m) => ({ default: m.AnalysisWorkbenchPage })));
 const QualitativeWorkbenchPage = lazy(() => import('./pages/ResearchWorkbenches').then((m) => ({ default: m.QualitativeWorkbenchPage })));
@@ -47,6 +49,10 @@ const AdminPublicSitePage = lazy(() => import('./pages/admin/AdminPublicSitePage
 const AdminContactInboxPage = lazy(() => import('./pages/admin/AdminContactInboxPage').then((m) => ({ default: m.AdminContactInboxPage })));
 const AdminPlansPage = lazy(() => import('./pages/admin/AdminPlansPage').then((m) => ({ default: m.AdminPlansPage })));
 const AdminPaymentsPage = lazy(() => import('./pages/admin/AdminPaymentsPage').then((m) => ({ default: m.AdminPaymentsPage })));
+const AdminUsersPage = lazy(() => import('./pages/admin/AdminUsersPage').then((m) => ({ default: m.AdminUsersPage })));
+const AdminWorkspacesPage = lazy(() => import('./pages/admin/AdminWorkspacesPage').then((m) => ({ default: m.AdminWorkspacesPage })));
+const AdminAuditPage = lazy(() => import('./pages/admin/AdminAuditPage').then((m) => ({ default: m.AdminAuditPage })));
+const AdminRecordsPage = lazy(() => import('./pages/admin/AdminRecordsPage').then((m) => ({ default: m.AdminRecordsPage })));
 const PaymentResultPage = lazy(() => import('./pages/billing/PaymentResultPage').then((m) => ({ default: m.PaymentResultPage })));
 const AdminLayout = lazy(() => import('./layouts/admin/AdminLayout').then((m) => ({ default: m.AdminLayout })));
 
@@ -89,9 +95,13 @@ export default function App() {
               <Route path="app/projects/:projectId/tasks" element={<TasksPage />} />
               <Route path="app/projects/:projectId/collaboration" element={<CommentsReviewsPage />} />
               <Route path="app/projects/:projectId/activity" element={<ActivityPage />} />
-              <Route path="app/projects/:projectId/documents" element={<DocumentsPage />} />
-              <Route path="app/projects/:projectId/research" element={<ResearchWorkflowPage />} />
-              <Route path="app/projects/:projectId/ai" element={<AiAssistantPage />} />
+              <Route path="app/projects/:projectId/sources" element={<SourcesPage />} />
+              <Route path="app/projects/:projectId/documents" element={<SourcesPage />} />
+              <Route path="app/projects/:projectId/assistant" element={<ResearchAssistantPage />} />
+              <Route path="app/projects/:projectId/ai" element={<ResearchAssistantPage />} />
+              <Route path="app/projects/:projectId/writing" element={<WritingPage />} />
+              <Route path="app/projects/:projectId/research" element={<ResearchPage />} />
+              <Route path="app/projects/:projectId/research/advanced" element={<AdvancedWorkflowPage />} />
               <Route path="app/projects/:projectId/data" element={<DatasetWorkbenchPage />} />
               <Route path="app/projects/:projectId/analysis" element={<AnalysisPage />} />
               <Route path="app/projects/:projectId/analysis/qualitative" element={<QualitativeWorkbenchPage />} />
@@ -103,9 +113,13 @@ export default function App() {
               <Route path="app/tasks" element={<TasksPage />} />
               <Route path="app/collaboration" element={<CommentsReviewsPage />} />
               <Route path="app/activity" element={<ActivityPage />} />
-              <Route path="app/documents" element={<DocumentsPage />} />
-              <Route path="app/research" element={<ResearchWorkflowPage />} />
-              <Route path="app/ai" element={<AiAssistantPage />} />
+              <Route path="app/sources" element={<SourcesPage />} />
+              <Route path="app/documents" element={<SourcesPage />} />
+              <Route path="app/assistant" element={<ResearchAssistantPage />} />
+              <Route path="app/ai" element={<ResearchAssistantPage />} />
+              <Route path="app/writing" element={<WritingPage />} />
+              <Route path="app/research" element={<ResearchPage />} />
+              <Route path="app/research/advanced" element={<AdvancedWorkflowPage />} />
               <Route path="app/data" element={<DatasetWorkbenchPage />} />
               <Route path="app/analysis" element={<AnalysisPage />} />
               <Route path="app/findings" element={<FindingsWorkbenchPage />} />
@@ -133,16 +147,25 @@ export default function App() {
             <Route element={<AdminRoute />}>
               <Route element={<AdminLayout />}>
                 <Route path="admin" element={<AdminPage />} />
-                <Route path="admin/users" element={<AdminPage />} />
-                <Route path="admin/workspaces" element={<AdminPage />} />
-                <Route path="admin/projects" element={<AdminPage />} />
+                <Route path="admin/users" element={<AdminUsersPage />} />
+                <Route path="admin/workspaces" element={<AdminWorkspacesPage />} />
+                <Route path="admin/projects" element={<AdminRecordsPage />} />
+                <Route path="admin/documents" element={<AdminRecordsPage />} />
+                <Route path="admin/processing-jobs" element={<AdminRecordsPage />} />
+                <Route path="admin/research-templates" element={<AdminRecordsPage />} />
+                <Route path="admin/report-templates" element={<AdminRecordsPage />} />
                 <Route path="admin/plans" element={<AdminPlansPage />} />
                 <Route path="admin/payments" element={<AdminPaymentsPage />} />
                 <Route path="admin/complimentary-access" element={<AdminPage />} />
-                <Route path="admin/ai-usage" element={<AdminPage />} />
-                <Route path="admin/jobs" element={<AdminPage />} />
-                <Route path="admin/audit" element={<AdminPage />} />
-                <Route path="admin/health" element={<AdminPage />} />
+                <Route path="admin/ai-operations" element={<AdminRecordsPage />} />
+                <Route path="admin/ai-usage" element={<AdminRecordsPage />} />
+                <Route path="admin/jobs" element={<AdminRecordsPage />} />
+                <Route path="admin/storage" element={<AdminRecordsPage />} />
+                <Route path="admin/references" element={<AdminRecordsPage />} />
+                <Route path="admin/notifications" element={<AdminRecordsPage />} />
+                <Route path="admin/audit" element={<AdminAuditPage />} />
+                <Route path="admin/health" element={<AdminRecordsPage />} />
+                <Route path="admin/settings" element={<AdminRecordsPage />} />
                 <Route path="admin/public-site" element={<AdminPublicSitePage />} />
                 <Route path="admin/contact-submissions" element={<AdminContactInboxPage />} />
               </Route>

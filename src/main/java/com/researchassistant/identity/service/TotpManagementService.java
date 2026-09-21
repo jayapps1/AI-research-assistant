@@ -36,19 +36,22 @@ public class TotpManagementService {
     private final RefreshTokenService refreshTokenService;
     private final AuthenticationManager authenticationManager;
     private final SecurityAuditService securityAuditService;
+    private final com.researchassistant.identity.repository.UserRepository userRepository;
 
     public TotpManagementService(
             TotpService totpService,
             RecoveryCodeService recoveryCodeService,
             RefreshTokenService refreshTokenService,
             AuthenticationManager authenticationManager,
-            SecurityAuditService securityAuditService
+            SecurityAuditService securityAuditService,
+            com.researchassistant.identity.repository.UserRepository userRepository
     ) {
         this.totpService = totpService;
         this.recoveryCodeService = recoveryCodeService;
         this.refreshTokenService = refreshTokenService;
         this.authenticationManager = authenticationManager;
         this.securityAuditService = securityAuditService;
+        this.userRepository = userRepository;
     }
 
     @Transactional
@@ -105,6 +108,12 @@ public class TotpManagementService {
                 SecurityAuditEventType.RECOVERY_CODES_GENERATED
         );
 
+        if (user.getAuthenticationMethod() == null
+                || user.getAuthenticationMethod() == com.researchassistant.identity.entity.AuthenticationMethod.PASSWORD) {
+            user.setAuthenticationMethod(com.researchassistant.identity.entity.AuthenticationMethod.PASSWORD_OR_TOTP);
+            userRepository.save(user);
+        }
+
         return new TotpEnrollmentCompleteResponse(
                 rotation ? "TOTP authenticator rotated." : "TOTP enabled.",
                 recoveryCodes
@@ -158,6 +167,9 @@ public class TotpManagementService {
         totpService.disable(user);
         recoveryCodeService.revokeAvailableCodes(user);
         refreshTokenService.revokeAllForUser(user);
+
+        user.setAuthenticationMethod(com.researchassistant.identity.entity.AuthenticationMethod.PASSWORD);
+        userRepository.save(user);
 
         securityAuditService.record(
                 user.getId(),

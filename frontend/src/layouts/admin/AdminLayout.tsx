@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -34,20 +34,29 @@ const adminNav = [
   ['Users', '/admin/users', Users, false],
   ['Workspaces', '/admin/workspaces', Layers, false],
   ['Projects', '/admin/projects', FolderKanban, false],
+  ['Documents', '/admin/documents', FileText, false],
+  ['Processing Jobs', '/admin/processing-jobs', Cpu, false],
+  ['Research Templates', '/admin/research-templates', FileText, false],
+  ['Report Templates', '/admin/report-templates', FileText, false],
   ['Plans', '/admin/plans', CreditCard, false],
   ['Payments', '/admin/payments', Receipt, false],
   ['Complimentary Access', '/admin/complimentary-access', Gift, false],
-  ['AI Usage', '/admin/ai-usage', Sparkles, false],
+  ['AI Operations', '/admin/ai-operations', Sparkles, false],
+  ['AI Usage / Cost', '/admin/ai-usage', Sparkles, false],
+  ['Notifications', '/admin/notifications', Activity, false],
   ['Contact Messages', paths.adminContactSubmissions, Inbox, false],
   ['Public Website CMS', paths.adminPublicSite, Globe, false],
-  ['Background Jobs', '/admin/jobs', Cpu, false],
+  ['Storage', '/admin/storage', Cpu, false],
+  ['References', '/admin/references', FileText, false],
   ['Audit Events', '/admin/audit', FileText, false],
   ['System Health', '/admin/health', Activity, false],
+  ['Settings', '/admin/settings', Shield, false],
 ] as const;
 
 export function AdminLayout() {
   const [open, setOpen] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const auth = useAuth();
   const theme = useTheme();
   const navigate = useNavigate();
@@ -62,6 +71,26 @@ export function AdminLayout() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Close avatar dropdown when clicking outside
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setAvatarOpen(false);
+      }
+    }
+    if (avatarOpen) {
+      document.addEventListener('pointerdown', handlePointerDown);
+    }
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [avatarOpen]);
+
+  // Close avatar dropdown on history navigation
+  useEffect(() => {
+    const handlePopState = () => setAvatarOpen(false);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   const adminName = auth.user?.fullName || auth.user?.firstName || 'System Administrator';
@@ -121,11 +150,12 @@ export function AdminLayout() {
           </Button>
 
           {/* Admin Avatar Dropdown */}
-          <div className="user-menu-wrapper">
+          <div className="user-menu-wrapper" ref={menuRef}>
             <button
               type="button"
               className="avatar-btn"
               aria-label="Admin account menu"
+              aria-haspopup="menu"
               aria-expanded={avatarOpen}
               onClick={() => setAvatarOpen((v) => !v)}
             >
@@ -156,21 +186,30 @@ export function AdminLayout() {
                 <button
                   type="button"
                   className="dropdown-item"
-                  onClick={() => navigate(paths.profile)}
+                  onClick={() => {
+                    setAvatarOpen(false);
+                    navigate(paths.profile);
+                  }}
                 >
                   <User size={15} /> Profile
                 </button>
                 <button
                   type="button"
                   className="dropdown-item"
-                  onClick={() => navigate(paths.security)}
+                  onClick={() => {
+                    setAvatarOpen(false);
+                    navigate(paths.security);
+                  }}
                 >
                   <Shield size={15} /> Security Settings
                 </button>
                 <button
                   type="button"
                   className="dropdown-item"
-                  onClick={() => navigate(paths.app)}
+                  onClick={() => {
+                    setAvatarOpen(false);
+                    navigate(paths.app);
+                  }}
                 >
                   <ArrowLeft size={15} /> Go to Research App
                 </button>
@@ -178,7 +217,10 @@ export function AdminLayout() {
                 <button
                   type="button"
                   className="dropdown-item text-danger"
-                  onClick={auth.logout}
+                  onClick={() => {
+                    setAvatarOpen(false);
+                    auth.logout();
+                  }}
                 >
                   <LogOut size={15} /> Logout
                 </button>

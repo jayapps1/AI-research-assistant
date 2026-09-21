@@ -43,23 +43,21 @@ public class FakeAiGenerationProvider implements AiGenerationProvider, GroundedA
         if (!available) {
             throw new IllegalStateException("Fake provider unavailable");
         }
-        return new AiTaskResult<>(
+        return AiTaskResult.success(
                 UUID.randomUUID(),
                 request.taskType(),
                 AiProviderType.OPENAI,
                 modelName(),
-                AiRequestStatus.COMPLETED,
                 null,
                 100,
                 50,
                 150,
+                null,
                 250L,
-                null,
-                null,
                 "fake-req-123",
                 OffsetDateTime.now(),
                 OffsetDateTime.now(),
-                List.of()
+                java.util.Collections.emptyList()
         );
     }
 

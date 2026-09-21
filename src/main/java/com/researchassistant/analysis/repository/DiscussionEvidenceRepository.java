@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface DiscussionEvidenceRepository extends JpaRepository<DiscussionEvidence, UUID> {
     List<DiscussionEvidence> findAllByDiscussionIdOrderByCitationOrdinalAsc(UUID discussionId);
+    boolean existsByDocumentId(UUID documentId);
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import {
   FolderGit2,
@@ -11,21 +11,40 @@ import {
   Clock,
   Users,
   HardDrive,
-  BarChart3,
   BookOpen,
   Settings,
   Layers,
   Database,
   Search,
+  Edit3,
+  Target,
+  PenTool,
+  UploadCloud,
+  Archive,
+  RotateCcw,
+  Trash2,
 } from 'lucide-react';
-import { billingApi, dashboardApi, projectApi } from '../api/endpoints';
-import { Badge, Breadcrumbs, Button, Card, Input, Pagination, Select } from '../components/ui';
+import { billingApi, dashboardApi, projectApi, reportApi } from '../api/endpoints';
+import {
+  Badge,
+  Breadcrumbs,
+  Button,
+  Card,
+  Field,
+  Input,
+  LoadingButton,
+  Modal,
+  Pagination,
+  Select,
+  Textarea,
+} from '../components/ui';
 import { EmptyState, ErrorState, PageLoading } from '../components/states';
 import { useWorkspace } from '../features/workspaces/WorkspaceProvider';
 import { CreateProjectModal } from '../features/projects/CreateProjectModal';
 import { CreateWorkspaceModal } from '../features/workspaces/CreateWorkspaceModal';
 import { pageContent } from '../utils/collections';
 import { paths } from '../routes/paths';
+import type { ResearchProject } from '../types/api';
 
 function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return '0 MB';
@@ -68,6 +87,7 @@ function formatRelativeTime(dateStr?: string): string {
 export function HomeDashboard() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const { selectedWorkspace, selectedWorkspaceId } = useWorkspace();
+  const [nowMs] = useState(() => Date.now());
 
   const userDashboard = useQuery({
     queryKey: ['dashboard'],
@@ -93,7 +113,7 @@ export function HomeDashboard() {
     planCode &&
     planCode !== 'FREE' &&
     periodEndStr &&
-    (new Date(periodEndStr).getTime() - Date.now()) <= 7 * 24 * 60 * 60 * 1000
+    (new Date(periodEndStr).getTime() - nowMs) <= 7 * 24 * 60 * 60 * 1000
   );
 
   return (
@@ -483,10 +503,13 @@ export function WorkspacePage() {
 
 export function ProjectsPage() {
   const { selectedWorkspace: workspace } = useWorkspace();
+  const queryClient = useQueryClient();
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [status, setStatus] = useState('');
   const [q, setQ] = useState('');
+  const [deleteProject, setDeleteProject] = useState<ResearchProject | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
 
   const projectsQuery = useQuery({
     queryKey: ['projects', workspace?.id, { page, q, status }],
@@ -498,6 +521,27 @@ export function ProjectsPage() {
   });
 
   const projects = pageContent(projectsQuery.data);
+  const invalidateProjects = () => {
+    queryClient.invalidateQueries({ queryKey: ['projects'] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    if (workspace?.id) queryClient.invalidateQueries({ queryKey: ['workspace-dashboard', workspace.id] });
+  };
+  const lifecycleMutation = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'archive' | 'trash' | 'restore' }) => {
+      if (action === 'archive') return projectApi.archive(id);
+      if (action === 'restore') return projectApi.restore(id);
+      return projectApi.trash(id);
+    },
+    onSuccess: invalidateProjects,
+  });
+  const permanentDeleteMutation = useMutation({
+    mutationFn: () => projectApi.permanentDelete(deleteProject!.id, deleteConfirm),
+    onSuccess: () => {
+      setDeleteProject(null);
+      setDeleteConfirm('');
+      invalidateProjects();
+    },
+  });
 
   return (
     <section className="page">
@@ -543,6 +587,7 @@ export function ProjectsPage() {
               <option value="ACTIVE">Active</option>
               <option value="COMPLETED">Completed</option>
               <option value="ARCHIVED">Archived</option>
+              <option value="TRASHED">Trash</option>
             </Select>
           </div>
         </div>
@@ -596,11 +641,34 @@ export function ProjectsPage() {
                       {formatDate(project.updatedAt || project.lastActivityAt)}
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      <Button asChild variant="secondary" style={{ fontSize: '0.82rem', padding: '4px 10px' }}>
-                        <Link to={paths.project(project.id)}>
-                          Open Dashboard <ArrowRight size={12} style={{ marginLeft: 4 }} />
-                        </Link>
-                      </Button>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' }}>
+                        {project.status !== 'TRASHED' ? (
+                          <Button asChild variant="secondary" style={{ fontSize: '0.82rem', padding: '4px 10px' }}>
+                            <Link to={paths.project(project.id)}>
+                              Open <ArrowRight size={12} style={{ marginLeft: 4 }} />
+                            </Link>
+                          </Button>
+                        ) : null}
+                        {project.status !== 'ARCHIVED' && project.status !== 'TRASHED' ? (
+                          <Button type="button" variant="secondary" style={{ fontSize: '0.82rem', padding: '4px 10px' }} onClick={() => lifecycleMutation.mutate({ id: project.id, action: 'archive' })}>
+                            <Archive size={12} /> Archive
+                          </Button>
+                        ) : null}
+                        {project.status === 'ARCHIVED' || project.status === 'TRASHED' ? (
+                          <Button type="button" variant="secondary" style={{ fontSize: '0.82rem', padding: '4px 10px' }} onClick={() => lifecycleMutation.mutate({ id: project.id, action: 'restore' })}>
+                            <RotateCcw size={12} /> Restore
+                          </Button>
+                        ) : null}
+                        {project.status !== 'TRASHED' ? (
+                          <Button type="button" variant="danger" style={{ fontSize: '0.82rem', padding: '4px 10px' }} onClick={() => lifecycleMutation.mutate({ id: project.id, action: 'trash' })}>
+                            <Trash2 size={12} /> Trash
+                          </Button>
+                        ) : (
+                          <Button type="button" variant="danger" style={{ fontSize: '0.82rem', padding: '4px 10px' }} onClick={() => { setDeleteProject(project); setDeleteConfirm(''); }}>
+                            <Trash2 size={12} /> Permanent Delete
+                          </Button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -648,6 +716,33 @@ export function ProjectsPage() {
         onClose={() => setCreateModalOpen(false)}
         defaultWorkspaceId={workspace?.id}
       />
+      <Modal title="Permanently Delete Project" open={Boolean(deleteProject)} onClose={() => setDeleteProject(null)}>
+        {deleteProject ? (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <p>
+              Permanently delete <strong>{deleteProject.title}</strong>? The backend will refuse this if documents,
+              reports, references, datasets, conversations, tasks, or audit-linked records still exist.
+            </p>
+            {permanentDeleteMutation.isError ? (
+              <div className="alert danger">{(permanentDeleteMutation.error as Error).message}</div>
+            ) : null}
+            <Field label="Type project title or DELETE">
+              <Input value={deleteConfirm} onChange={(event) => setDeleteConfirm(event.target.value)} />
+            </Field>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button type="button" variant="secondary" onClick={() => setDeleteProject(null)}>Cancel</Button>
+              <Button
+                type="button"
+                variant="danger"
+                disabled={permanentDeleteMutation.isPending || (deleteConfirm !== 'DELETE' && deleteConfirm !== deleteProject.title)}
+                onClick={() => permanentDeleteMutation.mutate()}
+              >
+                Permanent Delete
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </section>
   );
 }
@@ -658,6 +753,7 @@ export function ProjectsPage() {
 
 export function ProjectDashboard() {
   const { projectId = '' } = useParams();
+  const [editSetupOpen, setEditSetupOpen] = useState(false);
 
   const dashboardQuery = useQuery({
     queryKey: ['project-dashboard', projectId],
@@ -672,7 +768,9 @@ export function ProjectDashboard() {
   const project = data?.project;
   const progress = data?.researchProgress;
   const docs = data?.documents;
-  const tasks = data?.tasks;
+  const keywordsList = project?.keywords
+    ? project.keywords.split(',').map((k) => k.trim()).filter(Boolean)
+    : [];
 
   return (
     <section className="page">
@@ -680,7 +778,7 @@ export function ProjectDashboard() {
 
       {/* Project Header Banner */}
       <div className="page-header" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
-        <div>
+        <div style={{ flex: 1, minWidth: 280 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <h1 className="page-title" style={{ fontSize: '1.65rem', fontWeight: 700, margin: 0 }}>
               {project?.title}
@@ -691,6 +789,9 @@ export function ProjectDashboard() {
             <Badge tone="info">
               {data?.currentUserRole ?? 'LEAD'}
             </Badge>
+            {project?.researchType ? (
+              <Badge tone="info">{project.researchType}</Badge>
+            ) : null}
           </div>
           {project?.description ? (
             <p className="muted" style={{ fontSize: '0.95rem', marginTop: 6, maxWidth: 800 }}>
@@ -698,95 +799,161 @@ export function ProjectDashboard() {
             </p>
           ) : null}
         </div>
-        <Button asChild>
-          <Link to={progress?.nextStageUrl ?? paths.projectResearch(projectId)}>
-            Continue Research <ArrowRight size={14} style={{ marginLeft: 4 }} />
-          </Link>
-        </Button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Button type="button" variant="secondary" onClick={() => setEditSetupOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Edit3 size={14} /> Edit Setup
+          </Button>
+          <Button asChild variant="secondary">
+            <Link to={paths.projectSources(projectId)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <UploadCloud size={14} /> Upload Sources
+            </Link>
+          </Button>
+          <Button asChild variant="secondary">
+            <Link to={paths.projectResearch(projectId)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <BookOpen size={14} /> Continue Research
+            </Link>
+          </Button>
+          <Button asChild variant="primary">
+            <Link to={paths.projectAssistant(projectId)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Sparkles size={14} /> Ask AI Assistant
+            </Link>
+          </Button>
+          <Button asChild variant="secondary">
+            <Link to={paths.projectReport(projectId)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <FileText size={14} /> Continue Report
+            </Link>
+          </Button>
+        </div>
       </div>
 
-      {/* Progress & Summary Cards */}
+      {/* 4 Core Summary Cards */}
       <div className="grid cols-4" style={{ gap: 16 }}>
-        {/* Research Readiness Card */}
-        <Card>
-          <div className="muted" style={{ fontSize: '0.82rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <BarChart3 size={16} /> Research Progress
+        {/* 1. Research Topic & Setup */}
+        <Card style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div className="muted" style={{ fontSize: '0.82rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <Target size={16} /> Research Aim & Scope
+            </div>
+            <div style={{ fontSize: '0.9rem', fontWeight: 500, lineHeight: 1.4, color: project?.researchAim ? 'var(--text)' : 'var(--muted)' }}>
+              {project?.researchAim || 'No research aim defined yet. Click Edit Setup to add an aim.'}
+            </div>
+            {project?.studyArea ? (
+              <div style={{ marginTop: 8, fontSize: '0.8rem' }} className="muted">
+                <strong>Area:</strong> {project.studyArea}
+              </div>
+            ) : null}
+            {keywordsList.length > 0 ? (
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
+                {keywordsList.slice(0, 3).map((kw) => (
+                  <span key={kw} style={{ fontSize: '0.72rem', padding: '2px 6px', borderRadius: 4, background: 'var(--surface-hover)', border: '1px solid var(--border)' }}>
+                    {kw}
+                  </span>
+                ))}
+                {keywordsList.length > 3 ? (
+                  <span style={{ fontSize: '0.72rem', padding: '2px 6px', color: 'var(--muted)' }}>
+                    +{keywordsList.length - 3}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
-          <div style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: 4 }}>
-            {progress?.percentComplete ?? 0}%
-          </div>
-          <div style={{ width: '100%', height: 6, borderRadius: 3, background: 'var(--border)', margin: '8px 0', overflow: 'hidden' }}>
-            <div
-              style={{
-                width: `${Math.max(progress?.percentComplete ?? 0, 4)}%`,
-                height: '100%',
-                background: 'var(--primary)',
-                borderRadius: 3,
-              }}
-            />
-          </div>
-          <p className="muted" style={{ fontSize: '0.78rem' }}>
-            {progress?.completedStages ?? 0} of {progress?.totalStages ?? 18} stages complete
-          </p>
-        </Card>
-
-        {/* Documents Card */}
-        <Card>
-          <div className="muted" style={{ fontSize: '0.82rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <FileText size={16} /> Documents
-          </div>
-          <div style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: 4 }}>
-            {docs?.total ?? 0}
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 6, fontSize: '0.78rem' }} className="muted">
-            <span style={{ color: 'var(--success-text, #10b981)' }}>{docs?.ready ?? 0} Ready</span>
-            {docs?.processing ? <span>• {docs.processing} In Progress</span> : null}
-            {docs?.failed ? <span style={{ color: 'var(--danger-text, #ef4444)' }}>• {docs.failed} Failed</span> : null}
+          <div style={{ marginTop: 12 }}>
+            <Button type="button" variant="secondary" onClick={() => setEditSetupOpen(true)} style={{ width: '100%', fontSize: '0.8rem', padding: '4px 8px' }}>
+              <Edit3 size={12} style={{ marginRight: 4 }} /> Edit Setup
+            </Button>
           </div>
         </Card>
 
-        {/* Tasks Card */}
-        <Card>
-          <div className="muted" style={{ fontSize: '0.82rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <CheckSquare size={16} /> Collaboration Tasks
+        {/* 2. Sources Card */}
+        <Card style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div className="muted" style={{ fontSize: '0.82rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <FileText size={16} /> Research Sources
+            </div>
+            <div style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: 2 }}>
+              {docs?.total ?? 0}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 4, fontSize: '0.78rem' }} className="muted">
+              <span style={{ color: 'var(--success-text, #10b981)', fontWeight: 600 }}>{docs?.ready ?? 0} Ready</span>
+              {docs?.processing ? <span>• {docs.processing} Processing</span> : null}
+              {docs?.failed ? <span style={{ color: 'var(--danger-text, #ef4444)' }}>• {docs.failed} Failed</span> : null}
+            </div>
+            <p className="muted" style={{ fontSize: '0.78rem', marginTop: 6, lineHeight: 1.3 }}>
+              PDF literature & reports indexed with DOC codes for grounded AI queries.
+            </p>
           </div>
-          <div style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: 4 }}>
-            {tasks?.total ?? 0}
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 6, fontSize: '0.78rem' }} className="muted">
-            <span>{tasks?.inProgress ?? 0} In Progress</span>
-            <span>• {tasks?.completed ?? 0} Completed</span>
+          <div style={{ marginTop: 12 }}>
+            <Button asChild variant="secondary" style={{ width: '100%', fontSize: '0.8rem', padding: '4px 8px' }}>
+              <Link to={paths.projectSources(projectId)}>
+                <UploadCloud size={12} style={{ marginRight: 4 }} /> Manage Sources
+              </Link>
+            </Button>
           </div>
         </Card>
 
-        {/* Members Card */}
-        <Card>
-          <div className="muted" style={{ fontSize: '0.82rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Users size={16} /> Project Team
+        {/* 3. Writing Progress Card */}
+        <Card style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div className="muted" style={{ fontSize: '0.82rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <PenTool size={16} /> Writing Workspace
+            </div>
+            <div style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: 2 }}>
+              Drafts
+            </div>
+            <p className="muted" style={{ fontSize: '0.78rem', marginTop: 6, lineHeight: 1.3 }}>
+              Organize, review, and edit chapters from literature reviews to problem statements.
+            </p>
           </div>
-          <div style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: 4 }}>
-            {data?.memberCount ?? 1}
+          <div style={{ marginTop: 12 }}>
+            <Button asChild variant="secondary" style={{ width: '100%', fontSize: '0.8rem', padding: '4px 8px' }}>
+              <Link to={paths.projectWriting(projectId)}>
+                <PenTool size={12} style={{ marginRight: 4 }} /> Open Writing
+              </Link>
+            </Button>
           </div>
-          <p className="muted" style={{ fontSize: '0.78rem', marginTop: 6 }}>
-            Authorized researchers & reviewers
-          </p>
+        </Card>
+
+        {/* 4. AI Research Assistant Card */}
+        <Card style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid var(--primary-border, var(--primary))' }}>
+          <div>
+            <div style={{ color: 'var(--primary)', fontSize: '0.82rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <Sparkles size={16} /> AI Grounded Synthesis
+            </div>
+            <div style={{ fontSize: '1.1rem', fontWeight: 700, marginTop: 2 }}>
+              Ask & Generate
+            </div>
+            <p className="muted" style={{ fontSize: '0.78rem', marginTop: 4, lineHeight: 1.3 }}>
+              Generate verifiable literature reviews and problem statements cited to your documents.
+            </p>
+          </div>
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <Button asChild variant="primary" style={{ width: '100%', fontSize: '0.8rem', padding: '5px 8px' }}>
+              <Link to={paths.projectAssistant(projectId)}>
+                <Sparkles size={12} style={{ marginRight: 4 }} /> Ask Your Sources
+              </Link>
+            </Button>
+            <Button asChild variant="secondary" style={{ width: '100%', fontSize: '0.8rem', padding: '4px 8px' }}>
+              <Link to={paths.projectAssistant(projectId)}>
+                Generate Literature Review
+              </Link>
+            </Button>
+          </div>
         </Card>
       </div>
-
-      {/* Research Next Step Callout */}
+      {/* Advanced Research Readiness Banner */}
       {progress?.nextIncompleteStage ? (
         <Card style={{ marginTop: 16, background: 'var(--surface-hover)', border: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
             <div>
               <span className="muted" style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Next Incomplete Stage
+                Academic Readiness • <strong>{progress.percentComplete}%</strong> Complete ({progress.completedStages ?? 0} of {progress.totalStages ?? 18} stages)
               </span>
-              <h3 style={{ margin: '4px 0 0', fontSize: '1.1rem', fontWeight: 600 }}>
+              <h3 style={{ margin: '4px 0 0', fontSize: '1.05rem', fontWeight: 600 }}>
                 {progress.nextIncompleteStage}
               </h3>
             </div>
-            <Button asChild>
-              <Link to={progress.nextStageUrl ?? paths.projectResearch(projectId)}>
+            <Button asChild variant="secondary" style={{ fontSize: '0.82rem' }}>
+              <Link to={progress.nextStageUrl ?? paths.projectAdvanced(projectId)}>
                 Open Stage Workbench <ArrowRight size={14} style={{ marginLeft: 4 }} />
               </Link>
             </Button>
@@ -794,8 +961,8 @@ export function ProjectDashboard() {
         </Card>
       ) : null}
 
-      {/* 9 Project Sections Grid */}
-      <h2 style={{ fontSize: '1.2rem', fontWeight: 600, marginTop: 24, marginBottom: 12 }}>
+      {/* Project Modules Grid */}
+      <h2 style={{ fontSize: '1.2rem', fontWeight: 600, marginTop: 28, marginBottom: 12 }}>
         Project Modules & Workbenches
       </h2>
       <ProjectSections projectId={projectId} />
@@ -819,20 +986,29 @@ export function ProjectDashboard() {
           </div>
         </Card>
       ) : null}
+
+      {/* Edit Research Setup Modal */}
+      <EditProjectSetupModal
+        open={editSetupOpen}
+        onClose={() => setEditSetupOpen(false)}
+        project={project}
+        projectId={projectId}
+      />
     </section>
   );
 }
 
 function ProjectSections({ projectId }: { projectId: string }) {
   const sections = [
-    { title: 'Research Workflow', desc: '18 academic stages from problem statement to defense', icon: <BookOpen size={20} />, path: `/app/projects/${projectId}/research` },
-    { title: 'Document Library', desc: 'Manage PDF literature, data instruments, and doc codes', icon: <FileText size={20} />, path: `/app/projects/${projectId}/documents` },
-    { title: 'AI Assistant', desc: 'Evidence-grounded queries with verbatim citations', icon: <Sparkles size={20} />, path: `/app/projects/${projectId}/ai` },
+    { title: 'Research Sources', desc: 'Upload literature, extract text, and allocate DOC codes', icon: <FileText size={20} />, path: paths.projectSources(projectId) },
+    { title: 'Research Design & Methodology', desc: 'Define conceptual framework, study design, instruments, and datasets', icon: <BookOpen size={20} />, path: paths.projectResearch(projectId) },
+    { title: 'AI Research Assistant', desc: 'Evidence-grounded synthesis, Literature Matrix, and verifications', icon: <Sparkles size={20} />, path: paths.projectAssistant(projectId) },
+    { title: 'Writing Workspace', desc: 'Draft, edit, and organize research chapters', icon: <PenTool size={20} />, path: paths.projectWriting(projectId) },
     { title: 'Datasets & Analysis', desc: 'Import datasets, variables, and run statistical tests', icon: <Database size={20} />, path: `/app/projects/${projectId}/data` },
+    { title: 'Dissertation & Report', desc: 'Draft chapters, assemble report, and export docx/pdf', icon: <Layers size={20} />, path: paths.projectReport(projectId) },
     { title: 'Collaboration & Tasks', desc: 'Assign research tasks, leave review notes, invite peers', icon: <Users size={20} />, path: `/app/projects/${projectId}/tasks` },
-    { title: 'Dissertation & Report', desc: 'Draft chapters, assemble report, and export docx/pdf', icon: <Layers size={20} />, path: `/app/projects/${projectId}/reports` },
-    { title: 'References & Citations', desc: 'APA7/Harvard reference management and integrity audit', icon: <HardDrive size={20} />, path: `/app/projects/${projectId}/references` },
-    { title: 'Activity Stream', desc: 'Audit log of revisions, member actions, and analysis runs', icon: <Clock size={20} />, path: `/app/projects/${projectId}/activity` },
+    { title: 'References & Citations', desc: 'APA7/Harvard reference management and integrity audit', icon: <HardDrive size={20} />, path: paths.projectReferences(projectId) },
+    { title: 'Advanced Research Workflow', desc: '18 academic stages from problem statement to defense', icon: <BookOpen size={20} />, path: paths.projectAdvanced(projectId) },
     { title: 'Project Settings', desc: 'Manage title, description, team roles, and archiving', icon: <Settings size={20} />, path: `/app/projects/${projectId}/members` },
   ];
 
@@ -853,5 +1029,171 @@ function ProjectSections({ projectId }: { projectId: string }) {
         </Card>
       ))}
     </div>
+  );
+}
+
+function EditProjectSetupModal({
+  open,
+  onClose,
+  project,
+  projectId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  project?: ResearchProject;
+  projectId: string;
+}) {
+  return (
+    <Modal title="Edit Research Topic & Setup" open={open} onClose={onClose}>
+      {open ? (
+        <EditProjectSetupForm onClose={onClose} project={project} projectId={projectId} />
+      ) : null}
+    </Modal>
+  );
+}
+
+function EditProjectSetupForm({
+  onClose,
+  project,
+  projectId,
+}: {
+  onClose: () => void;
+  project?: ResearchProject;
+  projectId: string;
+}) {
+  const queryClient = useQueryClient();
+  const [title, setTitle] = useState(project?.title || '');
+  const [description, setDescription] = useState(project?.description || '');
+  const [researchAim, setResearchAim] = useState(project?.researchAim || '');
+  const [studyArea, setStudyArea] = useState(project?.studyArea || '');
+  const [researchType, setResearchType] = useState(project?.researchType || 'SOFTWARE_SYSTEM_PROJECT');
+  const [reportTemplateId, setReportTemplateId] = useState(project?.reportTemplateId || '');
+  const [citationStyle, setCitationStyle] = useState(project?.citationStyle || 'APA_7');
+  const [keywords, setKeywords] = useState(project?.keywords || '');
+  const [error, setError] = useState<string | null>(null);
+
+  const templatesQuery = useQuery({
+    queryKey: ['report-templates'],
+    queryFn: () => reportApi.templates(),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (values: Record<string, unknown>) => projectApi.update(projectId, values),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project-dashboard', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      onClose();
+    },
+    onError: (err: unknown) => {
+      const e = err as { message?: string };
+      setError(e?.message || 'Failed to update research setup');
+    },
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      setError('Title is required');
+      return;
+    }
+    updateMutation.mutate({
+      title: title.trim(),
+      description: description.trim() || undefined,
+      researchAim: researchAim.trim() || undefined,
+      studyArea: studyArea.trim() || undefined,
+      researchType: researchType.trim() || undefined,
+      reportTemplateId: reportTemplateId || undefined,
+      citationStyle: citationStyle || undefined,
+      keywords: keywords.trim() || undefined,
+    });
+  };
+
+  return (
+    <>
+      {error ? <div className="alert danger" style={{ marginBottom: 16 }}>{error}</div> : null}
+      <form className="form" onSubmit={handleSubmit}>
+        <Field label="Research Topic / Title *">
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
+        </Field>
+        <Field label="Project Description">
+          <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+        </Field>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="Study Area / Domain Context">
+            <Input value={studyArea} onChange={(e) => setStudyArea(e.target.value)} placeholder="e.g. Healthcare, Economics" />
+          </Field>
+          <Field label="Research Type">
+            <select
+              className="select-input"
+              value={researchType}
+              onChange={(e) => setResearchType(e.target.value)}
+              style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)' }}
+            >
+              {[
+                { id: 'SOFTWARE_SYSTEM_PROJECT', label: 'Software / System Project' },
+                { id: 'QUANTITATIVE_SURVEY', label: 'Quantitative Survey' },
+                { id: 'QUALITATIVE_RESEARCH', label: 'Qualitative Research' },
+                { id: 'MIXED_METHODS', label: 'Mixed Methods' },
+                { id: 'EXPERIMENTAL_RESEARCH', label: 'Experimental Research' },
+                { id: 'CASE_STUDY', label: 'Case Study' },
+                { id: 'LITERATURE_BASED_RESEARCH', label: 'Literature-Based Research' },
+                { id: 'GENERAL_ACADEMIC_RESEARCH', label: 'General Academic Research' },
+              ].map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="Report Template">
+            <select
+              className="select-input"
+              value={reportTemplateId}
+              onChange={(e) => setReportTemplateId(e.target.value)}
+              style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)' }}
+            >
+              <option value="">Default (TTU Computer Science Final Project Report)</option>
+              {templatesQuery.data?.map((tpl) => (
+                <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Citation Style">
+            <select
+              className="select-input"
+              value={citationStyle}
+              onChange={(e) => setCitationStyle(e.target.value)}
+              style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)' }}
+            >
+              {[
+                { id: 'APA_7', label: 'APA 7th Edition (Default)' },
+                { id: 'IEEE', label: 'IEEE Numerical' },
+                { id: 'HARVARD', label: 'Harvard Author-Date' },
+                { id: 'CHICAGO_AUTHOR_DATE', label: 'Chicago Author-Date' },
+                { id: 'VANCOUVER', label: 'Vancouver Numerical' },
+                { id: 'MLA_9', label: 'MLA 9th Edition' },
+              ].map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <Field label="Research Aim / Goal">
+          <Textarea value={researchAim} onChange={(e) => setResearchAim(e.target.value)} rows={3} placeholder="State the main objective or research question..." />
+        </Field>
+        <Field label="Keywords (comma-separated)">
+          <Input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="e.g. machine learning, clinical diagnostics" />
+        </Field>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 20 }}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={updateMutation.isPending}>
+            Cancel
+          </Button>
+          <LoadingButton type="submit" loading={updateMutation.isPending}>
+            Save Changes
+          </LoadingButton>
+        </div>
+      </form>
+    </>
   );
 }

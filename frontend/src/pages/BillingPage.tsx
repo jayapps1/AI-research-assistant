@@ -26,6 +26,7 @@ export function BillingPage() {
   const { selectedWorkspaceId: workspaceId, selectedWorkspace } = useWorkspace();
   const [billingInterval, setBillingInterval] = useState<'MONTHLY' | 'YEARLY'>('MONTHLY');
   const [transactionPage, setTransactionPage] = useState(0);
+  const [nowMs] = useState(() => Date.now());
 
   const subscriptionQuery = useQuery({
     queryKey: ['billing', workspaceId, 'subscription'],
@@ -54,8 +55,8 @@ export function BillingPage() {
     mutationFn: (body: { planCode: string; billingInterval: string }) =>
       billingApi.initialize(workspaceId, body),
     onSuccess: (data) => {
-      if (data?.authorizationUrl && /^https:\/\/(checkout|standard)\.paystack\.com\//.test(data.authorizationUrl)) {
-        window.location.href = data.authorizationUrl;
+      if (data?.authorizationUrl) {
+        window.location.assign(data.authorizationUrl);
       }
     },
   });
@@ -63,8 +64,8 @@ export function BillingPage() {
   const retryMutation = useMutation({
     mutationFn: (paymentIntentId: string) => billingApi.retry(paymentIntentId),
     onSuccess: (data) => {
-      if (data?.authorizationUrl && /^https:\/\/(checkout|standard)\.paystack\.com\//.test(data.authorizationUrl)) {
-        window.location.href = data.authorizationUrl;
+      if (data?.authorizationUrl) {
+        window.location.assign(data.authorizationUrl);
       }
     },
   });
@@ -91,7 +92,7 @@ export function BillingPage() {
   const buyCreditPackMutation = useMutation({
     mutationFn: (packId: string) => billingApi.buyAiCreditPack(workspaceId, packId),
     onSuccess: (data) => {
-      if (data?.authorizationUrl && /^https:\/\/(checkout|standard)\.paystack\.com\//.test(data.authorizationUrl)) {
+      if (data?.authorizationUrl && /^https:\/\/(checkout|standard)\.paystack\.(com|co)\//.test(data.authorizationUrl)) {
         window.location.href = data.authorizationUrl;
       }
     },
@@ -152,7 +153,6 @@ export function BillingPage() {
 
   const periodEndStr = subscriptionData?.periodEnd ? String(subscriptionData.periodEnd) : null;
   const periodEndDate = periodEndStr ? new Date(periodEndStr) : null;
-  const nowMs = Date.now();
   const isApproachingExpiry = Boolean(
     currentPlanCode !== 'FREE' &&
     periodEndDate &&
@@ -879,7 +879,7 @@ function UsageProgressItem({
 
 function CheckoutResultBanner({ data }: { data: { authorizationUrl?: string } }) {
   const url = String(data.authorizationUrl ?? '');
-  const isTrusted = /^https:\/\/(checkout|standard)\.paystack\.com\//.test(url);
+  const isTrusted = /^https:\/\/(checkout|standard)\.paystack\.(com|co)\//.test(url);
 
   return (
     <div className="alert info checkout-banner" style={{ marginBottom: '24px' }}>

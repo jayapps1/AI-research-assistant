@@ -186,6 +186,23 @@ public final class AnalysisDtos {
                                   List<String> warnings) {}
     public record TraceabilityMatrixResponse(UUID projectId, List<TraceabilityRow> rows, List<String> projectWarnings) {}
 
+    public record TemplateResponse(UUID id, String name, ResearchReportType type, String institution, String department,
+                                    boolean systemTemplate, CitationStyle defaultCitationStyle, boolean citationStyleLocked,
+                                    String description, String configurationJson) {
+        public static TemplateResponse from(ResearchReportTemplate template) {
+            return new TemplateResponse(template.getId(), template.getName(), template.getType(), template.getInstitution(),
+                    template.getDepartment(), template.isSystemTemplate(), template.getDefaultCitationStyle(),
+                    template.isCitationStyleLocked(), template.getDescription(), template.getConfigurationJson());
+        }
+    }
+
+    public record SectionCapability(String sectionKey, String capabilityStatus, String description, boolean requiresData, boolean requiresFindings) {}
+    public record SectionCapabilitiesResponse(UUID projectId, List<SectionCapability> capabilities) {}
+
+    public record TableOfContentsSectionItem(String heading, Integer displayOrder, ReportSectionType type) {}
+    public record TableOfContentsItem(String title, Integer chapterNumber, Integer displayOrder, List<TableOfContentsSectionItem> sections) {}
+    public record TableOfContentsResponse(UUID reportId, String reportTitle, List<TableOfContentsItem> chapters, String formattedMarkdown) {}
+
     private static UUID id(Object entity) {
         if (entity == null) return null;
         if (entity instanceof com.researchassistant.researchdesign.entity.ResearchObjective value) return value.getId();

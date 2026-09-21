@@ -28,10 +28,13 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.HexFormat;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 @Transactional
 public class BillingService {
+    private static final Logger log = LoggerFactory.getLogger(BillingService.class);
     private final WorkspaceRepository workspaceRepository;
     private final SubscriptionPlanRepository planRepository;
     private final WorkspaceSubscriptionRepository subscriptionRepository;
@@ -199,9 +202,16 @@ public class BillingService {
     }
 
     public PaymentAttempt verifyAttemptReference(String reference, UUID actorId) {
-        PaymentAttempt attempt = attemptRepository.findByInternalReference(reference)
-                .or(() -> attemptRepository.findByProviderAndEnvironmentAndProviderReference(PaymentProviderType.PAYSTACK, paymentProvider.environment(), reference))
-                .orElseThrow(() -> new ResourceNotFoundException("Payment attempt not found."));
+        if (reference == null || reference.isBlank()) {
+            throw new com.researchassistant.billing.exception.InvalidPaymentReferenceException("REFERENCE_MISSING", "Payment reference is required.");
+        }
+        String trimmed = reference.trim();
+        if (trimmed.contains(",")) {
+            throw new com.researchassistant.billing.exception.InvalidPaymentReferenceException("INVALID_PAYMENT_REFERENCE", "Invalid payment reference format: multiple or comma-separated references are not allowed.");
+        }
+        PaymentAttempt attempt = attemptRepository.findByInternalReference(trimmed)
+                .or(() -> attemptRepository.findByProviderAndEnvironmentAndProviderReference(PaymentProviderType.PAYSTACK, paymentProvider.environment(), trimmed))
+                .orElseThrow(() -> new ResourceNotFoundException("Payment attempt not found with reference: " + trimmed));
         return verifyAttempt(attempt.getId(), actorId);
     }
 
@@ -259,14 +269,22 @@ public class BillingService {
 
     @Transactional
     public BillingDtos.PaymentAttemptDetailResponse getOrVerifyAttemptByReference(String reference, UUID actorId) {
-        PaymentAttempt attempt = attemptRepository.findByInternalReference(reference)
-                .or(() -> attemptRepository.findByProviderAndEnvironmentAndProviderReference(PaymentProviderType.PAYSTACK, paymentProvider.environment(), reference))
-                .orElseThrow(() -> new ResourceNotFoundException("Payment attempt not found with reference: " + reference));
+        if (reference == null || reference.isBlank()) {
+            throw new com.researchassistant.billing.exception.InvalidPaymentReferenceException("REFERENCE_MISSING", "Payment reference is required.");
+        }
+        String trimmed = reference.trim();
+        if (trimmed.contains(",")) {
+            throw new com.researchassistant.billing.exception.InvalidPaymentReferenceException("INVALID_PAYMENT_REFERENCE", "Invalid payment reference format: multiple or comma-separated references are not allowed.");
+        }
+        PaymentAttempt attempt = attemptRepository.findByInternalReference(trimmed)
+                .or(() -> attemptRepository.findByProviderAndEnvironmentAndProviderReference(PaymentProviderType.PAYSTACK, paymentProvider.environment(), trimmed))
+                .orElseThrow(() -> new ResourceNotFoundException("Payment attempt not found with reference: " + trimmed));
 
         if (attempt.getStatus() == PaymentAttemptStatus.PENDING || attempt.getStatus() == PaymentAttemptStatus.CREATED) {
             try {
                 attempt = verifyAttempt(attempt.getId(), actorId);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                log.warn("Payment auto-verification failed for attempt {}: {}", attempt.getId(), e.getMessage());
             }
         }
         return toDetailResponse(attempt);

@@ -33,7 +33,7 @@ class AiCreditMeterTest {
         rate.setCreditsPerMillionOutputTokens(new BigDecimal("15.0000"));
         rate.setActive(true);
 
-        when(rateRepository.findFirstByProviderIgnoreCaseAndModelIgnoreCaseAndActiveTrueAndEffectiveFromBeforeOrderByEffectiveFromDesc(
+        org.mockito.Mockito.lenient().when(rateRepository.findFirstByProviderIgnoreCaseAndModelIgnoreCaseAndActiveTrueAndEffectiveFromBeforeOrderByEffectiveFromDesc(
                 anyString(), anyString(), any()))
                 .thenReturn(Optional.of(rate));
         creditMeter = new AiCreditMeter(rateRepository);

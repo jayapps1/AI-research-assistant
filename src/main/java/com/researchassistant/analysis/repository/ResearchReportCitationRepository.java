@@ -9,4 +9,5 @@ import java.util.UUID;
 public interface ResearchReportCitationRepository extends JpaRepository<ResearchReportCitation, UUID> {
     List<ResearchReportCitation> findAllBySectionIdOrderByCitationOrdinalAsc(UUID sectionId);
     List<ResearchReportCitation> findAllBySectionChapterReportIdOrderByCitationOrdinalAsc(UUID reportId);
+    boolean existsByDocumentId(UUID documentId);
 }

@@ -207,9 +207,9 @@ public class HybridDocumentRetrievalService {
         }
         for (Document document : documents) {
             if (!document.getProject().getId().equals(request.projectId())
-                    || document.getStatus() == DocumentStatus.ARCHIVED) {
+                    || document.getStatus() != DocumentStatus.READY) {
                 throw new InvalidDocumentOperationException(
-                        "Selected documents must belong to the authorized project."
+                        "Selected documents must belong to the authorized project and be ready for retrieval."
                 );
             }
         }

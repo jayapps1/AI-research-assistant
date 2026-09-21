@@ -60,7 +60,38 @@ public class DocumentRetrievalRepository {
         if (!documentIds.isEmpty()) {
             parameters.addValue("documentIds", documentIds);
         }
-        return jdbcTemplate.query(sql, parameters, this::mapRow);
+        List<RetrievalCandidateRow> rows = jdbcTemplate.query(sql, parameters, this::mapRow);
+        if (!rows.isEmpty()) {
+            return rows;
+        }
+
+        String fallbackSql = """
+                select c.id as chunk_id,
+                       rp.workspace_id,
+                       d.project_id,
+                       d.id as document_id,
+                       d.document_code,
+                       dv.id as document_version_id,
+                       dv.version_number,
+                       p.page_number,
+                       c.chunk_number,
+                       c.text_content,
+                       0.5 as score,
+                       d.title as document_title
+                from document_chunks c
+                join document_pages p on p.id = c.page_id
+                join document_versions dv on dv.id = c.document_version_id
+                join documents d on d.id = dv.document_id
+                join research_projects rp on rp.id = d.project_id
+                where d.project_id = :projectId
+                  and d.status <> 'ARCHIVED'
+                  and d.current_version_id = dv.id
+                  and length(trim(c.text_content)) > 0
+                """ + documentPredicate + """
+                order by c.chunk_number asc, d.document_code asc
+                limit :limit
+                """;
+        return jdbcTemplate.query(fallbackSql, parameters, this::mapRow);
     }
 
     public List<RetrievalCandidateRow> lexicalScoped(
@@ -70,6 +101,9 @@ public class DocumentRetrievalRepository {
             String query,
             int limit
     ) {
+        if (documentIds.isEmpty() || versionIds.isEmpty()) {
+            return List.of();
+        }
         String sql = """
                 select c.id as chunk_id,
                        rp.workspace_id,
@@ -90,18 +124,58 @@ public class DocumentRetrievalRepository {
                 join research_projects rp on rp.id = d.project_id
                 where d.project_id = :projectId
                   and d.id in (:documentIds)
+                  and d.status <> 'ARCHIVED'
                   and dv.id in (:versionIds)
                   and c.search_vector @@ websearch_to_tsquery('english', :query)
                 order by score desc, d.document_code asc, c.chunk_number asc
                 limit :limit
                 """;
-        return jdbcTemplate.query(
+        List<RetrievalCandidateRow> rows = jdbcTemplate.query(
                 sql,
                 new MapSqlParameterSource()
                         .addValue("projectId", projectId)
                         .addValue("documentIds", documentIds)
                         .addValue("versionIds", versionIds)
                         .addValue("query", query)
+                        .addValue("limit", limit),
+                this::mapRow
+        );
+        if (!rows.isEmpty()) {
+            return rows;
+        }
+
+        String fallbackSql = """
+                select c.id as chunk_id,
+                       rp.workspace_id,
+                       d.project_id,
+                       d.id as document_id,
+                       d.document_code,
+                       dv.id as document_version_id,
+                       dv.version_number,
+                       p.page_number,
+                       c.chunk_number,
+                       c.text_content,
+                       0.5 as score,
+                       d.title as document_title
+                from document_chunks c
+                join document_pages p on p.id = c.page_id
+                join document_versions dv on dv.id = c.document_version_id
+                join documents d on d.id = dv.document_id
+                join research_projects rp on rp.id = d.project_id
+                where d.project_id = :projectId
+                  and d.id in (:documentIds)
+                  and d.status <> 'ARCHIVED'
+                  and dv.id in (:versionIds)
+                  and length(trim(c.text_content)) > 0
+                order by c.chunk_number asc, d.document_code asc
+                limit :limit
+                """;
+        return jdbcTemplate.query(
+                fallbackSql,
+                new MapSqlParameterSource()
+                        .addValue("projectId", projectId)
+                        .addValue("documentIds", documentIds)
+                        .addValue("versionIds", versionIds)
                         .addValue("limit", limit),
                 this::mapRow
         );
@@ -205,6 +279,7 @@ public class DocumentRetrievalRepository {
                 ) distance
                 where d.project_id = :projectId
                   and d.id in (:documentIds)
+                  and d.status <> 'ARCHIVED'
                   and dv.id in (:versionIds)
                   and e.provider = :provider
                   and e.model = :model

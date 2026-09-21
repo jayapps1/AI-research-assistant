@@ -16,6 +16,7 @@ public record DocumentVersionResponse(
         FileScanStatus scanStatus,
         boolean quarantined,
         DocumentVersionStatus status,
+        UUID uploadedBy,
         OffsetDateTime uploadedAt
 ) {
 }

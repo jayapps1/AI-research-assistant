@@ -10,6 +10,7 @@ import com.researchassistant.identity.dto.RecoveryCodesResponse;
 import com.researchassistant.identity.dto.TotpEnrollmentCompleteResponse;
 import com.researchassistant.identity.dto.TotpEnrollmentResponse;
 import com.researchassistant.identity.dto.UserResponse;
+import com.researchassistant.identity.entity.AuthenticationMethod;
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.identity.repository.UserRepository;
 import com.researchassistant.identity.service.UserService;
@@ -296,7 +297,7 @@ class AuthControllerIntegrationTests {
         UserResponse userResponse = createUser();
         User user = userRepository.findByEmailIgnoreCase(userResponse.email())
                 .orElseThrow();
-        createVerifiedTotpCredential(user, null);
+        createVerifiedTotpCredential(user, null, AuthenticationMethod.PASSWORD_AND_TOTP);
 
         AuthTokenResponse response = loginWithPasswordAndTotp(
                 userResponse.email(),
@@ -315,7 +316,7 @@ class AuthControllerIntegrationTests {
         UserResponse userResponse = createUser();
         User user = userRepository.findByEmailIgnoreCase(userResponse.email())
                 .orElseThrow();
-        createVerifiedTotpCredential(user, null);
+        createVerifiedTotpCredential(user, null, AuthenticationMethod.PASSWORD_AND_TOTP);
 
         LoginChallengeResponse response =
                 passwordLoginChallenge(userResponse.email(), PASSWORD);
@@ -328,13 +329,40 @@ class AuthControllerIntegrationTests {
     }
 
     @Test
+    void passwordLoginDirectlyAuthenticatesWhenUserHasPasswordOrTotp() throws Exception {
+        UserResponse userResponse = createUser();
+        User user = userRepository.findByEmailIgnoreCase(userResponse.email())
+                .orElseThrow();
+        createVerifiedTotpCredential(user, null, AuthenticationMethod.PASSWORD_OR_TOTP);
+
+        // Password login should return AuthTokenResponse directly without TOTP challenge
+        String responseJson = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", userResponse.email(),
+                                "password", PASSWORD
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.refreshToken").isNotEmpty())
+                .andExpect(jsonPath("$.status").doesNotExist())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        AuthTokenResponse response = objectMapper.readValue(responseJson, AuthTokenResponse.class);
+        assertThat(response.accessToken()).isNotBlank();
+        assertThat(response.refreshToken()).isNotBlank();
+    }
+
+    @Test
     void validTotpChallengeCompletesAuthentication()
             throws Exception {
 
         UserResponse userResponse = createUser();
         User user = userRepository.findByEmailIgnoreCase(userResponse.email())
                 .orElseThrow();
-        createVerifiedTotpCredential(user, null);
+        createVerifiedTotpCredential(user, null, AuthenticationMethod.PASSWORD_AND_TOTP);
         LoginChallengeResponse challenge =
                 passwordLoginChallenge(userResponse.email(), PASSWORD);
 
@@ -353,7 +381,7 @@ class AuthControllerIntegrationTests {
         UserResponse userResponse = createUser();
         User user = userRepository.findByEmailIgnoreCase(userResponse.email())
                 .orElseThrow();
-        createVerifiedTotpCredential(user, null);
+        createVerifiedTotpCredential(user, null, AuthenticationMethod.PASSWORD_AND_TOTP);
         LoginChallengeResponse challenge =
                 passwordLoginChallenge(userResponse.email(), PASSWORD);
 
@@ -389,7 +417,7 @@ class AuthControllerIntegrationTests {
         UserResponse userResponse = createUser();
         User user = userRepository.findByEmailIgnoreCase(userResponse.email())
                 .orElseThrow();
-        createVerifiedTotpCredential(user, null);
+        createVerifiedTotpCredential(user, null, AuthenticationMethod.PASSWORD_AND_TOTP);
         java.util.List<String> recoveryCodes = recoveryCodeService.replaceRecoveryCodes(user);
         String validRecoveryCode = recoveryCodes.get(0);
 
@@ -434,6 +462,9 @@ class AuthControllerIntegrationTests {
         UserResponse userResponse = createUser();
         User user = userRepository.findByEmailIgnoreCase(userResponse.email())
                 .orElseThrow();
+
+        user.setAuthenticationMethod(AuthenticationMethod.PASSWORD_AND_TOTP);
+        userRepository.save(user);
 
         // Corrupt the encrypted secret so decryption fails
         TotpCredential credential = new TotpCredential();
@@ -528,7 +559,7 @@ class AuthControllerIntegrationTests {
         UserResponse userResponse = createUser();
         User user = userRepository.findByEmailIgnoreCase(userResponse.email())
                 .orElseThrow();
-        createVerifiedTotpCredential(user, null);
+        createVerifiedTotpCredential(user, null, AuthenticationMethod.PASSWORD_AND_TOTP);
         LoginChallengeResponse challenge =
                 passwordLoginChallenge(userResponse.email(), PASSWORD);
 
@@ -624,7 +655,7 @@ class AuthControllerIntegrationTests {
         UserResponse userResponse = createUser();
         User user = userRepository.findByEmailIgnoreCase(userResponse.email())
                 .orElseThrow();
-        createVerifiedTotpCredential(user, null);
+        createVerifiedTotpCredential(user, null, AuthenticationMethod.PASSWORD_AND_TOTP);
         AuthTokenResponse loginResponse =
                 loginWithPasswordAndTotp(
                         userResponse.email(),
@@ -1292,6 +1323,16 @@ class AuthControllerIntegrationTests {
             User user,
             Long lastUsedTimestep
     ) {
+        createVerifiedTotpCredential(user, lastUsedTimestep, AuthenticationMethod.PASSWORD_OR_TOTP);
+    }
+
+    private void createVerifiedTotpCredential(
+            User user,
+            Long lastUsedTimestep,
+            AuthenticationMethod authenticationMethod
+    ) {
+        user.setAuthenticationMethod(authenticationMethod);
+        userRepository.save(user);
 
         TotpCredential credential = new TotpCredential();
         credential.setUser(user);

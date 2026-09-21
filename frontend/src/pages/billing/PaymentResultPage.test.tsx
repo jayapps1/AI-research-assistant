@@ -46,11 +46,11 @@ describe('PaymentResultPage Component', () => {
 
     renderPaymentResult('?reference=PA_TEST_REF_123');
 
-    expect(await screen.findByRole('heading', { name: /subscription upgraded!/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /payment successful/i })).toBeInTheDocument();
     expect(screen.getByText('Pro Researcher (PRO)')).toBeInTheDocument();
     expect(screen.getByText('GHS 50.00')).toBeInTheDocument();
     expect(screen.getByText('PA_TEST_REF_123')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /continue to dashboard/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /continue to billing/i })).toBeInTheDocument();
   });
 
   it('renders Mobile Money pending prompt with handset approval guidance', async () => {
@@ -121,6 +121,116 @@ describe('PaymentResultPage Component', () => {
 
     await waitFor(() => {
       expect(retrySpy).toHaveBeenCalledWith('intent-3');
+    });
+  });
+
+  it('passes single canonical reference when URL has ?reference=RA-123', async () => {
+    const verifySpy = vi.spyOn(billingApi, 'verifyAttemptByReference').mockResolvedValue({
+      paymentAttemptId: 'att-1',
+      paymentIntentId: 'intent-1',
+      workspaceId: 'ws-1',
+      planCode: 'PRO',
+      planName: 'Pro Researcher',
+      expectedAmount: 50.0,
+      currency: 'GHS',
+      attemptNumber: 1,
+      status: 'SUCCESS',
+      providerStatus: 'success',
+      internalReference: 'RA-123',
+      retryable: false,
+      createdAt: '2026-09-16T12:00:00Z',
+    });
+
+    renderPaymentResult('?reference=RA-123');
+
+    await waitFor(() => {
+      expect(verifySpy).toHaveBeenCalledWith('RA-123');
+    });
+  });
+
+  it('passes single canonical reference when URL has both reference and trxref', async () => {
+    const verifySpy = vi.spyOn(billingApi, 'verifyAttemptByReference').mockResolvedValue({
+      paymentAttemptId: 'att-1',
+      paymentIntentId: 'intent-1',
+      workspaceId: 'ws-1',
+      planCode: 'PRO',
+      planName: 'Pro Researcher',
+      expectedAmount: 50.0,
+      currency: 'GHS',
+      attemptNumber: 1,
+      status: 'SUCCESS',
+      providerStatus: 'success',
+      internalReference: 'RA-123',
+      retryable: false,
+      createdAt: '2026-09-16T12:00:00Z',
+    });
+
+    renderPaymentResult('?reference=RA-123&trxref=RA-123');
+
+    await waitFor(() => {
+      expect(verifySpy).toHaveBeenCalledWith('RA-123');
+      expect(verifySpy).not.toHaveBeenCalledWith('RA-123,RA-123');
+    });
+  });
+
+  it('normalizes comma-duplicated reference from URL to single canonical reference', async () => {
+    const verifySpy = vi.spyOn(billingApi, 'verifyAttemptByReference').mockResolvedValue({
+      paymentAttemptId: 'att-1',
+      paymentIntentId: 'intent-1',
+      workspaceId: 'ws-1',
+      planCode: 'PRO',
+      planName: 'Pro Researcher',
+      expectedAmount: 50.0,
+      currency: 'GHS',
+      attemptNumber: 1,
+      status: 'SUCCESS',
+      providerStatus: 'success',
+      internalReference: 'RA-123',
+      retryable: false,
+      createdAt: '2026-09-16T12:00:00Z',
+    });
+
+    renderPaymentResult('?reference=RA-123,RA-123');
+
+    await waitFor(() => {
+      expect(verifySpy).toHaveBeenCalledWith('RA-123');
+      expect(verifySpy).not.toHaveBeenCalledWith('RA-123,RA-123');
+    });
+  });
+
+  it('reuses the same single canonical reference across repeated Retry clicks', async () => {
+    const verifySpy = vi.spyOn(billingApi, 'verifyAttemptByReference')
+      .mockRejectedValueOnce(new Error('Network error'))
+      .mockResolvedValueOnce({
+        paymentAttemptId: 'att-1',
+        paymentIntentId: 'intent-1',
+        workspaceId: 'ws-1',
+        planCode: 'PRO',
+        planName: 'Pro Researcher',
+        expectedAmount: 50.0,
+        currency: 'GHS',
+        attemptNumber: 1,
+        status: 'SUCCESS',
+        providerStatus: 'success',
+        internalReference: 'RA-123',
+        retryable: false,
+        createdAt: '2026-09-16T12:00:00Z',
+      });
+
+    renderPaymentResult('?reference=RA-123,RA-123');
+
+    // First attempt fails, shows error and retry button
+    expect(await screen.findByRole('heading', { name: /verification notice/i })).toBeInTheDocument();
+    expect(verifySpy).toHaveBeenCalledWith('RA-123');
+
+    // Click Retry Verification
+    const retryBtn = screen.getByRole('button', { name: /retry verification/i });
+    fireEvent.click(retryBtn);
+
+    // Second call must still receive exactly "RA-123"
+    await waitFor(() => {
+      expect(verifySpy).toHaveBeenLastCalledWith('RA-123');
+      expect(verifySpy).toHaveBeenCalledTimes(2);
     });
   });
 });

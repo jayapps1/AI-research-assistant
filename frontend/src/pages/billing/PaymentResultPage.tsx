@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
   XCircle,
@@ -11,35 +12,43 @@ import {
 import { billingApi } from '../../api/endpoints';
 import { Button, Card, LoadingButton } from '../../components/ui';
 import type { PaymentAttemptDetail } from '../../types/api';
+import { parseCanonicalReference, formatPaymentError } from './paymentResultUtils';
 
 export function PaymentResultPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const reference = searchParams.get('reference');
+  const queryClient = useQueryClient();
+
+  const rawReference = searchParams.get('reference');
+  const reference = useMemo(() => parseCanonicalReference(searchParams), [searchParams]);
+
+  // Ensure clean URL without duplicate or conflicting params
+  useEffect(() => {
+    if (reference && (searchParams.get('reference') !== reference || searchParams.has('trxref'))) {
+      setSearchParams({ reference }, { replace: true });
+    }
+  }, [reference, searchParams, setSearchParams]);
 
   const [loading, setLoading] = useState(Boolean(reference));
   const [attempt, setAttempt] = useState<PaymentAttemptDetail | null>(null);
-  const [error, setError] = useState<string | null>(reference ? null : 'No transaction reference found in URL.');
+  const [error, setError] = useState<string | null>(
+    reference
+      ? null
+      : rawReference?.includes(',')
+      ? 'Invalid payment reference: multiple or conflicting references found in URL.'
+      : 'No transaction reference found in URL.'
+  );
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [pollCount, setPollCount] = useState(0);
 
-  const checkStatus = useCallback(async () => {
-    if (!reference) {
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await billingApi.verifyAttemptByReference(reference);
-      setAttempt(data);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Unable to verify payment status.');
-    } finally {
-      setLoading(false);
-    }
-  }, [reference]);
+  const invalidateBillingCaches = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['billing'] });
+    queryClient.invalidateQueries({ queryKey: ['workspace'] });
+    queryClient.invalidateQueries({ queryKey: ['subscription'] });
+    queryClient.invalidateQueries({ queryKey: ['credits'] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+  }, [queryClient]);
 
   useEffect(() => {
     if (!reference) return;
@@ -51,11 +60,14 @@ export function PaymentResultPage() {
         if (active) {
           setAttempt(data);
           setLoading(false);
+          if (data.status === 'SUCCESS' || data.status === 'SUCCEEDED') {
+            invalidateBillingCaches();
+          }
         }
       })
       .catch((err: unknown) => {
         if (active) {
-          setError(err instanceof Error ? err.message : 'Unable to verify payment status.');
+          setError(formatPaymentError(err));
           setLoading(false);
         }
       });
@@ -63,18 +75,45 @@ export function PaymentResultPage() {
     return () => {
       active = false;
     };
-  }, [reference]);
+  }, [reference, invalidateBillingCaches]);
+
+  const handleRetry = async () => {
+    if (!reference) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await billingApi.verifyAttemptByReference(reference);
+      setAttempt(data);
+      if (data.status === 'SUCCESS' || data.status === 'SUCCEEDED') {
+        invalidateBillingCaches();
+      }
+    } catch (err: unknown) {
+      setError(formatPaymentError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Polling for MoMo pending state
   useEffect(() => {
     if (attempt && (attempt.status === 'PENDING' || attempt.status === 'CREATED') && pollCount < 10) {
       const timer = setTimeout(() => {
         setPollCount((prev) => prev + 1);
-        checkStatus();
+        if (reference) {
+          billingApi
+            .verifyAttemptByReference(reference)
+            .then((data) => {
+              setAttempt(data);
+              if (data.status === 'SUCCESS' || data.status === 'SUCCEEDED') {
+                invalidateBillingCaches();
+              }
+            })
+            .catch(() => {});
+        }
       }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [attempt, pollCount, checkStatus]);
+  }, [attempt, pollCount, reference, invalidateBillingCaches]);
 
   const handlePayAgain = async () => {
     if (!attempt?.paymentIntentId) return;
@@ -135,7 +174,7 @@ export function PaymentResultPage() {
             <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.5rem' }}>Verification Notice</h2>
             <p className="text-sm muted" style={{ marginBottom: '1.5rem' }}>{error}</p>
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-              <Button variant="secondary" onClick={checkStatus}>
+              <Button variant="secondary" onClick={handleRetry}>
                 <RefreshCw className="w-4 h-4 mr-1 inline" /> Retry Verification
               </Button>
               <Button variant="primary" onClick={() => navigate('/app/billing')}>
@@ -164,11 +203,10 @@ export function PaymentResultPage() {
             </div>
 
             <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: '0 0 0.5rem' }}>
-              Subscription Upgraded!
+              Payment Successful
             </h1>
             <p className="text-sm muted" style={{ marginBottom: '1.5rem' }}>
-              Your payment has been verified by the backend. Your workspace has been activated on the{' '}
-              <strong>{attempt.planName}</strong> plan.
+              Your {attempt.planName || attempt.planCode} plan is now active.
             </p>
 
             {/* Receipt Summary Box */}
@@ -207,12 +245,13 @@ export function PaymentResultPage() {
               <Button variant="secondary" onClick={() => navigate('/app/billing')}>
                 View Billing Details
               </Button>
-              <Button variant="primary" onClick={() => navigate('/app')}>
-                Continue to Dashboard <ArrowRight className="w-4 h-4 ml-1 inline" />
+              <Button variant="primary" onClick={() => navigate('/app/billing')}>
+                Continue to Billing <ArrowRight className="w-4 h-4 ml-1 inline" />
               </Button>
             </div>
           </div>
         )}
+
 
         {/* 2. PENDING / MOBILE MONEY STATE */}
         {isPending && attempt && (
@@ -254,7 +293,7 @@ export function PaymentResultPage() {
             </p>
 
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-              <Button variant="primary" onClick={checkStatus} disabled={loading}>
+              <Button variant="primary" onClick={handleRetry} disabled={loading}>
                 <RefreshCw className="w-4 h-4 mr-1 inline" />
                 I Have Approved on My Phone
               </Button>

@@ -8,6 +8,7 @@ import { authApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthProvider';
 import { TotpChallengeRequired } from '../auth/errors';
 import { Button, Field, Input } from '../components/ui';
+import { OtpInput } from '../components/OtpInput';
 import { paths } from '../routes/paths';
 
 const loginSchema = z.object({
@@ -15,10 +16,10 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Password is required').max(128),
 });
 
-
 const totpOnlySchema = z.object({
   email: z.string().email().max(255),
-  totpCode: z.string().regex(/^\d{6}$/, 'Enter the 6-digit authenticator code'),
+  totpCode: z.string().optional(),
+  recoveryCode: z.string().optional(),
 });
 
 const totpChallengeSchema = z.object({
@@ -40,9 +41,10 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [method, setMethod] = useState<'PASSWORD' | 'TOTP'>('PASSWORD');
   const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+  const [totpTabUseRecovery, setTotpTabUseRecovery] = useState(false);
   const [challenge, setChallenge] = useState<{ id: string; email: string; expiresIn: number } | null>(null);
   const form = useForm<z.infer<typeof loginSchema>>({ resolver: zodResolver(loginSchema), defaultValues: { email: '', password: '' } });
-  const totpForm = useForm<z.infer<typeof totpOnlySchema>>({ resolver: zodResolver(totpOnlySchema), defaultValues: { email: '', totpCode: '' } });
+  const totpForm = useForm<z.infer<typeof totpOnlySchema>>({ resolver: zodResolver(totpOnlySchema), defaultValues: { email: '', totpCode: '', recoveryCode: '' } });
   const challengeForm = useForm<z.infer<typeof totpChallengeSchema>>({ resolver: zodResolver(totpChallengeSchema), defaultValues: { totpCode: '', recoveryCode: '' } });
   if (auth.isAuthenticated) return <Navigate to={paths.dashboard} replace />;
 
@@ -77,20 +79,27 @@ export function LoginPage() {
           </div>
           {error ? <div className="alert danger" role="alert">{error}</div> : null}
           {!useRecoveryCode ? (
-            <Field label="Authenticator code" error={challengeForm.formState.errors.totpCode?.message}>
-              <Input
-                inputMode="numeric"
-                pattern="[0-9]*"
-                autoComplete="one-time-code"
-                maxLength={6}
-                placeholder="6-digit code"
-                {...challengeForm.register('totpCode', {
-                  onChange: (e) => {
-                    e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
-                  },
-                })}
+            <div className="field">
+              <label htmlFor="challenge-totp-code" className="label">Authenticator code</label>
+              <OtpInput
+                id="challenge-totp-code"
+                value={challengeForm.watch('totpCode') || ''}
+                onChange={(val) => challengeForm.setValue('totpCode', val, { shouldValidate: true })}
+                onComplete={() => challengeForm.handleSubmit(async (values) => {
+                  setError(null);
+                  try {
+                    await auth.completeTotpChallenge({ challengeId: challenge.id, totpCode: values.totpCode });
+                    navigate(destination, { replace: true });
+                  } catch (err) {
+                    setError(authErrorMessage(err, 'Invalid or expired authenticator code.'));
+                  }
+                })()}
+                error={challengeForm.formState.errors.totpCode?.message}
               />
-            </Field>
+              {challengeForm.formState.errors.totpCode?.message ? (
+                <span className="badge danger">{challengeForm.formState.errors.totpCode?.message}</span>
+              ) : null}
+            </div>
           ) : (
             <Field label="Recovery code" error={challengeForm.formState.errors.recoveryCode?.message}>
               <Input
@@ -100,21 +109,27 @@ export function LoginPage() {
               />
             </Field>
           )}
-          <div className="auth-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Link to="/forgot-password">Lost authenticator? Use a recovery code</Link>
+          <div className="auth-row" style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 12px' }}>
             <button
               type="button"
               className="button-link"
-              style={{ background: 'none', border: 'none', color: 'var(--brand, #155eef)', cursor: 'pointer', padding: 0, fontSize: '0.875rem' }}
+              style={{ background: 'none', border: 'none', color: 'var(--brand, #155eef)', cursor: 'pointer', padding: 0, fontSize: '0.875rem', fontWeight: 500 }}
               onClick={() => {
                 setUseRecoveryCode(!useRecoveryCode);
                 setError(null);
               }}
             >
-              {useRecoveryCode ? 'Use 6-digit code' : 'Enter recovery code'}
+              {useRecoveryCode ? 'Use authenticator code' : 'Use a recovery code'}
             </button>
           </div>
-          <Button type="submit" disabled={challengeForm.formState.isSubmitting}>
+          <Button
+            type="submit"
+            disabled={
+              challengeForm.formState.isSubmitting ||
+              (!useRecoveryCode && (challengeForm.watch('totpCode') || '').length < 6) ||
+              (useRecoveryCode && !(challengeForm.watch('recoveryCode') || '').trim())
+            }
+          >
             {challengeForm.formState.isSubmitting ? 'Verifying...' : 'Verify & Sign In'}
           </Button>
           <Button type="button" variant="secondary" onClick={() => { setChallenge(null); setError(null); setUseRecoveryCode(false); challengeForm.reset(); }}>
@@ -159,8 +174,12 @@ export function LoginPage() {
             <form className="form" onSubmit={totpForm.handleSubmit(async (values) => {
               setError(null);
               try {
-                await auth.login({ email: values.email, totpCode: values.totpCode, authenticationMethod: 'TOTP' });
-                totpForm.reset({ email: values.email, totpCode: '' });
+                if (totpTabUseRecovery) {
+                  await auth.login({ email: values.email, recoveryCode: values.recoveryCode, authenticationMethod: 'TOTP' });
+                } else {
+                  await auth.login({ email: values.email, totpCode: values.totpCode, authenticationMethod: 'TOTP' });
+                }
+                totpForm.reset({ email: values.email, totpCode: '', recoveryCode: '' });
                 navigate(destination, { replace: true });
               } catch (err) {
                 setError(authErrorMessage(err, 'Unable to sign in with authenticator.'));
@@ -168,21 +187,63 @@ export function LoginPage() {
             })}>
               {error ? <div className="alert danger" role="alert">{error}</div> : null}
               <Field label="Email" error={totpForm.formState.errors.email?.message}><Input type="email" autoComplete="email" {...totpForm.register('email')} /></Field>
-              <Field label="Authenticator code" error={totpForm.formState.errors.totpCode?.message}>
-                <Input
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  {...totpForm.register('totpCode', {
-                    onChange: (e) => {
-                      e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
-                    },
-                  })}
-                />
-              </Field>
-              <Button type="submit" disabled={totpForm.formState.isSubmitting}>
-                {totpForm.formState.isSubmitting ? 'Signing in...' : 'Sign in with authenticator'}
+              {!totpTabUseRecovery ? (
+                <div className="field">
+                  <label htmlFor="totp-login-code" className="label">Authenticator code</label>
+                  <OtpInput
+                    id="totp-login-code"
+                    value={totpForm.watch('totpCode') || ''}
+                    onChange={(val) => totpForm.setValue('totpCode', val, { shouldValidate: true })}
+                    onComplete={(code) => {
+                      totpForm.setValue('totpCode', code, { shouldValidate: true });
+                      totpForm.handleSubmit(async (values) => {
+                        setError(null);
+                        try {
+                          await auth.login({ email: values.email, totpCode: code, authenticationMethod: 'TOTP' });
+                          totpForm.reset({ email: values.email, totpCode: '', recoveryCode: '' });
+                          navigate(destination, { replace: true });
+                        } catch (err) {
+                          setError(authErrorMessage(err, 'Unable to sign in with authenticator.'));
+                        }
+                      })();
+                    }}
+                    error={totpForm.formState.errors.totpCode?.message}
+                  />
+                  {totpForm.formState.errors.totpCode?.message ? (
+                    <span className="badge danger">{totpForm.formState.errors.totpCode?.message}</span>
+                  ) : null}
+                </div>
+              ) : (
+                <Field label="Recovery code" error={totpForm.formState.errors.recoveryCode?.message}>
+                  <Input
+                    autoComplete="off"
+                    placeholder="e.g. ABCD-EFGH-JKLM"
+                    {...totpForm.register('recoveryCode')}
+                  />
+                </Field>
+              )}
+              <div className="auth-row" style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 12px' }}>
+                <button
+                  type="button"
+                  className="button-link"
+                  style={{ background: 'none', border: 'none', color: 'var(--brand, #155eef)', cursor: 'pointer', padding: 0, fontSize: '0.875rem', fontWeight: 500 }}
+                  onClick={() => {
+                    setTotpTabUseRecovery(!totpTabUseRecovery);
+                    setError(null);
+                  }}
+                >
+                  {totpTabUseRecovery ? 'Use authenticator code' : 'Use a recovery code'}
+                </button>
+              </div>
+              <Button
+                type="submit"
+                disabled={
+                  totpForm.formState.isSubmitting ||
+                  (!totpTabUseRecovery && (totpForm.watch('totpCode') || '').length < 6) ||
+                  (totpTabUseRecovery && !(totpForm.watch('recoveryCode') || '').trim())
+                }
+              >
+                {totpForm.formState.isSubmitting ? 'Signing in...' : 'Verify & Sign In'}
               </Button>
             </form>
           )}
@@ -199,8 +260,9 @@ export function TotpPage() {
   const location = useLocation();
   const previous = location.state as { challengeId?: string; email?: string } | null;
   const [error, setError] = useState<string | null>(null);
-  const form = useForm<{ totpCode: string }>({
-    defaultValues: { totpCode: '' },
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+  const form = useForm<{ totpCode: string; recoveryCode: string }>({
+    defaultValues: { totpCode: '', recoveryCode: '' },
   });
 
   return (
@@ -210,13 +272,19 @@ export function TotpPage() {
         onSubmit={form.handleSubmit(async (values) => {
           setError(null);
           try {
-            if (previous?.challengeId) {
+            if (!previous?.challengeId) {
+              throw new Error('No active authentication challenge found. Please sign in again.');
+            }
+            if (useRecoveryCode) {
+              await auth.completeTotpChallenge({
+                challengeId: previous.challengeId,
+                recoveryCode: values.recoveryCode,
+              });
+            } else {
               await auth.completeTotpChallenge({
                 challengeId: previous.challengeId,
                 totpCode: values.totpCode,
               });
-            } else {
-              throw new Error('No active authentication challenge found. Please sign in again.');
             }
             navigate(paths.dashboard, { replace: true });
           } catch (err) {
@@ -233,25 +301,63 @@ export function TotpPage() {
           </p>
         </div>
         {error ? <div className="alert danger" role="alert">{error}</div> : null}
-        <Field label="6-digit code" error={form.formState.errors.totpCode?.message}>
-          <Input
-            inputMode="numeric"
-            pattern="[0-9]*"
-            autoComplete="one-time-code"
-            maxLength={6}
-            {...form.register('totpCode', {
-              required: 'Authenticator code is required',
-              onChange: (e) => {
-                e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
-              },
-            })}
-          />
-        </Field>
-        <div className="auth-row">
-          <Link to="/forgot-password">Lost authenticator? Use a recovery code</Link>
+        {!useRecoveryCode ? (
+          <div className="field">
+            <label htmlFor="totp-page-code" className="label">Authenticator code</label>
+            <OtpInput
+              id="totp-page-code"
+              value={form.watch('totpCode') || ''}
+              onChange={(val) => form.setValue('totpCode', val, { shouldValidate: true })}
+              onComplete={(code) => {
+                form.setValue('totpCode', code, { shouldValidate: true });
+                form.handleSubmit(async () => {
+                  setError(null);
+                  try {
+                    if (!previous?.challengeId) throw new Error('No active challenge');
+                    await auth.completeTotpChallenge({ challengeId: previous.challengeId, totpCode: code });
+                    navigate(paths.dashboard, { replace: true });
+                  } catch (err) {
+                    setError(authErrorMessage(err, 'Invalid or expired authenticator code.'));
+                  }
+                })();
+              }}
+              error={form.formState.errors.totpCode?.message}
+            />
+            {form.formState.errors.totpCode?.message ? (
+              <span className="badge danger">{form.formState.errors.totpCode?.message}</span>
+            ) : null}
+          </div>
+        ) : (
+          <Field label="Recovery code" error={form.formState.errors.recoveryCode?.message}>
+            <Input
+              autoComplete="off"
+              placeholder="e.g. ABCD-EFGH-JKLM"
+              {...form.register('recoveryCode')}
+            />
+          </Field>
+        )}
+        <div className="auth-row" style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 12px' }}>
+          <button
+            type="button"
+            className="button-link"
+            style={{ background: 'none', border: 'none', color: 'var(--brand, #155eef)', cursor: 'pointer', padding: 0, fontSize: '0.875rem', fontWeight: 500 }}
+            onClick={() => {
+              setUseRecoveryCode(!useRecoveryCode);
+              setError(null);
+            }}
+          >
+            {useRecoveryCode ? 'Use authenticator code' : 'Use a recovery code'}
+          </button>
         </div>
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Verifying...' : 'Verify and continue'}
+        <Button
+          type="submit"
+          disabled={
+            form.formState.isSubmitting ||
+            (!useRecoveryCode && (form.watch('totpCode') || '').length < 6) ||
+            (useRecoveryCode && !(form.watch('recoveryCode') || '').trim())
+          }
+        >
+          {form.formState.isSubmitting ? 'Verifying...' : 'Verify & Sign In'}
         </Button>
         <Button type="button" variant="secondary" onClick={() => navigate('/login', { replace: true })}>
           Back
@@ -400,16 +506,29 @@ function authErrorMessage(error: unknown, fallback: string) {
   if (typeof error === 'object' && error !== null) {
     const errObj = error as { code?: string; message?: string; status?: number };
     const code = errObj.code?.toUpperCase();
-    if (code === 'INVALID_TOTP') return 'Invalid authenticator code. Please check your app and try again.';
-    if (code === 'TOTP_REPLAYED') return 'This authenticator code has already been used. Please wait for the next code.';
-    if (code === 'TOTP_RATE_LIMITED' || errObj.status === 429) return 'Too many attempts. Please wait a moment before trying again.';
-    if (code === 'TOTP_NOT_ENROLLED') return 'Authenticator app is not configured for this account.';
+    if (code === 'INVALID_TOTP') return 'Invalid authenticator code.';
+    if (code === 'TOTP_REPLAYED') return 'This authenticator code has already been used. Wait for a new code.';
+    if (code === 'TOTP_NOT_CONFIGURED' || code === 'TOTP_NOT_ENROLLED') return 'Authenticator login is not configured for this account.';
+    if (code === 'CREDENTIAL_DECRYPTION_FAILED') return 'Authenticator configuration must be reset.';
+    if (code === 'RATE_LIMITED' || code === 'TOTP_RATE_LIMITED' || errObj.status === 429) return 'Too many attempts. Try again later.';
     if (code === 'CHALLENGE_EXPIRED') return 'Authentication challenge has expired. Please sign in again.';
   }
   if (error instanceof Error) {
     const msg = error.message;
     if (/credential secret decryption failed|decryption failed|could not be verified/i.test(msg)) {
-      return 'Your authenticator configuration could not be verified. Use a recovery code or reset your authenticator.';
+      return 'Authenticator configuration must be reset.';
+    }
+    if (/already been used|replayed/i.test(msg)) {
+      return 'This authenticator code has already been used. Wait for a new code.';
+    }
+    if (/not configured/i.test(msg)) {
+      return 'Authenticator login is not configured for this account.';
+    }
+    if (/too many attempts|rate limit/i.test(msg)) {
+      return 'Too many attempts. Try again later.';
+    }
+    if (/invalid authenticator code|invalid credentials/i.test(msg)) {
+      return 'Invalid authenticator code.';
     }
     if (/stack trace|exception|\bat\b\s+[a-z0-9_$.]+|\bjava\./i.test(msg)) {
       return fallback;

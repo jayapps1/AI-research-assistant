@@ -25,6 +25,7 @@ import java.util.UUID;
 
 @RestController
 public class BillingController {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(BillingController.class);
     private final AuthenticatedUserResolver userResolver;
     private final WorkspaceAuthorizationService workspaceAuthorizationService;
     private final BillingService billingService;
@@ -32,6 +33,8 @@ public class BillingController {
     private final PaystackWebhookVerifier webhookVerifier;
     private final ObjectMapper objectMapper;
     private final com.researchassistant.subscription.ComplimentaryAccessGrantRepository complimentaryAccessGrantRepository;
+    @org.springframework.beans.factory.annotation.Value("${app.api.frontend-url:}")
+    private String frontendUrl;
 
     public BillingController(AuthenticatedUserResolver userResolver, WorkspaceAuthorizationService workspaceAuthorizationService,
                              BillingService billingService,
@@ -146,7 +149,14 @@ public class BillingController {
     @GetMapping("/api/v1/billing/payment-attempts/by-reference/{reference}")
     public BillingDtos.PaymentAttemptDetailResponse getAttemptByReference(@PathVariable String reference, Authentication authentication) {
         User user = userResolver.requireActiveUser(authentication);
-        BillingDtos.PaymentAttemptDetailResponse detail = billingService.getOrVerifyAttemptByReference(reference, user.getId());
+        if (reference == null || reference.isBlank()) {
+            throw new com.researchassistant.billing.exception.InvalidPaymentReferenceException("REFERENCE_MISSING", "Payment reference is required.");
+        }
+        String trimmed = reference.trim();
+        if (trimmed.contains(",")) {
+            throw new com.researchassistant.billing.exception.InvalidPaymentReferenceException("INVALID_PAYMENT_REFERENCE", "Invalid payment reference format: multiple or comma-separated references are not allowed.");
+        }
+        BillingDtos.PaymentAttemptDetailResponse detail = billingService.getOrVerifyAttemptByReference(trimmed, user.getId());
         workspaceAuthorizationService.requireActiveMembership(detail.workspaceId(), user);
         return detail;
     }
@@ -167,16 +177,64 @@ public class BillingController {
     }
 
     @GetMapping("/api/v1/billing/paystack/callback")
-    public org.springframework.web.servlet.view.RedirectView callback(@RequestParam String reference) {
-        try {
-            billingService.verifyAttemptReference(reference, null);
-        } catch (RuntimeException ignored) {
+    public org.springframework.web.servlet.view.RedirectView callback(
+            @RequestParam(name = "reference", required = false) String reference,
+            @RequestParam(name = "trxref", required = false) String trxref) {
+        String ref = resolveCanonicalReference(reference, trxref);
+        if (ref != null && !ref.isBlank()) {
             try {
-                billingService.verifyReference(reference, null);
-            } catch (RuntimeException alsoIgnored) {
+                billingService.verifyAttemptReference(ref, null);
+            } catch (RuntimeException ignored) {
+                try {
+                    billingService.verifyReference(ref, null);
+                } catch (RuntimeException alsoIgnored) {
+                }
             }
         }
-        return new org.springframework.web.servlet.view.RedirectView("/app/billing/payment-result?reference=" + java.net.URLEncoder.encode(reference, java.nio.charset.StandardCharsets.UTF_8));
+        String baseUrl = (frontendUrl != null && !frontendUrl.isBlank()) ? frontendUrl : "http://localhost:5173";
+        String target = baseUrl + "/app/billing/payment-result";
+        if (ref != null && !ref.isBlank()) {
+            target += "?reference=" + java.net.URLEncoder.encode(ref, java.nio.charset.StandardCharsets.UTF_8);
+        }
+        return new org.springframework.web.servlet.view.RedirectView(target);
+    }
+
+    private String resolveCanonicalReference(String reference, String trxref) {
+        String primary = cleanReferenceToken(reference);
+        String secondary = cleanReferenceToken(trxref);
+
+        if (primary != null && secondary != null) {
+            if (!primary.equals(secondary)) {
+                log.warn("Conflicting payment callback references: reference='{}', trxref='{}'", reference, trxref);
+                return null;
+            }
+            return primary;
+        }
+        return primary != null ? primary : secondary;
+    }
+
+    private String cleanReferenceToken(String token) {
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+        String trimmed = token.trim();
+        if (trimmed.contains(",")) {
+            String[] parts = trimmed.split(",");
+            String first = null;
+            for (String part : parts) {
+                String p = part.trim();
+                if (!p.isEmpty()) {
+                    if (first == null) {
+                        first = p;
+                    } else if (!first.equals(p)) {
+                        log.warn("Multiple conflicting reference tokens in query parameter: '{}'", token);
+                        return null;
+                    }
+                }
+            }
+            return first;
+        }
+        return trimmed;
     }
 
     @PostMapping("/api/v1/workspaces/{workspaceId}/billing/cancel")

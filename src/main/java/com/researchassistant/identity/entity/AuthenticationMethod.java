@@ -26,5 +26,12 @@ public enum AuthenticationMethod {
      * Stronger authentication requiring both a valid password and
      * a valid authenticator-app TOTP code.
      */
-    PASSWORD_AND_TOTP
+    PASSWORD_AND_TOTP,
+
+    /**
+     * Alternative authentication allowing the user to authenticate
+     * using either a valid password OR a valid authenticator-app
+     * TOTP code independently.
+     */
+    PASSWORD_OR_TOTP
 }

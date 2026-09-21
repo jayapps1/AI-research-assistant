@@ -209,6 +209,7 @@ public class TotpService {
                     .findByUserIdForUpdate(user.getId())
                     .filter(TotpCredential::isEnabled)
                     .orElseThrow(() -> new AuthenticationFailedException(
+                            "TOTP_NOT_CONFIGURED",
                             INVALID_CREDENTIALS
                     ));
 
@@ -271,7 +272,7 @@ public class TotpService {
     ) {
 
         if (submittedCode == null || !submittedCode.matches("\\d{6}")) {
-            throw new AuthenticationFailedException(INVALID_CREDENTIALS);
+            throw new AuthenticationFailedException("INVALID_TOTP", INVALID_CREDENTIALS);
         }
 
         String secret;
@@ -280,31 +281,36 @@ public class TotpService {
         } catch (Exception exception) {
             String correlationId = java.util.UUID.randomUUID().toString();
             log.warn("TOTP secret decryption failed [correlationId={}]: unable to decrypt credential with configured key", correlationId);
-            throw new AuthenticationFailedException(UNVERIFIED_AUTHENTICATOR);
+            throw new AuthenticationFailedException("CREDENTIAL_DECRYPTION_FAILED", UNVERIFIED_AUTHENTICATOR);
         }
 
         byte[] secretBytes = decodeBase32(secret);
         long currentTimestep = Instant.now().getEpochSecond()
                 / PERIOD_SECONDS;
 
+        boolean replayed = false;
         for (long timestep = currentTimestep - ALLOWED_WINDOW_STEPS;
                 timestep <= currentTimestep + ALLOWED_WINDOW_STEPS;
                 timestep++) {
 
-            if (!allowFirstUse
-                    && lastUsedTimestep != null
-                    && timestep <= lastUsedTimestep) {
-                continue;
-            }
-
             String expectedCode = generateCode(secretBytes, timestep);
 
             if (constantTimeEquals(expectedCode, submittedCode)) {
-                return timestep;
+                if (!allowFirstUse
+                        && lastUsedTimestep != null
+                        && timestep <= lastUsedTimestep) {
+                    replayed = true;
+                } else {
+                    return timestep;
+                }
             }
         }
 
-        throw new AuthenticationFailedException(INVALID_CREDENTIALS);
+        if (replayed) {
+            throw new AuthenticationFailedException("TOTP_REPLAYED", INVALID_CREDENTIALS);
+        }
+
+        throw new AuthenticationFailedException("INVALID_TOTP", INVALID_CREDENTIALS);
     }
 
     private String generateSecret() {

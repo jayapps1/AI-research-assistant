@@ -36,7 +36,10 @@ public record LoginRequest(
                 regexp = "^\\d{6}$",
                 message = "TOTP code must contain exactly 6 digits"
         )
-        String totpCode
+        String totpCode,
+
+        @Size(max = 64, message = "Recovery code must not exceed 64 characters")
+        String recoveryCode
 ) {
 
     public AuthenticationMethod requestedAuthenticationMethod() {
@@ -58,14 +61,34 @@ public record LoginRequest(
         return true;
     }
 
-    @AssertTrue(message = "TOTP code is required for this authentication method")
+    @AssertTrue(message = "TOTP code or recovery code is required for this authentication method")
     public boolean isTotpCodeValidForAuthenticationMethod() {
 
         AuthenticationMethod method = requestedAuthenticationMethod();
 
-        if (method == AuthenticationMethod.TOTP
-                || method == AuthenticationMethod.PASSWORD_AND_TOTP) {
-            return totpCode != null && !totpCode.isBlank();
+        if (method == AuthenticationMethod.TOTP) {
+            boolean hasTotp = totpCode != null && !totpCode.isBlank();
+            boolean hasRecovery = recoveryCode != null && !recoveryCode.isBlank();
+            return hasTotp || hasRecovery;
+        }
+
+        if (method == AuthenticationMethod.PASSWORD_AND_TOTP) {
+            return (totpCode != null && !totpCode.isBlank()) || (recoveryCode != null && !recoveryCode.isBlank());
+        }
+
+        return true;
+    }
+
+    @AssertTrue(message = "Either password, TOTP code, or recovery code is required for this authentication method")
+    public boolean isCredentialPresentForAlternativeMethod() {
+
+        AuthenticationMethod method = requestedAuthenticationMethod();
+
+        if (method == AuthenticationMethod.PASSWORD_OR_TOTP) {
+            boolean hasPassword = password != null && !password.isBlank();
+            boolean hasTotp = totpCode != null && !totpCode.isBlank();
+            boolean hasRecovery = recoveryCode != null && !recoveryCode.isBlank();
+            return hasPassword || hasTotp || hasRecovery;
         }
 
         return true;

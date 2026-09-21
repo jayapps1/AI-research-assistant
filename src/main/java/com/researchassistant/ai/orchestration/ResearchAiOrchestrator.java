@@ -87,23 +87,10 @@ public class ResearchAiOrchestrator {
         }
 
         if (!generationProvider.available()) {
-            AiTaskResult<T> unavailable = new AiTaskResult<>(
+            AiTaskResult<T> unavailable = AiTaskResult.unavailable(
                     java.util.UUID.randomUUID(),
                     request.taskType(),
-                    com.researchassistant.ai.provider.AiProviderType.NONE,
-                    "none",
-                    AiRequestStatus.CAPABILITY_UNAVAILABLE,
-                    null,
-                    null,
-                    null,
-                    null,
-                    0L,
-                    "CAPABILITY_UNAVAILABLE",
-                    "AI generation capability is disabled or unavailable.",
-                    null,
-                    java.time.OffsetDateTime.now(),
-                    java.time.OffsetDateTime.now(),
-                    List.of("AI generation capability is disabled or unavailable.")
+                    "AI generation capability is disabled or unavailable."
             );
             usageRecordingService.recordRequest(user, request, unavailable);
             return unavailable;

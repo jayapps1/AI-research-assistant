@@ -22,9 +22,23 @@ public class ResearchReportTemplate {
     private String institution;
     @Column(name = "system_template", nullable = false)
     private boolean systemTemplate;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "default_citation_style", length = 60)
+    private CitationStyle defaultCitationStyle = CitationStyle.APA_7;
+    @Column(name = "citation_style_locked", nullable = false)
+    private boolean citationStyleLocked;
+    @Column(length = 255)
+    private String department;
+    @Column(columnDefinition = "TEXT")
+    private String description;
     @Column(name = "configuration_json", nullable = false, columnDefinition = "TEXT")
     private String configurationJson;
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
-    @PrePersist void onCreate() { if (id == null) id = UUID.randomUUID(); if (createdAt == null) createdAt = OffsetDateTime.now(); if (type == null) type = ResearchReportType.FINAL_YEAR_PROJECT; }
+    @PrePersist void onCreate() {
+        if (id == null) id = UUID.randomUUID();
+        if (createdAt == null) createdAt = OffsetDateTime.now();
+        if (type == null) type = ResearchReportType.FINAL_YEAR_PROJECT;
+        if (defaultCitationStyle == null) defaultCitationStyle = CitationStyle.APA_7;
+    }
 }

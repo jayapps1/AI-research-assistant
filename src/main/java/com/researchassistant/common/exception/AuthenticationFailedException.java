@@ -9,7 +9,19 @@ package com.researchassistant.common.exception;
  */
 public class AuthenticationFailedException extends RuntimeException {
 
+    private final String errorCode;
+
     public AuthenticationFailedException(String message) {
         super(message);
+        this.errorCode = null;
+    }
+
+    public AuthenticationFailedException(String errorCode, String message) {
+        super(message);
+        this.errorCode = errorCode;
+    }
+
+    public String getErrorCode() {
+        return errorCode;
     }
 }

@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type ClipboardEvent, type ChangeEvent } from 'react';
+import { useRef, type KeyboardEvent, type ClipboardEvent } from 'react';
 
 export interface OtpInputProps {
   value: string;
@@ -19,38 +19,79 @@ export function OtpInput({
   error,
   id = 'otp-input',
 }: OtpInputProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const digits = value.slice(0, 6).split('');
-  const activeIndex = Math.min(digits.length, 5);
+  const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
+  const digits = Array.from({ length: 6 }, (_, i) => value[i] ?? '');
 
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
-    // Strictly filter out all non-digit characters
-    const sanitized = raw.replace(/\D/g, '').slice(0, 6);
-    if (sanitized !== value) {
-      onChange(sanitized);
-      if (sanitized.length === 6 && onComplete) {
-        onComplete(sanitized);
-      }
-    }
-  };
-
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    // If a non-numeric key other than allowed control keys is pressed, prevent default
-    if (
-      !/^\d$/.test(e.key) &&
-      !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Home', 'End'].includes(e.key) &&
-      !e.ctrlKey &&
-      !e.metaKey
-    ) {
-      e.preventDefault();
+  const handleInputChange = (index: number, rawValue: string) => {
+    const clean = rawValue.replace(/\D/g, '');
+    if (!clean) {
+      const newDigits = [...digits];
+      newDigits[index] = '';
+      onChange(newDigits.join('').trimEnd());
       return;
     }
 
+    if (clean.length > 1) {
+      // Multiple digits typed or pasted into single box
+      const newDigits = [...digits];
+      for (let j = 0; j < clean.length && index + j < 6; j++) {
+        newDigits[index + j] = clean[j];
+      }
+      const newCode = newDigits.join('').slice(0, 6);
+      onChange(newCode);
+      const nextFocus = Math.min(index + clean.length, 5);
+      inputsRef.current[nextFocus]?.focus();
+      if (newCode.length === 6 && onComplete) {
+        onComplete(newCode);
+      }
+      return;
+    }
+
+    // Single digit entered
+    const newDigits = [...digits];
+    newDigits[index] = clean;
+    const newCode = newDigits.join('').slice(0, 6);
+    onChange(newCode);
+
+    if (index < 5) {
+      inputsRef.current[index + 1]?.focus();
+    }
+    if (newCode.length === 6 && onComplete) {
+      onComplete(newCode);
+    }
+  };
+
+  const handleKeyDown = (index: number, e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Backspace') {
-      if (value.length > 0) {
-        onChange(value.slice(0, -1));
+      if (!digits[index] && index > 0) {
         e.preventDefault();
+        const newDigits = [...digits];
+        newDigits[index - 1] = '';
+        onChange(newDigits.join('').trimEnd());
+        inputsRef.current[index - 1]?.focus();
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowLeft') {
+      if (index > 0) {
+        e.preventDefault();
+        inputsRef.current[index - 1]?.focus();
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowRight') {
+      if (index < 5) {
+        e.preventDefault();
+        inputsRef.current[index + 1]?.focus();
+      }
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      if (value.length === 6 && onComplete) {
+        onComplete(value);
       }
     }
   };
@@ -58,18 +99,17 @@ export function OtpInput({
   const handlePaste = (e: ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
     const pasted = e.clipboardData.getData('text/plain') || '';
-    const digitsOnly = pasted.replace(/\D/g, '').slice(0, 6);
-    if (digitsOnly !== value) {
-      onChange(digitsOnly);
-      if (digitsOnly.length === 6 && onComplete) {
-        onComplete(digitsOnly);
+    const clean = pasted.replace(/\D/g, '').slice(0, 6);
+    if (clean) {
+      onChange(clean);
+      if (clean.length === 6) {
+        inputsRef.current[5]?.focus();
+        if (onComplete) {
+          onComplete(clean);
+        }
+      } else {
+        inputsRef.current[clean.length]?.focus();
       }
-    }
-  };
-
-  const focusInput = () => {
-    if (!disabled && inputRef.current) {
-      inputRef.current.focus();
     }
   };
 
@@ -77,46 +117,37 @@ export function OtpInput({
     <div className="otp-container">
       <div
         className={`otp-boxes ${error ? 'has-error' : ''} ${disabled ? 'is-disabled' : ''}`}
-        onClick={focusInput}
         role="group"
-        aria-label="6-digit authenticator code"
+        aria-label="One-time verification code"
       >
         {[0, 1, 2, 3, 4, 5].map((index) => {
-          const char = digits[index] ?? '';
-          const isCurrent = !disabled && index === activeIndex;
-          const isFilled = Boolean(char);
-
           return (
-            <div
+            <input
               key={index}
+              ref={(el) => {
+                inputsRef.current[index] = el;
+              }}
               data-testid="otp-box"
-              className={`otp-box ${isCurrent ? 'is-active' : ''} ${isFilled ? 'is-filled' : ''}`}
-            >
-              {char || <span className="otp-placeholder">_</span>}
-            </div>
+              id={index === 0 ? id : `${id}-${index}`}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete={index === 0 ? 'one-time-code' : 'off'}
+              maxLength={1}
+              value={digits[index]}
+              disabled={disabled}
+              autoFocus={autoFocus && index === 0}
+              className={`otp-box ${digits[index] ? 'is-filled' : ''}`}
+              aria-label={`Digit ${index + 1} of 6`}
+              aria-invalid={Boolean(error)}
+              onChange={(e) => handleInputChange(index, e.target.value)}
+              onKeyDown={(e) => handleKeyDown(index, e)}
+              onPaste={handlePaste}
+              onFocus={(e) => e.target.select()}
+            />
           );
         })}
       </div>
-
-      {/* Accessible underlying input */}
-      <input
-        ref={inputRef}
-        id={id}
-        type="text"
-        inputMode="numeric"
-        pattern="[0-9]*"
-        autoComplete="one-time-code"
-        maxLength={6}
-        value={value}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        onPaste={handlePaste}
-        disabled={disabled}
-        autoFocus={autoFocus}
-        className="otp-hidden-input"
-        aria-label="Enter 6-digit authenticator code"
-        aria-invalid={Boolean(error)}
-      />
 
       {error ? <span className="badge danger" style={{ marginTop: '6px' }}>{error}</span> : null}
     </div>

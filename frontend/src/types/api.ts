@@ -154,6 +154,14 @@ export interface ResearchProject {
   workspaceId?: UUID;
   title: string;
   description?: string;
+  researchAim?: string;
+  studyArea?: string;
+  researchType?: string;
+  keywords?: string;
+  reportTemplateId?: UUID;
+  reportTemplateName?: string;
+  citationStyle?: string;
+  citationStyleLocked?: boolean;
   status?: string;
   role?: string;
   currentUserRole?: string;
@@ -183,6 +191,7 @@ export interface DocumentVersionSummary {
   scanStatus: string;
   quarantined: boolean;
   status: string;
+  uploadedBy?: string;
   uploadedAt: string;
 }
 
@@ -196,6 +205,19 @@ export interface DocumentItem {
   filename?: string;
   originalFilename?: string;
   title?: string;
+  bibliographicTitle?: string;
+  authors?: string;
+  publicationYear?: number | null;
+  journal?: string | null;
+  conference?: string | null;
+  publisher?: string | null;
+  volume?: string | null;
+  issue?: string | null;
+  pages?: string | null;
+  doi?: string | null;
+  url?: string | null;
+  sourceType?: string | null;
+  keywords?: string | null;
   version?: number;
   currentVersion?: DocumentVersionSummary | null;
   status?: string;
@@ -203,6 +225,12 @@ export interface DocumentItem {
   semanticIndexStatus?: string;
   uploadedBy?: string;
   uploadedAt?: string;
+  pageCount?: number | null;
+  chunkCount?: number | null;
+  type?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  archivedAt?: string | null;
 }
 
 export interface NotificationItem {
@@ -679,5 +707,57 @@ export interface AdminGrantAiCreditsRequest {
   reason: string;
 }
 
+export interface ReportTemplateItem {
+  id: UUID;
+  name: string;
+  description?: string;
+  citationStyle?: string;
+  citationStyleLocked?: boolean;
+  department?: string;
+  active?: boolean;
+  configurationJson?: string;
+}
 
+export interface SectionCapabilityItem {
+  sectionId: UUID;
+  chapterNumber?: number;
+  chapterTitle?: string;
+  sectionNumber?: string;
+  sectionTitle?: string;
+  status: 'READY' | 'DATA_REQUIRED' | 'FINDINGS_REQUIRED' | string;
+  reason?: string;
+  canGenerate: boolean;
+  hasDataset: boolean;
+  hasFindings: boolean;
+  readyDocumentCount: number;
+}
 
+export interface SectionCapabilitiesResponse {
+  projectId: UUID;
+  canGenerateEmpirical: boolean;
+  hasDataset: boolean;
+  hasFindings: boolean;
+  readyDocumentCount: number;
+  sections: SectionCapabilityItem[];
+}
+
+export interface TableOfContentsSectionItem {
+  sectionId: UUID;
+  sectionNumber?: string;
+  title: string;
+  pageNumber: number;
+}
+
+export interface TableOfContentsItem {
+  chapterId: UUID;
+  chapterNumber?: number;
+  title: string;
+  pageNumber: number;
+  sections: TableOfContentsSectionItem[];
+}
+
+export interface TableOfContentsResponse {
+  reportId: UUID;
+  title: string;
+  items: TableOfContentsItem[];
+}

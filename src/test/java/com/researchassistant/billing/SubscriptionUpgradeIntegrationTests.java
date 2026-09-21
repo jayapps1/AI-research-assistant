@@ -522,6 +522,31 @@ class SubscriptionUpgradeIntegrationTests extends IntegrationTestSupport {
         mockMvc.perform(get("/api/v1/billing/paystack/callback")
                         .param("reference", "PA_NON_EXISTENT_REF"))
                 .andExpect(status().is3xxRedirection())
-                .andExpect(redirectedUrl("/app/billing/payment-result?reference=PA_NON_EXISTENT_REF"));
+                .andExpect(redirectedUrlPattern("**/app/billing/payment-result?reference=PA_NON_EXISTENT_REF"));
+    }
+
+    @Test
+    void paystackCallbackCanonicalizesDuplicateReference() throws Exception {
+        mockMvc.perform(get("/api/v1/billing/paystack/callback")
+                        .param("reference", "PA_REF_123,PA_REF_123"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrlPattern("**/app/billing/payment-result?reference=PA_REF_123"));
+    }
+
+    @Test
+    void paystackCallbackCanonicalizesReferenceAndTrxref() throws Exception {
+        mockMvc.perform(get("/api/v1/billing/paystack/callback")
+                        .param("reference", "PA_REF_123")
+                        .param("trxref", "PA_REF_123"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrlPattern("**/app/billing/payment-result?reference=PA_REF_123"));
+    }
+
+    @Test
+    void getAttemptByReferenceRejectsCommaConcatenatedReference() throws Exception {
+        mockMvc.perform(get("/api/v1/billing/payment-attempts/by-reference/{reference}", "PA_REF_123,PA_REF_123")
+                        .header("Authorization", userToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode", is("INVALID_PAYMENT_REFERENCE")));
     }
 }
