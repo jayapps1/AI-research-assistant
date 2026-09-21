@@ -1,6 +1,31 @@
 import { Slot } from '@radix-ui/react-slot';
 import { clsx } from 'clsx';
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import {
+  useEffect,
+  useRef,
+  type ButtonHTMLAttributes,
+  type InputHTMLAttributes,
+  type KeyboardEvent,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
+} from 'react';
+
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function getFocusableElements(container: HTMLElement) {
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => {
+    if (element.getAttribute('aria-hidden') === 'true') return false;
+    return element.offsetParent !== null || element.getClientRects().length > 0;
+  });
+}
 
 export function Button({
   variant = 'primary',
@@ -73,8 +98,17 @@ export function Breadcrumbs({ items }: { items: string[] }) {
   );
 }
 
-export function LoadingButton({ loading, children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger'; loading?: boolean }) {
-  return <Button {...props} disabled={loading || props.disabled}>{loading ? 'Working...' : children}</Button>;
+export function LoadingButton({
+  loading,
+  loadingLabel = 'Working...',
+  children,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: 'primary' | 'secondary' | 'danger';
+  loading?: boolean;
+  loadingLabel?: string;
+}) {
+  return <Button {...props} disabled={loading || props.disabled}>{loading ? loadingLabel : children}</Button>;
 }
 
 export function Pagination({
@@ -135,37 +169,123 @@ export function Modal({
   open,
   onClose,
   children,
+  footer,
+  className,
+  bodyClassName,
+  closeDisabled = false,
 }: {
   title: string;
   open: boolean;
   onClose: () => void;
   children: ReactNode;
+  footer?: ReactNode;
+  className?: string;
+  bodyClassName?: string;
+  closeDisabled?: boolean;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previouslyFocusedElement = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const originalOverflow = document.body.style.overflow;
+    const originalPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+
+    document.body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.paddingRight = originalPaddingRight;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    previouslyFocusedElement.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const frameId = window.requestAnimationFrame(() => {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+
+      const autofocusTarget = dialog.querySelector<HTMLElement>('[autofocus]');
+      const firstFocusable = getFocusableElements(dialog)[0];
+      (autofocusTarget ?? firstFocusable ?? dialog).focus();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      previouslyFocusedElement.current?.focus({ preventScroll: true });
+      previouslyFocusedElement.current = null;
+    };
+  }, [open]);
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      if (!closeDisabled) {
+        onClose();
+      }
+      return;
+    }
+
+    if (event.key !== 'Tab') return;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const focusableElements = getFocusableElements(dialog);
+    if (!focusableElements.length) {
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (event.shiftKey && document.activeElement === firstElement) {
+      event.preventDefault();
+      lastElement.focus();
+    } else if (!event.shiftKey && document.activeElement === lastElement) {
+      event.preventDefault();
+      firstElement.focus();
+    }
+  };
+
   if (!open) return null;
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="modal-backdrop" role="presentation" onMouseDown={closeDisabled ? undefined : onClose}>
       <div
-        className="modal-dialog"
+        ref={dialogRef}
+        className={clsx('modal-dialog', className)}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={handleKeyDown}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <h3 style={{ margin: 0 }}>{title}</h3>
+        <div className="modal-header">
+          <h3>{title}</h3>
           <button
             type="button"
             className="button secondary"
             onClick={onClose}
             aria-label="Close"
+            disabled={closeDisabled}
             style={{ padding: '4px 10px', fontSize: '0.9rem', lineHeight: 1 }}
           >
-            ✕
+            X
           </button>
         </div>
-        {children}
+        <div className={clsx('modal-body', bodyClassName)}>{children}</div>
+        {footer ? <div className="modal-footer">{footer}</div> : null}
       </div>
     </div>
   );
 }
-
