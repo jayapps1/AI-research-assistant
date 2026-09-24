@@ -68,12 +68,16 @@ management:
     web:
       exposure:
         include: health,info,metrics
+
   endpoint:
     health:
       show-details: when_authorized
       probes:
         enabled: true
+
   health:
+    redis:
+      enabled: false
     livenessstate:
       enabled: true
     readinessstate:
