@@ -1,5 +1,8 @@
 package com.researchassistant.rag.service;
 
+import com.researchassistant.analysis.entity.CitationPresentation;
+import com.researchassistant.analysis.entity.CitationStyle;
+import com.researchassistant.rag.citation.UserFacingCitationRenderer;
 import com.researchassistant.rag.dto.response.CitationResponse;
 import com.researchassistant.rag.dto.response.GroundedAnswerResponse;
 import com.researchassistant.rag.dto.response.RagConversationResponse;
@@ -18,6 +21,12 @@ import java.util.List;
 
 @Component
 public class RagResponseMapper {
+
+    private final UserFacingCitationRenderer citationRenderer;
+
+    public RagResponseMapper(UserFacingCitationRenderer citationRenderer) {
+        this.citationRenderer = citationRenderer;
+    }
 
     public RagConversationResponse conversation(RagConversation conversation) {
         return new RagConversationResponse(
@@ -49,24 +58,37 @@ public class RagResponseMapper {
             int documentCount,
             int evidenceCount
     ) {
+        CitationStyle style = query.getConversation().getProject().getCitationStyle();
+        CitationPresentation presentation = query.getConversation().getProject().getCitationPresentation();
         return new GroundedAnswerResponse(
                 query.getId(),
                 query.getConversation().getId(),
-                answer == null ? null : answer.getAnswerText(),
+                answer == null ? null : citationRenderer.renderAnswer(answer.getAnswerText(), style, presentation, citations),
                 query.getStatus(),
-                citations.stream().map(this::citation).toList(),
+                citations.stream().map(citation -> citation(citation, style, presentation)).toList(),
                 new RetrievalSummaryResponse(
                         query.getScopeType(),
                         documentCount,
                         evidenceCount,
-                        query.getRetrievalMode()
+                        query.getRetrievalMode(),
+                        query.getAnalyzedSourceCount(),
+                        query.getSourcesWithRelevantEvidenceCount(),
+                        query.getCandidateChunkCount(),
+                        query.getEstimatedInputTokens(),
+                        query.getActualInputTokens(),
+                        query.getActualOutputTokens(),
+                        query.getContextBudgetTokens(),
+                        query.getTruncatedEvidenceCount(),
+                        query.getGenerationStrategy(),
+                        query.getConfiguredModel()
                 ),
                 answer == null ? query.getCreatedAt() : answer.getCreatedAt()
         );
     }
 
-    public CitationResponse citation(AnswerCitation citation) {
+    public CitationResponse citation(AnswerCitation citation, CitationStyle style, CitationPresentation presentation) {
         RagQueryEvidence evidence = citation.getEvidence();
+        UserFacingCitationRenderer.RenderedCitation rendered = citationRenderer.renderCitation(citation, style, presentation);
         return new CitationResponse(
                 citation.getCitationOrdinal(),
                 evidence.getDocumentId(),
@@ -76,7 +98,10 @@ public class RagResponseMapper {
                 evidence.getVersionNumber(),
                 evidence.getPageNumber(),
                 evidence.getChunkNumber(),
-                excerpt(evidence.getTextSnapshot(), 1000)
+                excerpt(evidence.getTextSnapshot(), 1000),
+                rendered.text(),
+                rendered.metadataComplete(),
+                rendered.warning()
         );
     }
 

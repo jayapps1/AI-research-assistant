@@ -1,6 +1,7 @@
 package com.researchassistant.analysis;
 
 import com.researchassistant.analysis.entity.*;
+import com.researchassistant.literature.entity.LiteratureMatrix;
 import com.researchassistant.common.enums.ContentOrigin;
 
 import org.junit.jupiter.api.Test;
@@ -50,6 +51,50 @@ class ResearchOutputEntityTests {
         assertThat(section.isSourceOutOfDate()).isTrue();
         assertThat(section.isManuallyEdited()).isTrue();
         assertThat(section.getSourceArtifactType()).isEqualTo("ResearchFinding");
+    }
+
+    @Test
+    void reportSectionSupportsHierarchicalNestingAndSystemFlags() {
+        ResearchReportSection parent = new ResearchReportSection();
+        parent.setHeading("Literature Review");
+        parent.setSectionNumber("2.1");
+        parent.setRequired(true);
+        parent.setSystemDefined(true);
+
+        ResearchReportSection child = new ResearchReportSection();
+        child.setParentSection(parent);
+        child.setHeading("Thematic Analysis");
+        child.setSectionNumber("2.1.1");
+        child.setRequired(false);
+        child.setSystemDefined(false);
+        child.setAiEnabled(true);
+
+        assertThat(child.getParentSection()).isEqualTo(parent);
+        assertThat(child.getSectionNumber()).isEqualTo("2.1.1");
+        assertThat(child.isRequired()).isFalse();
+        assertThat(child.isSystemDefined()).isFalse();
+        assertThat(child.isAiEnabled()).isTrue();
+        assertThat(parent.isRequired()).isTrue();
+    }
+
+    @Test
+    void researchReportHoldsLiteratureMatrixInclusionAndUncitedReferencesFlags() {
+        ResearchReport report = new ResearchReport();
+        report.setIncludeUncitedReferences(true);
+        report.setLiteratureMatrixInclusion("CHAPTER_TWO");
+
+        assertThat(report.isIncludeUncitedReferences()).isTrue();
+        assertThat(report.getLiteratureMatrixInclusion()).isEqualTo("CHAPTER_TWO");
+    }
+
+    @Test
+    void literatureMatrixEntityHoldsExtractedTable() {
+        LiteratureMatrix matrix = new LiteratureMatrix();
+        matrix.setTitle("Evidence Matrix");
+        matrix.setMarkdownTable("| Source | Objective | Findings |\n|---|---|---|");
+
+        assertThat(matrix.getTitle()).isEqualTo("Evidence Matrix");
+        assertThat(matrix.getMarkdownTable()).contains("| Source | Objective | Findings |");
     }
 
     private void invokeLifecycle(Object target, String methodName) throws Exception {

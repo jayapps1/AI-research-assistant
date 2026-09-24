@@ -38,6 +38,10 @@ public class ReferenceEntry {
     @Column(length = 80) private String pmid;
     @Column(name = "arxiv_id", length = 120) private String arxivId;
     @Enumerated(EnumType.STRING) @Column(name = "metadata_status", nullable = false, length = 40) private ReferenceMetadataStatus metadataStatus = ReferenceMetadataStatus.PARTIAL;
+    @Column(name = "metadata_source", length = 80) private String metadataSource;
+    @Column(name = "metadata_confidence") private Double metadataConfidence;
+    @Column(name = "metadata_review_status", length = 40) private String metadataReviewStatus;
+    @Column(name = "verified_at") private OffsetDateTime verifiedAt;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 30) private ContentOrigin origin = ContentOrigin.USER;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "created_by", nullable = false) private User createdBy;
     @Column(name = "created_at", nullable = false, updatable = false) private OffsetDateTime createdAt;

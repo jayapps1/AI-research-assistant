@@ -21,6 +21,7 @@ import type {
   LoginResponse,
   NotificationItem,
   PageResponse,
+  LiteratureMatrixResponse,
   PaymentAttemptDetail,
   PaymentAttemptInitialization,
   PaymentTransactionPage,
@@ -30,11 +31,15 @@ import type {
   RagAnswer,
   RagConversation,
   RecoveryCodesResponse,
+  ReorderStructureRequest,
+  ReportStructureResponse,
   ReportTemplateItem,
   ResearchProgressResponse,
   ResearchProject,
+  SaveLiteratureMatrixRequest,
   SectionCapabilitiesResponse,
   TableOfContentsResponse,
+  UpdateReportSettingsRequest,
   TotpEnrollmentResponse,
   UpdateAiCreditPackRequest,
   UpdateProfileRequest,
@@ -99,6 +104,9 @@ export const projectApi = {
   update: (projectId: string, body: Record<string, unknown>) =>
     api.patch<ResearchProject>(`/projects/${projectId}`, body).then((r) => r.data),
   archive: (projectId: string) => api.post<ResearchProject>(`/projects/${projectId}/archive`).then((r) => r.data),
+  hold: (projectId: string) => api.post<ResearchProject>(`/projects/${projectId}/hold`).then((r) => r.data),
+  activate: (projectId: string) => api.post<ResearchProject>(`/projects/${projectId}/activate`).then((r) => r.data),
+  complete: (projectId: string) => api.post<ResearchProject>(`/projects/${projectId}/complete`).then((r) => r.data),
   trash: (projectId: string) => api.post<ResearchProject>(`/projects/${projectId}/trash`).then((r) => r.data),
   restore: (projectId: string) => api.post<ResearchProject>(`/projects/${projectId}/restore`).then((r) => r.data),
   permanentDelete: (projectId: string, confirmation: string) =>
@@ -160,6 +168,10 @@ export const documentApi = {
   versions: (documentId: string) => api.get<Record<string, unknown>[]>(`/documents/${documentId}/versions`).then((r) => r.data),
   processing: (documentId: string) => api.get<Record<string, unknown>>(`/documents/${documentId}/processing`).then((r) => r.data),
   retryProcessing: (documentId: string) => api.post(`/documents/${documentId}/processing/retry`).then((r) => r.data),
+  rescanReferenceMetadata: (documentId: string) =>
+    api.post<DocumentItem>(`/documents/${documentId}/reference-metadata/rescan`).then((r) => r.data),
+  rescanProjectReferenceMetadata: (projectId: string) =>
+    api.post<DocumentItem[]>(`/projects/${projectId}/documents/reference-metadata/rescan`).then((r) => r.data),
   archive: (documentId: string) => api.post<DocumentItem>(`/documents/${documentId}/archive`).then((r) => r.data),
   delete: (documentId: string) => api.delete<DocumentItem>(`/documents/${documentId}`).then((r) => r.data),
   restore: (documentId: string) => api.post<DocumentItem>(`/documents/${documentId}/restore`).then((r) => r.data),
@@ -178,6 +190,17 @@ function filenameFromContentDisposition(value?: string) {
   return match ? match[1] : null;
 }
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 export const researchDesignApi = {
   get: (projectId: string) =>
     api.get<Record<string, unknown>>(`/projects/${projectId}/research-design`).then((r) => r.data),
@@ -186,6 +209,16 @@ export const researchDesignApi = {
     body: { problemStatement?: string; objectives?: string[]; questions?: string[]; hypotheses?: string[] },
   ) =>
     api.put<Record<string, unknown>>(`/projects/${projectId}/research-design`, body).then((r) => r.data),
+  generate: (
+    projectId: string,
+    body?: { documentIds?: string[]; instructions?: string },
+  ) =>
+    api.post<Record<string, unknown>>(`/projects/${projectId}/research-design/generate`, body ?? {}).then((r) => r.data),
+  exportProtocol: (projectId: string, format: 'docx' | 'markdown' = 'docx') =>
+    api.get<Blob>(`/projects/${projectId}/research-design/export`, { params: { format }, responseType: 'blob' }).then((r) => ({
+      blob: r.data,
+      filename: filenameFromContentDisposition(r.headers['content-disposition']) ?? `research_protocol.${format === 'markdown' ? 'md' : 'docx'}`,
+    })),
 };
 
 export const researchApi = {
@@ -208,6 +241,12 @@ export const ragApi = {
   conversations: (projectId: string) => api.get<RagConversation[]>(`/projects/${projectId}/rag/conversations`).then((r) => r.data),
   createConversation: (projectId: string, body: Record<string, unknown>) =>
     api.post<RagConversation>(`/projects/${projectId}/rag/conversations`, body).then((r) => r.data),
+  updateConversation: (conversationId: string, body: Record<string, unknown>) =>
+    api.patch<RagConversation>(`/rag/conversations/${conversationId}`, body).then((r) => r.data),
+  archiveConversation: (conversationId: string) =>
+    api.post<RagConversation>(`/rag/conversations/${conversationId}/archive`).then((r) => r.data),
+  deleteConversation: (conversationId: string) =>
+    api.delete<void>(`/rag/conversations/${conversationId}`).then((r) => r.data),
   ask: (conversationId: string, body: Record<string, unknown>) =>
     api.post<RagAnswer>(`/rag/conversations/${conversationId}/queries`, body).then((r) => r.data),
   evidence: (queryId: string) => api.get<Citation[]>(`/rag/queries/${queryId}/evidence`).then((r) => r.data),
@@ -265,29 +304,65 @@ export const reportApi = {
   tableOfContents: (reportId: string) =>
     api.get<TableOfContentsResponse>(`/reports/${reportId}/table-of-contents`).then((r) => r.data),
   reports: (projectId: string, page = 0, size = 20) => api.get<PageResponse<Record<string, unknown>>>(`/projects/${projectId}/reports`, { params: { page, size } }).then((r) => r.data),
+  ensure: (projectId: string) => api.post<Record<string, unknown>>(`/projects/${projectId}/reports/ensure`).then((r) => r.data),
   createReport: (projectId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/projects/${projectId}/reports`, body).then((r) => r.data),
   report: (reportId: string) => api.get<Record<string, unknown>>(`/reports/${reportId}`).then((r) => r.data),
+  updateReport: (reportId: string, body: Record<string, unknown>) => api.patch<Record<string, unknown>>(`/reports/${reportId}`, body).then((r) => r.data),
+  finalDocument: (reportId: string) => api.get<Record<string, unknown> | null>(`/reports/${reportId}/final-document`).then((r) => r.data),
+  prepareFinalDocument: (reportId: string) => api.post<Record<string, unknown>>(`/reports/${reportId}/final-document/prepare`).then((r) => r.data),
+  updateFinalDocument: (reportId: string, body: Record<string, unknown>) => api.put<Record<string, unknown>>(`/reports/${reportId}/final-document`, body).then((r) => r.data),
+  structure: (reportId: string) =>
+    api.get<ReportStructureResponse>(`/reports/${reportId}/structure`).then((r) => r.data),
+  reorderStructure: (reportId: string, body: ReorderStructureRequest) =>
+    api.post<ReportStructureResponse>(`/reports/${reportId}/structure/reorder`, body).then((r) => r.data),
   chapters: (reportId: string) => api.get<Record<string, unknown>[]>(`/reports/${reportId}/chapters`).then((r) => r.data),
   createChapter: (reportId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/reports/${reportId}/chapters`, body).then((r) => r.data),
+  updateChapter: (chapterId: string, body: Record<string, unknown>) => api.patch<Record<string, unknown>>(`/report-chapters/${chapterId}`, body).then((r) => r.data),
+  deleteChapter: (chapterId: string) => api.delete<void>(`/report-chapters/${chapterId}`).then((r) => r.data),
   sections: (chapterId: string) => api.get<Record<string, unknown>[]>(`/report-chapters/${chapterId}/sections`).then((r) => r.data),
   createSection: (chapterId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/report-chapters/${chapterId}/sections`, body).then((r) => r.data),
   updateSection: (sectionId: string, body: Record<string, unknown>) => api.patch<Record<string, unknown>>(`/report-sections/${sectionId}`, body).then((r) => r.data),
-  generateSection: (sectionId: string) => api.post<Record<string, unknown>>(`/report-sections/${sectionId}/generate`).then((r) => r.data),
+  deleteSection: (sectionId: string) => api.delete<void>(`/report-sections/${sectionId}`).then((r) => r.data),
+  refreshReferences: (reportId: string) => api.post<Record<string, unknown>>(`/reports/${reportId}/references/refresh`).then((r) => r.data),
+  updateSettings: (reportId: string, body: UpdateReportSettingsRequest) => api.patch<Record<string, unknown>>(`/reports/${reportId}/settings`, body).then((r) => r.data),
+  literatureMatrix: (projectId: string) => api.get<LiteratureMatrixResponse>(`/projects/${projectId}/literature-matrix`).then((r) => r.data),
+  saveLiteratureMatrix: (projectId: string, body: SaveLiteratureMatrixRequest) => api.post<LiteratureMatrixResponse>(`/projects/${projectId}/literature-matrix`, body).then((r) => r.data),
+  generateSection: (
+    sectionId: string,
+    body?: { documentIds?: string[]; instructions?: string; evidenceLimit?: number },
+  ) => api.post<Record<string, unknown>>(`/report-sections/${sectionId}/generate`, body ?? {}).then((r) => r.data),
   validate: (reportId: string) => api.post<Record<string, unknown>>(`/reports/${reportId}/validate`).then((r) => r.data),
   assemble: (reportId: string) => api.post<Record<string, unknown>>(`/reports/${reportId}/assemble`).then((r) => r.data),
   finalize: (reportId: string) => api.post<Record<string, unknown>>(`/reports/${reportId}/finalize`).then((r) => r.data),
   references: (projectId: string, page = 0, size = 20, filters?: Record<string, unknown>) =>
     api.get<PageResponse<Record<string, unknown>>>(`/projects/${projectId}/references`, { params: { page, size, ...filters } }).then((r) => r.data),
   createReference: (projectId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/projects/${projectId}/references`, body).then((r) => r.data),
+  updateReference: (referenceId: string, body: Record<string, unknown>) => api.patch<Record<string, unknown>>(`/references/${referenceId}`, body).then((r) => r.data),
+  setCitationEnabled: (referenceId: string, enabled: boolean) => api.post<Record<string, unknown>>(`/references/${referenceId}/citation-enabled?enabled=${enabled}`).then((r) => r.data),
+  setResearchEnabled: (referenceId: string, enabled: boolean) => api.post<Record<string, unknown>>(`/references/${referenceId}/research-enabled?enabled=${enabled}`).then((r) => r.data),
+  setUsageScope: (referenceId: string, body: { availableForResearchAi?: boolean; availableForCitation?: boolean }) => api.post<Record<string, unknown>>(`/references/${referenceId}/usage-scope`, body).then((r) => r.data),
+  rescanDocumentMetadata: (documentId: string) => api.post<Record<string, unknown>>(`/documents/${documentId}/reference-metadata/rescan`).then((r) => r.data),
+  rescanProjectMetadata: (projectId: string) => api.post<Record<string, unknown>[]>(`/projects/${projectId}/documents/reference-metadata/rescan`).then((r) => r.data),
   formatCitation: (body: Record<string, unknown>) => api.post<Record<string, unknown>>('/references/format-citation', body).then((r) => r.data),
   duplicateReferences: (projectId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/projects/${projectId}/references/check-duplicates`, body).then((r) => r.data),
   importReferences: (projectId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/projects/${projectId}/references/import`, body).then((r) => r.data),
   importPreview: (importJobId: string) => api.get<Record<string, unknown>[]>(`/reference-imports/${importJobId}/preview`).then((r) => r.data),
   confirmReferenceImport: (importJobId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/reference-imports/${importJobId}/confirm`, body).then((r) => r.data),
   exportReferencesUrl: (projectId: string, format: string) => `${api.defaults.baseURL}/projects/${projectId}/references/export?format=${encodeURIComponent(format)}`,
-  exports: (reportId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/reports/${reportId}/exports`, body).then((r) => r.data),
+  exportReferences: (projectId: string, format: string) =>
+    api.get<Blob>(`/projects/${projectId}/references/export`, { params: { format }, responseType: 'blob' }).then((r) => ({
+      blob: r.data,
+      filename: filenameFromContentDisposition(r.headers['content-disposition']) ?? `references.${format.toLowerCase()}`,
+    })),
+  exports: (reportId: string, body: { format: string; draft?: boolean }) => api.post<Record<string, unknown>>(`/reports/${reportId}/exports`, body).then((r) => r.data),
   exportJob: (exportId: string) => api.get<Record<string, unknown>>(`/report-exports/${exportId}`).then((r) => r.data),
   exportDownloadUrl: (exportId: string) => `${api.defaults.baseURL}/report-exports/${exportId}/download`,
+  downloadExport: (exportId: string) =>
+    api.get<Blob>(`/report-exports/${exportId}/download`, { responseType: 'blob' }).then((r) => ({
+      blob: r.data,
+      filename: filenameFromContentDisposition(r.headers['content-disposition']) ?? 'research-report',
+    })),
+  saveBlob: downloadBlob,
   integrity: (reportId: string) => api.post(`/reports/${reportId}/integrity-review`).then((r) => r.data),
   writingReview: (reportId: string) => api.post<Record<string, unknown>>(`/reports/${reportId}/writing-review`).then((r) => r.data),
   similarity: (projectId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/projects/${projectId}/similarity-checks`, body).then((r) => r.data),

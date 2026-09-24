@@ -25,9 +25,19 @@ public record UpdateResearchProjectRequest(
 
         com.researchassistant.analysis.entity.CitationStyle citationStyle,
 
-        Boolean citationStyleLocked
+        Boolean citationStyleLocked,
+
+        com.researchassistant.analysis.entity.CitationPresentation citationPresentation,
+
+        String bibliographySort,
+
+        Boolean includeDoi,
+
+        Boolean includeUrl,
+
+        com.researchassistant.project.entity.ResearchProjectStatus status
 ) {
     public UpdateResearchProjectRequest(String title, String description) {
-        this(title, description, null, null, null, null, null, null, null);
+        this(title, description, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 }

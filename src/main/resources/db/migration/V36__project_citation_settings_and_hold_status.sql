@@ -1,0 +1,10 @@
+ALTER TABLE research_projects
+    ADD COLUMN IF NOT EXISTS citation_presentation VARCHAR(40) NOT NULL DEFAULT 'PARENTHETICAL',
+    ADD COLUMN IF NOT EXISTS bibliography_sort VARCHAR(40) NOT NULL DEFAULT 'STYLE_DEFAULT',
+    ADD COLUMN IF NOT EXISTS include_doi BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS include_url BOOLEAN NOT NULL DEFAULT TRUE;
+
+ALTER TABLE research_projects DROP CONSTRAINT IF EXISTS research_projects_status_check;
+ALTER TABLE research_projects
+    ADD CONSTRAINT research_projects_status_check
+    CHECK (status IN ('DRAFT','ACTIVE','ON_HOLD','COMPLETED','ARCHIVED','TRASHED'));

@@ -26,7 +26,14 @@ public class LiteratureMatrix {
     private ContentOrigin origin = ContentOrigin.USER;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "created_by", nullable = false)
     private User createdBy;
+    @Column(name = "matrix_data_json", columnDefinition = "TEXT")
+    private String matrixDataJson;
+    @Column(name = "markdown_table", columnDefinition = "TEXT")
+    private String markdownTable;
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
-    @PrePersist void onCreate() { if (id == null) id = UUID.randomUUID(); if (createdAt == null) createdAt = OffsetDateTime.now(); if (origin == null) origin = ContentOrigin.USER; }
+    @Column(name = "updated_at")
+    private OffsetDateTime updatedAt;
+    @PrePersist void onCreate() { if (id == null) id = UUID.randomUUID(); OffsetDateTime now = OffsetDateTime.now(); if (createdAt == null) createdAt = now; updatedAt = now; if (origin == null) origin = ContentOrigin.USER; }
+    @PreUpdate void onUpdate() { updatedAt = OffsetDateTime.now(); }
 }

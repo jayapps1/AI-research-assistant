@@ -20,10 +20,14 @@ public final class ReferenceDtos {
             ReferenceMetadataStatus metadataStatus, ContentOrigin origin, List<AuthorRequest> authors) {}
     public record UpdateReferenceRequest(String title, String containerTitle, Integer publicationYear, String volume,
             String issue, String pages, String publisher, String publisherPlace, String doi, String url,
-            ReferenceMetadataStatus metadataStatus, List<AuthorRequest> authors) {}
+            ReferenceMetadataStatus metadataStatus, Boolean availableForCitation, Boolean availableForResearchAi,
+            List<AuthorRequest> authors, String citationKey) {}
+    public record UpdateReferenceUsageScopeRequest(Boolean availableForResearchAi, Boolean availableForCitation) {}
     public record ReferenceResponse(UUID id, UUID projectReferenceId, String citationKey, ReferenceType type, String title,
-            Integer year, String doi, String url, ReferenceMetadataStatus metadataStatus, List<AuthorResponse> authors,
-            OffsetDateTime updatedAt) {}
+            String containerTitle, Integer year, String volume, String issue, String pages, String publisher,
+            String doi, String url, ReferenceMetadataStatus metadataStatus, String metadataSource,
+            Double metadataConfidence, boolean availableForCitation, boolean availableForResearchAi,
+            List<AuthorResponse> authors, OffsetDateTime updatedAt) {}
     public record AuthorResponse(String familyName, String givenName, String literalName, AuthorRole role, int displayOrder) {}
     public record DuplicateCheckRequest(String doi, String title, Integer publicationYear, String firstAuthor) {}
     public record DuplicateCandidate(UUID referenceId, String reason, String title, Integer year) {}

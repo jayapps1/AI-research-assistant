@@ -12,6 +12,8 @@ import java.util.UUID;
 public interface ProjectReferenceRepository extends JpaRepository<ProjectReference, UUID> {
     Page<ProjectReference> findAllByProjectIdAndStatus(UUID projectId, ProjectReferenceStatus status, Pageable pageable);
     List<ProjectReference> findAllByProjectIdAndStatusOrderByCitationKeyAsc(UUID projectId, ProjectReferenceStatus status);
+    List<ProjectReference> findAllByProjectId(UUID projectId);
     Optional<ProjectReference> findByProjectIdAndReferenceId(UUID projectId, UUID referenceId);
     boolean existsByProjectIdAndCitationKey(UUID projectId, String citationKey);
+    boolean existsByProjectIdAndCitationKeyAndIdNot(UUID projectId, String citationKey, UUID id);
 }

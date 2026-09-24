@@ -28,6 +28,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { Badge, Button } from '../components/ui';
 import { Avatar } from '../components/Avatar';
 import { NotificationBell } from '../features/notifications/NotificationBell';
+import { useOptionalActiveProject } from '../features/projects/ActiveProjectProvider';
 import { WorkspaceSwitcher } from '../features/workspaces/WorkspaceSwitcher';
 import { useWorkspace } from '../features/workspaces/WorkspaceProvider';
 import { paths } from '../routes/paths';
@@ -70,10 +71,14 @@ export function AppShell() {
   const location = useLocation();
   const theme = useTheme();
   const workspace = useWorkspace();
+  const activeProject = useOptionalActiveProject();
   const projectId =
     location.pathname.match(/\/projects\/([^/]+)/)?.[1] ??
     new URLSearchParams(location.search).get('projectId') ??
+    activeProject?.activeProjectId ??
     '';
+  const modulePath = (fallback: string, projectSuffix: string) =>
+    activeProject?.activeProjectId ? `/app/projects/${activeProject.activeProjectId}/${projectSuffix}` : fallback;
 
   // Close drawer and menu on Escape key
   useEffect(() => {
@@ -286,12 +291,22 @@ export function AppShell() {
         {/* RESEARCH GROUP */}
         <div className="nav-group">
           <div className="nav-title">Research</div>
-          {researchNav.map(([label, to, Icon]) => (
-            <NavLink key={to} className="nav-link" to={to} onClick={() => setOpen(false)}>
+          {researchNav.map(([label, to, Icon]) => {
+            const scopedTo =
+              label === 'Documents' ? modulePath(to, 'documents') :
+              label === 'Research' ? modulePath(to, 'research') :
+              label === 'AI Assistant' ? modulePath(to, 'assistant') :
+              label === 'Analysis' ? modulePath(to, 'analysis') :
+              label === 'Reports' ? modulePath(to, 'reports') :
+              label === 'References' ? modulePath(to, 'references') :
+              to;
+            return (
+            <NavLink key={label} className="nav-link" to={scopedTo} onClick={() => setOpen(false)}>
               <Icon size={18} aria-hidden />
               <span>{label}</span>
             </NavLink>
-          ))}
+          );
+          })}
         </div>
 
         {/* COMMUNICATION GROUP */}

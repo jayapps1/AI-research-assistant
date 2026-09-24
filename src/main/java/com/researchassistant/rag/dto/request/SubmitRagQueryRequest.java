@@ -14,6 +14,8 @@ public record SubmitRagQueryRequest(
         String question,
         RetrievalScopeType scopeType,
         Set<UUID> documentIds,
-        Integer evidenceLimit
+        Integer evidenceLimit,
+        @Size(max = 2000)
+        String retrievalQuery
 ) {
 }

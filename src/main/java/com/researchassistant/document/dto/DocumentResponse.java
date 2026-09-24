@@ -2,6 +2,7 @@ package com.researchassistant.document.dto;
 
 import com.researchassistant.document.entity.DocumentStatus;
 import com.researchassistant.document.entity.DocumentType;
+import com.researchassistant.reference.entity.ReferenceMetadataStatus;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -25,6 +26,10 @@ public record DocumentResponse(
         String url,
         String sourceType,
         String keywords,
+        ReferenceMetadataStatus bibliographicMetadataStatus,
+        String bibliographicMetadataSource,
+        Double bibliographicMetadataConfidence,
+        OffsetDateTime bibliographicMetadataExtractedAt,
         DocumentType type,
         DocumentStatus status,
         DocumentVersionResponse currentVersion,

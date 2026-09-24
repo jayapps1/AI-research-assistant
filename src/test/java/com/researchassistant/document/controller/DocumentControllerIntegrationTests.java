@@ -268,7 +268,9 @@ class DocumentControllerIntegrationTests {
         uploadDocumentAction(token, project.id(), file("bad.bin", "application/octet-stream", "bad"), null)
                 .andExpect(status().isUnsupportedMediaType());
         uploadDocumentAction(token, project.id(), file("big.pdf", "application/pdf", "x".repeat(128)), null)
-                .andExpect(status().isPayloadTooLarge());
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.errorCode").value("DOCUMENT_FILE_TOO_LARGE"))
+                .andExpect(jsonPath("$.message").value("The maximum file size is 50 MB per file."));
 
         assertThat(projectRepository.findById(project.id()).orElseThrow()
                 .getNextDocumentNumber()).isEqualTo(1L);

@@ -149,8 +149,18 @@ public class ReferenceInteroperabilityService {
             if (r.year() != null) b.append("PY  - ").append(r.year()).append('\n');
             b.append("TI  - ").append(r.title()).append('\n');
             if (r.containerTitle() != null) b.append("JO  - ").append(r.containerTitle()).append('\n');
+            if (r.volume() != null) b.append("VL  - ").append(r.volume()).append('\n');
+            if (r.issue() != null) b.append("IS  - ").append(r.issue()).append('\n');
+            if (r.pages() != null) {
+                String[] pages = r.pages().split("-", 2);
+                b.append("SP  - ").append(pages[0].trim()).append('\n');
+                if (pages.length > 1) b.append("EP  - ").append(pages[1].trim()).append('\n');
+            }
+            if (r.publisher() != null) b.append("PB  - ").append(r.publisher()).append('\n');
             if (r.doi() != null) b.append("DO  - ").append(normalizationService.normalizeDoi(r.doi())).append('\n');
             if (r.url() != null) b.append("UR  - ").append(r.url()).append('\n');
+            if (r.isbn() != null) b.append("SN  - ").append(r.isbn()).append('\n');
+            if (r.issn() != null) b.append("SN  - ").append(r.issn()).append('\n');
             b.append("ER  - \n");
         }
         return b.toString();
@@ -165,7 +175,13 @@ public class ReferenceInteroperabilityService {
             if (!r.authors().isEmpty()) b.append("  author = {").append(String.join(" and ", r.authors())).append("},\n");
             if (r.year() != null) b.append("  year = {").append(r.year()).append("},\n");
             if (r.containerTitle() != null) b.append("  journal = {").append(escape(r.containerTitle())).append("},\n");
+            if (r.volume() != null) b.append("  volume = {").append(escape(r.volume())).append("},\n");
+            if (r.issue() != null) b.append("  number = {").append(escape(r.issue())).append("},\n");
+            if (r.pages() != null) b.append("  pages = {").append(escape(r.pages())).append("},\n");
+            if (r.publisher() != null) b.append("  publisher = {").append(escape(r.publisher())).append("},\n");
             if (r.doi() != null) b.append("  doi = {").append(normalizationService.normalizeDoi(r.doi())).append("},\n");
+            if (r.isbn() != null) b.append("  isbn = {").append(escape(r.isbn())).append("},\n");
+            if (r.issn() != null) b.append("  issn = {").append(escape(r.issn())).append("},\n");
             b.append("}\n");
         }
         return b.toString();
@@ -175,7 +191,20 @@ public class ReferenceInteroperabilityService {
         StringBuilder b = new StringBuilder("<xml><records>");
         for (ReferenceExportView r : refs) {
             b.append("<record><titles><title>").append(xml(r.title())).append("</title></titles>");
+            if (!r.authors().isEmpty()) {
+                b.append("<contributors><authors>");
+                for (String author : r.authors()) b.append("<author>").append(xml(author)).append("</author>");
+                b.append("</authors></contributors>");
+            }
             if (r.year() != null) b.append("<dates><year>").append(r.year()).append("</year></dates>");
+            if (r.containerTitle() != null) b.append("<periodical><full-title>").append(xml(r.containerTitle())).append("</full-title></periodical>");
+            if (r.volume() != null || r.issue() != null || r.pages() != null) {
+                b.append("<pages>").append(xml(r.pages())).append("</pages>");
+                if (r.volume() != null) b.append("<volume>").append(xml(r.volume())).append("</volume>");
+                if (r.issue() != null) b.append("<number>").append(xml(r.issue())).append("</number>");
+            }
+            if (r.publisher() != null) b.append("<publisher>").append(xml(r.publisher())).append("</publisher>");
+            if (r.doi() != null) b.append("<electronic-resource-num>").append(xml(normalizationService.normalizeDoi(r.doi()))).append("</electronic-resource-num>");
             if (r.url() != null) b.append("<urls><related-urls><url>").append(xml(r.url())).append("</url></related-urls></urls>");
             b.append("</record>");
         }
@@ -250,5 +279,7 @@ public class ReferenceInteroperabilityService {
     private String xml(String value) { return value == null ? "" : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"); }
     private String text(org.w3c.dom.Node node, String tag, String fallback) { NodeList list = ((org.w3c.dom.Element) node).getElementsByTagName(tag); return list.getLength() == 0 ? fallback : list.item(0).getTextContent(); }
     private record ParsedValue(String value, int nextIndex) {}
-    public record ReferenceExportView(ReferenceType type, String title, String containerTitle, Integer year, String doi, String url, List<String> authors) {}
+    public record ReferenceExportView(ReferenceType type, String title, String containerTitle, Integer year,
+                                      String volume, String issue, String pages, String publisher,
+                                      String doi, String url, String isbn, String issn, List<String> authors) {}
 }

@@ -4,6 +4,7 @@ import com.researchassistant.identity.entity.User;
 import com.researchassistant.project.service.ProjectAuthorizationContext;
 import com.researchassistant.project.service.ProjectAuthorizationService;
 import com.researchassistant.rag.dto.request.CreateRagConversationRequest;
+import com.researchassistant.rag.dto.request.UpdateRagConversationRequest;
 import com.researchassistant.rag.dto.response.RagConversationDetailResponse;
 import com.researchassistant.rag.dto.response.RagConversationResponse;
 import com.researchassistant.rag.entity.RagConversation;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.OffsetDateTime;
 
 @Service
 public class RagConversationService {
@@ -84,6 +86,30 @@ public class RagConversationService {
                         .map(mapper::querySummary)
                         .toList()
         );
+    }
+
+    @Transactional
+    public RagConversationResponse update(UUID conversationId, User user, UpdateRagConversationRequest request) {
+        RagConversation conversation = authorizationService.requireOwnConversation(conversationId, user);
+        if (request != null && request.title() != null) {
+            conversation.setTitle(cleanTitle(request.title()));
+        }
+        return mapper.conversation(conversation);
+    }
+
+    @Transactional
+    public RagConversationResponse archive(UUID conversationId, User user) {
+        RagConversation conversation = authorizationService.requireOwnConversation(conversationId, user);
+        conversation.setStatus(RagConversationStatus.ARCHIVED);
+        conversation.setArchivedAt(OffsetDateTime.now());
+        return mapper.conversation(conversation);
+    }
+
+    @Transactional
+    public void delete(UUID conversationId, User user) {
+        RagConversation conversation = authorizationService.requireOwnConversation(conversationId, user);
+        conversation.setStatus(RagConversationStatus.ARCHIVED);
+        conversation.setArchivedAt(OffsetDateTime.now());
     }
 
     private String cleanTitle(String title) {

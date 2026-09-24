@@ -23,7 +23,7 @@ public class ReportExportController {
         this.userResolver = userResolver;
     }
 
-    public record CreateReportExportRequest(@NotNull ReportExportFormat format) {}
+    public record CreateReportExportRequest(@NotNull ReportExportFormat format, Boolean draft) {}
     public record ReportExportResponse(UUID id, UUID reportId, ReportExportFormat format, ReportExportStatus status,
                                        String filename, String mimeType, Long fileSizeBytes, String checksumSha256,
                                        int reportRevisionNumber) {
@@ -36,7 +36,7 @@ public class ReportExportController {
 
     @PostMapping("/reports/{reportId}/exports")
     public ReportExportResponse create(Authentication authentication, @PathVariable UUID reportId, @RequestBody CreateReportExportRequest request) {
-        return ReportExportResponse.from(exportService.createExport(reportId, request.format(), user(authentication)));
+        return ReportExportResponse.from(exportService.createExport(reportId, request.format(), Boolean.TRUE.equals(request.draft()), user(authentication)));
     }
 
     @GetMapping("/report-exports/{exportId}")

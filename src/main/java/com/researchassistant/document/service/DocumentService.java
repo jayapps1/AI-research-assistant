@@ -20,6 +20,7 @@ import com.researchassistant.document.exception.DocumentUploadException;
 import com.researchassistant.document.exception.DocumentVersionNotFoundException;
 import com.researchassistant.document.exception.InvalidDocumentOperationException;
 import com.researchassistant.document.exception.UnsupportedDocumentTypeException;
+import com.researchassistant.document.metadata.BibliographicMetadataExtractionService;
 import com.researchassistant.document.repository.DocumentChunkEmbeddingRepository;
 import com.researchassistant.document.repository.DocumentChunkRepository;
 import com.researchassistant.document.repository.DocumentPageRepository;
@@ -45,6 +46,7 @@ import com.researchassistant.analysis.repository.DiscussionEvidenceRepository;
 import com.researchassistant.analysis.repository.ResearchReportCitationRepository;
 import com.researchassistant.rag.repository.RagQueryEvidenceRepository;
 import com.researchassistant.reference.repository.ReferenceSourceLinkRepository;
+import com.researchassistant.reference.entity.ReferenceMetadataStatus;
 import com.researchassistant.subscription.PlanFeature;
 import com.researchassistant.usage.QuotaService;
 import com.researchassistant.usage.UsageMetricType;
@@ -84,6 +86,7 @@ public class DocumentService {
     private static final String TEXT = "text/plain";
     private static final String DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     private static final String DOC = "application/msword";
+    private static final String MAX_FILE_SIZE_MESSAGE = "The maximum file size is 50 MB per file.";
 
     private final DocumentRepository documentRepository;
     private final DocumentVersionRepository versionRepository;
@@ -106,6 +109,7 @@ public class DocumentService {
     private final DiscussionEvidenceRepository discussionEvidenceRepository;
     private final ResearchReportCitationRepository reportCitationRepository;
     private final ReferenceSourceLinkRepository referenceSourceLinkRepository;
+    private final BibliographicMetadataExtractionService metadataExtractionService;
 
     public DocumentService(
             DocumentRepository documentRepository,
@@ -128,7 +132,8 @@ public class DocumentService {
             RagQueryEvidenceRepository ragQueryEvidenceRepository,
             DiscussionEvidenceRepository discussionEvidenceRepository,
             ResearchReportCitationRepository reportCitationRepository,
-            ReferenceSourceLinkRepository referenceSourceLinkRepository
+            ReferenceSourceLinkRepository referenceSourceLinkRepository,
+            BibliographicMetadataExtractionService metadataExtractionService
     ) {
         this.documentRepository = documentRepository;
         this.versionRepository = versionRepository;
@@ -151,6 +156,7 @@ public class DocumentService {
         this.discussionEvidenceRepository = discussionEvidenceRepository;
         this.reportCitationRepository = reportCitationRepository;
         this.referenceSourceLinkRepository = referenceSourceLinkRepository;
+        this.metadataExtractionService = metadataExtractionService;
     }
 
     public DocumentResponse uploadDocument(
@@ -389,12 +395,45 @@ public class DocumentService {
         if (request.keywords() != null) {
             document.setKeywords(normalizeOptional(request.keywords()));
         }
+        document.setBibliographicMetadataStatus(ReferenceMetadataStatus.VERIFIED);
+        document.setBibliographicMetadataSource("USER_CONFIRMED");
+        document.setBibliographicMetadataConfidence(1.0d);
+        document.setBibliographicMetadataExtractedAt(OffsetDateTime.now());
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_RENAMED);
         cacheInvalidationService.evictDocumentMetadata(
                 document.getId(),
                 document.getProject().getId()
         );
         return toDocumentResponse(document);
+    }
+
+    public DocumentResponse rescanReferenceMetadata(UUID documentId, User user) {
+        DocumentAuthorizationContext context =
+                documentAuthorizationService.requireDocumentEditor(documentId, user);
+        DocumentVersion version = context.document().getCurrentVersion();
+        if (version == null) {
+            throw new DocumentVersionNotFoundException();
+        }
+        metadataExtractionService.extractAndApply(version, null);
+        cacheInvalidationService.evictDocumentMetadata(
+                context.document().getId(),
+                context.document().getProject().getId()
+        );
+        return toDocumentResponse(context.document());
+    }
+
+    public List<DocumentResponse> rescanProjectReferenceMetadata(UUID projectId, User user) {
+        projectAuthorizationService.requireProjectEditor(projectId, user);
+        List<DocumentResponse> responses = new ArrayList<>();
+        for (Document document : documentRepository.findAllByProjectIdAndStatusNot(projectId, DocumentStatus.ARCHIVED, Pageable.unpaged()).getContent()) {
+            DocumentVersion version = document.getCurrentVersion();
+            if (version != null && !version.isQuarantined()) {
+                metadataExtractionService.extractAndApply(version, null);
+            }
+            responses.add(toDocumentResponse(document));
+        }
+        cacheInvalidationService.evictProjectMetadata(projectId);
+        return responses;
     }
 
     @Transactional(readOnly = true)
@@ -710,7 +749,7 @@ public class DocumentService {
             throw new DocumentUploadException("Uploaded file is required.");
         }
         if (file.getSize() > properties.maxUploadSizeBytes()) {
-            throw new DocumentUploadException("Uploaded file is too large.");
+            throw new DocumentUploadException("DOCUMENT_FILE_TOO_LARGE", MAX_FILE_SIZE_MESSAGE);
         }
         toDocumentType(file.getContentType());
     }
@@ -852,6 +891,10 @@ public class DocumentService {
                 document.getUrl(),
                 document.getSourceType(),
                 document.getKeywords(),
+                document.getBibliographicMetadataStatus(),
+                document.getBibliographicMetadataSource(),
+                document.getBibliographicMetadataConfidence(),
+                document.getBibliographicMetadataExtractedAt(),
                 document.getType(),
                 document.getStatus(),
                 currentVersion == null

@@ -13,6 +13,7 @@ public class AiCreditsExhaustedException extends RuntimeException {
     private final BigDecimal promotionalRemaining;
     private final BigDecimal purchasedRemaining;
     private final BigDecimal totalAvailable;
+    private final BigDecimal estimatedRequiredCredits;
     private final boolean canPurchaseCredits;
 
     public AiCreditsExhaustedException(
@@ -21,14 +22,16 @@ public class AiCreditsExhaustedException extends RuntimeException {
             BigDecimal promotionalRemaining,
             BigDecimal purchasedRemaining,
             BigDecimal totalAvailable,
+            BigDecimal estimatedRequiredCredits,
             boolean canPurchaseCredits
     ) {
-        super("AI credits exhausted for workspace " + workspaceId + ". Please top up or purchase AI credits.");
+        super("You do not have enough AI credits for this request.");
         this.workspaceId = workspaceId;
         this.includedRemaining = includedRemaining != null ? includedRemaining : BigDecimal.ZERO;
         this.promotionalRemaining = promotionalRemaining != null ? promotionalRemaining : BigDecimal.ZERO;
         this.purchasedRemaining = purchasedRemaining != null ? purchasedRemaining : BigDecimal.ZERO;
         this.totalAvailable = totalAvailable != null ? totalAvailable : BigDecimal.ZERO;
+        this.estimatedRequiredCredits = estimatedRequiredCredits != null ? estimatedRequiredCredits : BigDecimal.ZERO;
         this.canPurchaseCredits = canPurchaseCredits;
     }
 }

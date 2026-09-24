@@ -2,6 +2,7 @@ package com.researchassistant.document.processing;
 
 import com.researchassistant.document.chunk.DocumentChunkingService;
 import com.researchassistant.document.embedding.DocumentEmbeddingService;
+import com.researchassistant.document.metadata.BibliographicMetadataExtractionService;
 import com.researchassistant.document.entity.DocumentProcessingJob;
 import com.researchassistant.document.entity.DocumentProcessingJobType;
 import com.researchassistant.document.entity.DocumentProcessingStatus;
@@ -19,17 +20,20 @@ public class DocumentProcessingPipelineService {
 
     private final DocumentProcessingJobRepository jobRepository;
     private final DocumentTextExtractionService extractionService;
+    private final BibliographicMetadataExtractionService metadataExtractionService;
     private final DocumentChunkingService chunkingService;
     private final DocumentEmbeddingService embeddingService;
 
     public DocumentProcessingPipelineService(
             DocumentProcessingJobRepository jobRepository,
             DocumentTextExtractionService extractionService,
+            BibliographicMetadataExtractionService metadataExtractionService,
             DocumentChunkingService chunkingService,
             DocumentEmbeddingService embeddingService
     ) {
         this.jobRepository = jobRepository;
         this.extractionService = extractionService;
+        this.metadataExtractionService = metadataExtractionService;
         this.chunkingService = chunkingService;
         this.embeddingService = embeddingService;
     }
@@ -45,6 +49,10 @@ public class DocumentProcessingPipelineService {
         if (extractionJob.getStatus() != DocumentProcessingStatus.COMPLETED) {
             return;
         }
+
+        DocumentProcessingJob metadataJob =
+                createJob(version, DocumentProcessingJobType.REFERENCE_METADATA_EXTRACTION);
+        metadataExtractionService.extractAndApply(version, metadataJob);
 
         DocumentProcessingJob chunkingJob =
                 createJob(version, DocumentProcessingJobType.CHUNKING);

@@ -18,6 +18,9 @@ public class ProjectReference {
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "reference_id", nullable = false) private ReferenceEntry reference;
     @Column(name = "citation_key", nullable = false, length = 120) private String citationKey;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 40) private ProjectReferenceStatus status = ProjectReferenceStatus.ACTIVE;
+    @Column(name = "available_for_research_ai", nullable = false) private boolean availableForResearchAi = true;
+    @Column(name = "available_for_citation", nullable = false) private boolean availableForCitation = true;
+    @Column(name = "include_when_cited_in_bibliography", nullable = false) private boolean includeWhenCitedInBibliography = true;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "added_by", nullable = false) private User addedBy;
     @Column(name = "created_at", nullable = false, updatable = false) private OffsetDateTime createdAt;
     @PrePersist void onCreate() { if (id == null) id = UUID.randomUUID(); if (createdAt == null) createdAt = OffsetDateTime.now(); if (status == null) status = ProjectReferenceStatus.ACTIVE; }

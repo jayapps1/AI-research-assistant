@@ -2,6 +2,7 @@ package com.researchassistant.document.entity;
 
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.project.entity.ResearchProject;
+import com.researchassistant.reference.entity.ReferenceMetadataStatus;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -109,6 +110,12 @@ public class Document {
     @Column(name = "doi", length = 500)
     private String doi;
 
+    @Column(name = "isbn", length = 80)
+    private String isbn;
+
+    @Column(name = "issn", length = 80)
+    private String issn;
+
     @Column(name = "url", length = 1000)
     private String url;
 
@@ -117,6 +124,19 @@ public class Document {
 
     @Column(name = "keywords", columnDefinition = "TEXT")
     private String keywords;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "bibliographic_metadata_status", nullable = false, length = 40)
+    private ReferenceMetadataStatus bibliographicMetadataStatus = ReferenceMetadataStatus.INCOMPLETE;
+
+    @Column(name = "bibliographic_metadata_source", length = 80)
+    private String bibliographicMetadataSource;
+
+    @Column(name = "bibliographic_metadata_confidence")
+    private Double bibliographicMetadataConfidence;
+
+    @Column(name = "bibliographic_metadata_extracted_at")
+    private OffsetDateTime bibliographicMetadataExtractedAt;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "type", nullable = false, length = 40)
@@ -161,6 +181,9 @@ public class Document {
         }
         if (status == null) {
             status = DocumentStatus.UPLOADING;
+        }
+        if (bibliographicMetadataStatus == null) {
+            bibliographicMetadataStatus = ReferenceMetadataStatus.INCOMPLETE;
         }
     }
 

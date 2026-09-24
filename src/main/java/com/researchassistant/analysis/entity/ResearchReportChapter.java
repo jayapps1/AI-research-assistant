@@ -24,6 +24,10 @@ public class ResearchReportChapter {
     private Integer chapterNumber;
     @Column(name = "display_order", nullable = false)
     private int displayOrder = 1;
+    @Column(name = "required", nullable = false)
+    private boolean required = false;
+    @Column(name = "system_defined", nullable = false)
+    private boolean systemDefined = false;
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
     @Column(name = "updated_at", nullable = false)

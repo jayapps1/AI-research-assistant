@@ -3,6 +3,8 @@ package com.researchassistant.common.error;
 import com.researchassistant.common.exception.AuthenticationFailedException;
 import com.researchassistant.common.exception.DuplicateResourceException;
 import com.researchassistant.common.exception.ResourceNotFoundException;
+import com.researchassistant.analysis.dto.AnalysisDtos.ValidationIssue;
+import com.researchassistant.analysis.exception.ReportValidationException;
 import com.researchassistant.collaboration.exception.ArtifactVersionConflictException;
 import com.researchassistant.document.exception.DocumentAccessDeniedException;
 import com.researchassistant.document.exception.DocumentStorageException;
@@ -28,6 +30,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.MDC;
@@ -241,6 +244,7 @@ public class GlobalExceptionHandler {
 
         return buildResponse(
                 HttpStatus.PAYLOAD_TOO_LARGE,
+                exception.getErrorCode() != null ? exception.getErrorCode() : HttpStatus.PAYLOAD_TOO_LARGE.name(),
                 exception.getMessage(),
                 request.getRequestURI(),
                 Map.of()
@@ -317,6 +321,7 @@ public class GlobalExceptionHandler {
             case "AI_MODEL_UNAVAILABLE" -> HttpStatus.BAD_GATEWAY;
             case "AI_PROVIDER_RATE_LIMITED", "AI_PROVIDER_QUOTA_EXHAUSTED", "AI_PROVIDER_BILLING_UNAVAILABLE" -> HttpStatus.TOO_MANY_REQUESTS;
             case "AI_PROVIDER_TIMEOUT" -> HttpStatus.GATEWAY_TIMEOUT;
+            case "AI_CONTEXT_BUDGET_EXCEEDED", "CONTEXT_TOO_LARGE" -> HttpStatus.UNPROCESSABLE_ENTITY;
             case "AI_PROVIDER_REQUEST_INVALID" -> HttpStatus.BAD_REQUEST;
             case "AI_CREDITS_EXHAUSTED" -> HttpStatus.PAYMENT_REQUIRED;
             case "AI_INSUFFICIENT_EVIDENCE", "AI_CITATION_VERIFICATION_FAILED" -> HttpStatus.UNPROCESSABLE_ENTITY;
@@ -367,10 +372,32 @@ public class GlobalExceptionHandler {
         return buildResponse(
                 HttpStatus.UNPROCESSABLE_ENTITY,
                 "AI_CITATION_VERIFICATION_FAILED",
-                exception.getMessage(),
+                "AI generated a response, but the citations could not be verified safely. Your AI credits were restored.",
                 request.getRequestURI(),
                 Map.of()
         );
+    }
+
+    @ExceptionHandler(ReportValidationException.class)
+    public ResponseEntity<ReportValidationErrorResponse> handleReportValidation(
+            ReportValidationException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(new ReportValidationErrorResponse(
+                        "about:blank",
+                        "Unprocessable Entity",
+                        OffsetDateTime.now(),
+                        MDC.get("requestId"),
+                        HttpStatus.UNPROCESSABLE_ENTITY.value(),
+                        "REPORT_VALIDATION_FAILED",
+                        exception.getMessage(),
+                        request.getRequestURI(),
+                        exception.getValidation().errors(),
+                        exception.getValidation().warnings(),
+                        exception.getValidation().information()
+                ));
     }
 
     @ExceptionHandler(MethodologyValidationException.class)
@@ -443,8 +470,8 @@ public class GlobalExceptionHandler {
     ) {
         return buildResponse(
                 HttpStatus.PAYMENT_REQUIRED,
-                "AI_CREDITS_EXHAUSTED",
-                exception.getMessage(),
+                "AI_CREDITS_INSUFFICIENT",
+                "You do not have enough AI credits for this request.",
                 request.getRequestURI(),
                 Map.of(
                         "workspaceId", exception.getWorkspaceId() != null ? exception.getWorkspaceId().toString() : "",
@@ -452,6 +479,9 @@ public class GlobalExceptionHandler {
                         "promotionalRemaining", exception.getPromotionalRemaining().toPlainString(),
                         "purchasedRemaining", exception.getPurchasedRemaining().toPlainString(),
                         "totalAvailable", exception.getTotalAvailable().toPlainString(),
+                        "availableCredits", exception.getTotalAvailable().toPlainString(),
+                        "estimatedRequiredCredits", exception.getEstimatedRequiredCredits().toPlainString(),
+                        "providerCalled", "false",
                         "canPurchaseCredits", String.valueOf(exception.isCanPurchaseCredits())
                 )
         );
@@ -621,4 +651,18 @@ public class GlobalExceptionHandler {
     ) {
         return buildResponse(status, status.name(), message, path, validationErrors);
     }
+
+    public record ReportValidationErrorResponse(
+            String type,
+            String title,
+            OffsetDateTime timestamp,
+            String requestId,
+            int status,
+            String errorCode,
+            String message,
+            String path,
+            List<ValidationIssue> issues,
+            List<ValidationIssue> warnings,
+            List<ValidationIssue> information
+    ) {}
 }

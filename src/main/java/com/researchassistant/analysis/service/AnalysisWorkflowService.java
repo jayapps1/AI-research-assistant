@@ -2,17 +2,37 @@ package com.researchassistant.analysis.service;
 
 import com.researchassistant.analysis.dto.AnalysisDtos.*;
 import com.researchassistant.analysis.entity.*;
+import com.researchassistant.analysis.exception.ReportValidationException;
 import com.researchassistant.analysis.repository.*;
 import com.researchassistant.cache.CacheInvalidationService;
 import com.researchassistant.common.enums.ContentOrigin;
 import com.researchassistant.common.exception.ResourceNotFoundException;
 import com.researchassistant.dataset.model.ResearchDataset;
 import com.researchassistant.dataset.repository.ResearchDatasetRepository;
+import com.researchassistant.document.entity.DocumentStatus;
+import com.researchassistant.document.repository.DocumentRepository;
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.methodology.repository.MethodologyRepository;
 import com.researchassistant.project.entity.ResearchProject;
 import com.researchassistant.project.service.ProjectAuthorizationService;
+import com.researchassistant.rag.dto.request.SubmitRagQueryRequest;
+import com.researchassistant.rag.dto.response.GroundedAnswerResponse;
 import com.researchassistant.rag.exception.RagCapabilityUnavailableException;
+import com.researchassistant.rag.entity.RagQueryEvidence;
+import com.researchassistant.rag.repository.RagQueryEvidenceRepository;
+import com.researchassistant.rag.scope.RetrievalScopeType;
+import com.researchassistant.rag.service.RagQueryService;
+import com.researchassistant.reference.entity.ProjectReference;
+import com.researchassistant.reference.entity.ProjectReferenceStatus;
+import com.researchassistant.reference.entity.ReferenceEntry;
+import com.researchassistant.reference.entity.ReferenceMetadataStatus;
+import com.researchassistant.reference.repository.ProjectReferenceRepository;
+import com.researchassistant.reference.repository.ReferenceSourceLinkRepository;
+import com.researchassistant.reference.service.CitationFormattingService;
+import com.researchassistant.reference.service.ProjectReferenceRegistryService;
+import com.researchassistant.reference.dto.ReferenceDtos.CitationContext;
+import com.researchassistant.literature.entity.LiteratureMatrix;
+import com.researchassistant.literature.repository.LiteratureMatrixRepository;
 import com.researchassistant.researchdesign.entity.*;
 import com.researchassistant.researchdesign.repository.*;
 import com.researchassistant.security.audit.SecurityAuditEventType;
@@ -24,7 +44,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.OffsetDateTime;
 import java.util.*;
@@ -43,16 +65,28 @@ public class AnalysisWorkflowService {
     private final ResearchReportChapterRepository chapterRepository;
     private final ResearchReportSectionRepository sectionRepository;
     private final ResearchReportCitationRepository citationRepository;
+    private final ReportDocumentVersionRepository documentVersionRepository;
     private final ResearchObjectiveRepository objectiveRepository;
     private final ResearchQuestionRepository questionRepository;
     private final ResearchHypothesisRepository hypothesisRepository;
     private final ResearchProblemRepository problemRepository;
     private final MethodologyRepository methodologyRepository;
     private final ResearchDatasetRepository datasetRepository;
+    private final DocumentRepository documentRepository;
     private final ProjectAuthorizationService authorizationService;
     private final CacheInvalidationService cacheInvalidationService;
     private final SecurityAuditService auditService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final RagQueryService ragQueryService;
+    private final RagQueryEvidenceRepository ragEvidenceRepository;
+    private final ProjectReferenceRegistryService referenceRegistryService;
+    private final ReportMarkdownRenderer markdownRenderer;
+    private final ReportRichTextService richTextService;
+    private final CitationFormattingService citationFormattingService;
+    private final ProjectReferenceRepository projectReferenceRepository;
+    private final ReferenceSourceLinkRepository referenceSourceLinkRepository;
+    private final LiteratureMatrixRepository literatureMatrixRepository;
+    private final TransactionTemplate transactionTemplate;
 
     public AnalysisWorkflowService(AnalysisRunRepository runRepository, AnalysisResultRepository resultRepository,
             ResearchFindingRepository findingRepository, FindingDiscussionRepository discussionRepository,
@@ -60,11 +94,18 @@ public class AnalysisWorkflowService {
             ResearchRecommendationRepository recommendationRepository, ResearchReportRepository reportRepository,
             ResearchReportTemplateRepository templateRepository, ResearchReportChapterRepository chapterRepository,
             ResearchReportSectionRepository sectionRepository, ResearchReportCitationRepository citationRepository,
+            ReportDocumentVersionRepository documentVersionRepository,
             ResearchObjectiveRepository objectiveRepository, ResearchQuestionRepository questionRepository,
             ResearchHypothesisRepository hypothesisRepository, ResearchProblemRepository problemRepository,
             MethodologyRepository methodologyRepository, ResearchDatasetRepository datasetRepository,
+            DocumentRepository documentRepository,
             ProjectAuthorizationService authorizationService, CacheInvalidationService cacheInvalidationService,
-            SecurityAuditService auditService) {
+            SecurityAuditService auditService, RagQueryService ragQueryService,
+            RagQueryEvidenceRepository ragEvidenceRepository, ProjectReferenceRegistryService referenceRegistryService,
+            ReportMarkdownRenderer markdownRenderer, ReportRichTextService richTextService,
+            CitationFormattingService citationFormattingService, ProjectReferenceRepository projectReferenceRepository,
+            ReferenceSourceLinkRepository referenceSourceLinkRepository, LiteratureMatrixRepository literatureMatrixRepository,
+            PlatformTransactionManager transactionManager) {
         this.runRepository = runRepository;
         this.resultRepository = resultRepository;
         this.findingRepository = findingRepository;
@@ -77,15 +118,27 @@ public class AnalysisWorkflowService {
         this.chapterRepository = chapterRepository;
         this.sectionRepository = sectionRepository;
         this.citationRepository = citationRepository;
+        this.documentVersionRepository = documentVersionRepository;
         this.objectiveRepository = objectiveRepository;
         this.questionRepository = questionRepository;
         this.hypothesisRepository = hypothesisRepository;
         this.problemRepository = problemRepository;
         this.methodologyRepository = methodologyRepository;
         this.datasetRepository = datasetRepository;
+        this.documentRepository = documentRepository;
         this.authorizationService = authorizationService;
         this.cacheInvalidationService = cacheInvalidationService;
         this.auditService = auditService;
+        this.ragQueryService = ragQueryService;
+        this.ragEvidenceRepository = ragEvidenceRepository;
+        this.referenceRegistryService = referenceRegistryService;
+        this.markdownRenderer = markdownRenderer;
+        this.richTextService = richTextService;
+        this.citationFormattingService = citationFormattingService;
+        this.projectReferenceRepository = projectReferenceRepository;
+        this.referenceSourceLinkRepository = referenceSourceLinkRepository;
+        this.literatureMatrixRepository = literatureMatrixRepository;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     @Transactional
@@ -478,23 +531,43 @@ public class AnalysisWorkflowService {
         report.setOrigin(defaultOrigin(request.origin()));
         report.setCreatedBy(user);
         ResearchReport saved = reportRepository.save(report);
-        if (saved.getTemplate() != null && saved.getTemplate().getConfigurationJson() != null && !saved.getTemplate().getConfigurationJson().isBlank()) {
-            try {
-                assembleFromTemplate(saved, user, saved.getTemplate().getConfigurationJson());
-            } catch (Exception e) {
-                createDefaultChapters(saved, user);
-            }
-        } else {
-            createDefaultChapters(saved, user);
-        }
+        ensureReportStructure(saved, user);
         auditService.record(user.getId(), SecurityAuditEventType.REPORT_CREATED);
         return ReportResponse.from(saved);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
+    public ReportResponse ensureReportInitialized(UUID projectId, User user) {
+        ResearchProject project = authorizationService.requireProjectEditor(projectId, user).project();
+        ResearchReport report = reportRepository.findFirstByProjectIdOrderByUpdatedAtDesc(projectId)
+                .orElseGet(() -> createInitializedReport(project, user));
+        if (report.getTemplate() == null) {
+            ResearchReportTemplate template = project.getReportTemplate() != null
+                    ? project.getReportTemplate()
+                    : loadTemplate(null, report.getType());
+            report.setTemplate(template);
+        }
+        if (report.getCitationStyle() == null) {
+            report.setCitationStyle(project.getCitationStyle() != null ? project.getCitationStyle() : CitationStyle.APA_7);
+        }
+        ensureReportStructure(report, user);
+        backfillProjectReferences(projectId, user);
+        return ReportResponse.from(report);
+    }
+
+    @Transactional
     public Page<ReportResponse> listReports(UUID projectId, User user, Pageable pageable) {
         authorizationService.requireProjectViewer(projectId, user);
-        return reportRepository.findAllByProjectIdOrderByUpdatedAtDesc(projectId, pageable).map(ReportResponse::from);
+        Page<ReportResponse> page = reportRepository.findAllByProjectIdOrderByUpdatedAtDesc(projectId, pageable).map(ReportResponse::from);
+        if (page.isEmpty()) {
+            try {
+                ReportResponse initialized = ensureReportInitialized(projectId, user);
+                return new PageImpl<>(List.of(initialized), pageable, 1);
+            } catch (Exception ignored) {
+                // User may not have editor permissions to initialize, return empty
+            }
+        }
+        return page;
     }
 
     @Transactional(readOnly = true)
@@ -523,20 +596,340 @@ public class AnalysisWorkflowService {
     @Transactional
     public ReportResponse assembleReport(UUID reportId, User user) {
         ResearchReport report = loadReportForEdit(reportId, user);
-        if (!chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(reportId).isEmpty()) return ReportResponse.from(report);
-
-        if (report.getTemplate() != null && report.getTemplate().getConfigurationJson() != null && !report.getTemplate().getConfigurationJson().isBlank()) {
-            try {
-                assembleFromTemplate(report, user, report.getTemplate().getConfigurationJson());
-            } catch (Exception e) {
-                createDefaultChapters(report, user);
-            }
-        } else {
-            createDefaultChapters(report, user);
-        }
-
+        ensureReportStructure(report, user);
         auditService.record(user.getId(), SecurityAuditEventType.REPORT_ASSEMBLED);
         return ReportResponse.from(report);
+    }
+
+    private ResearchReport createInitializedReport(ResearchProject project, User user) {
+        ResearchReportTemplate template = project.getReportTemplate() != null
+                ? project.getReportTemplate()
+                : loadTemplate(null, ResearchReportType.FINAL_YEAR_PROJECT);
+        ResearchReport report = new ResearchReport();
+        report.setProject(project);
+        report.setTemplate(template);
+        report.setTitle(project.getTitle() == null || project.getTitle().isBlank() ? "Research Report" : project.getTitle() + " Report");
+        report.setType(template == null ? ResearchReportType.FINAL_YEAR_PROJECT : template.getType());
+        report.setCitationStyle(project.getCitationStyle() != null
+                ? project.getCitationStyle()
+                : template != null && template.getDefaultCitationStyle() != null ? template.getDefaultCitationStyle() : CitationStyle.APA_7);
+        report.setInstitutionName(template == null ? null : template.getInstitution());
+        report.setDepartmentName(template == null ? null : template.getDepartment());
+        report.setOrigin(ContentOrigin.USER);
+        report.setCreatedBy(user);
+        return reportRepository.save(report);
+    }
+
+    private void ensureReportStructure(ResearchReport report, User user) {
+        boolean assembled = false;
+        if (report.getTemplate() != null && report.getTemplate().getConfigurationJson() != null && !report.getTemplate().getConfigurationJson().isBlank()) {
+            try {
+                ensureFromTemplate(report, user, report.getTemplate().getConfigurationJson());
+                assembled = true;
+            } catch (Exception ignored) {
+                assembled = false;
+            }
+        }
+        if (!assembled) {
+            ensureDefaultChapters(report, user);
+        }
+        linkPersistedResearchEntities(report, user);
+        cleanLiteratureReviewAndExtractMatrix(report, user);
+        ensureReferencesSection(report, user);
+        recalculateSectionNumbers(report);
+        for (ResearchReportSection section : sectionRepository.findAllByChapterReportId(report.getId())) {
+            ensureRichSection(section);
+        }
+    }
+
+    private void ensureFromTemplate(ResearchReport report, User user, String configurationJson) throws Exception {
+        JsonNode root = objectMapper.readTree(configurationJson);
+        JsonNode chaptersNode = root.get("chapters");
+        if (chaptersNode == null || !chaptersNode.isArray()) {
+            ensureDefaultChapters(report, user);
+            return;
+        }
+
+        List<ResearchReportChapter> existingChapters = new ArrayList<>(chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId()));
+        int chOrder = 1;
+        for (JsonNode chNode : chaptersNode) {
+            ReportChapterType type = parseChapterType(chNode.has("type") ? chNode.get("type").asText() : "CUSTOM");
+            String title = chNode.has("title") ? chNode.get("title").asText() : "Chapter " + chOrder;
+            Integer chapterNumber = chNode.has("chapterNumber") && !chNode.get("chapterNumber").isNull() ? chNode.get("chapterNumber").asInt() : null;
+            ResearchReportChapter chapter = findChapter(existingChapters, type, title)
+                    .orElseGet(() -> {
+                        ResearchReportChapter created = new ResearchReportChapter();
+                        created.setReport(report);
+                        created.setType(type);
+                        created.setTitle(title);
+                        created.setChapterNumber(chapterNumber);
+                        created.setDisplayOrder(chOrderValue(existingChapters));
+                        ResearchReportChapter saved = chapterRepository.save(created);
+                        existingChapters.add(saved);
+                        return saved;
+                    });
+            if (chapter.getChapterNumber() == null && chapterNumber != null) chapter.setChapterNumber(chapterNumber);
+            JsonNode sectionsNode = chNode.get("sections");
+            if (sectionsNode != null && sectionsNode.isArray()) {
+                ensureTemplateSections(chapter, sectionsNode, user);
+            } else if (sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapter.getId()).isEmpty()) {
+                createSeedSection(chapter, user);
+            }
+            chOrder++;
+        }
+    }
+
+    private int chOrderValue(List<ResearchReportChapter> chapters) {
+        return chapters.stream().mapToInt(ResearchReportChapter::getDisplayOrder).max().orElse(0) + 1;
+    }
+
+    private void ensureTemplateSections(ResearchReportChapter chapter, JsonNode sectionsNode, User user) {
+        List<ResearchReportSection> existing = new ArrayList<>(sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapter.getId()));
+        int order = 1;
+        for (JsonNode secNode : sectionsNode) {
+            ReportSectionType type = parseSectionType(secNode.has("type") ? secNode.get("type").asText() : "CUSTOM");
+            String heading = secNode.has("heading") ? secNode.get("heading").asText() : "Section " + order;
+            int displayOrder = order++;
+            ResearchReportSection section = findSection(existing, type, heading)
+                    .orElseGet(() -> {
+                        ResearchReportSection created = new ResearchReportSection();
+                        created.setChapter(chapter);
+                        created.setType(type);
+                        created.setHeading(heading);
+                        created.setDisplayOrder(displayOrder);
+                        created.setOrigin(ContentOrigin.USER);
+                        created.setCreatedBy(user);
+                        ResearchReportSection saved = sectionRepository.save(created);
+                        existing.add(saved);
+                        return saved;
+                    });
+            ensureRichSection(section);
+        }
+    }
+
+    private void ensureDefaultChapters(ResearchReport report, User user) {
+        if (chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId()).isEmpty()) {
+            createDefaultChapters(report, user);
+        }
+    }
+
+    private Optional<ResearchReportChapter> findChapter(List<ResearchReportChapter> chapters, ReportChapterType type, String title) {
+        return chapters.stream()
+                .filter(chapter -> chapter.getType() == type || normalizeTitle(chapter.getTitle()).equals(normalizeTitle(title)))
+                .findFirst();
+    }
+
+    private Optional<ResearchReportSection> findSection(List<ResearchReportSection> sections, ReportSectionType type, String heading) {
+        return sections.stream()
+                .filter(section -> (section.getType() == type && normalizeTitle(section.getHeading()).equals(normalizeTitle(heading)))
+                        || normalizeTitle(section.getHeading()).equals(normalizeTitle(heading)))
+                .findFirst();
+    }
+
+    private ReportChapterType parseChapterType(String value) {
+        try {
+            return ReportChapterType.valueOf(value);
+        } catch (Exception ignored) {
+            return ReportChapterType.CUSTOM;
+        }
+    }
+
+    private ReportSectionType parseSectionType(String value) {
+        try {
+            return ReportSectionType.valueOf(value);
+        } catch (Exception ignored) {
+            return ReportSectionType.CUSTOM;
+        }
+    }
+
+    private void ensureRichSection(ResearchReportSection section) {
+        boolean changed = false;
+        if (section.getContentJson() == null || section.getContentJson().isBlank() || !richTextService.isValidDocumentJson(section.getContentJson())) {
+            section.setContentJson(richTextService.markdownToDocumentJson(section.getContent()));
+            changed = true;
+        }
+        if (section.getPlainText() == null || section.getPlainText().isBlank()) {
+            section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
+            changed = true;
+        }
+        if ((section.getContent() == null || section.getContent().isBlank()) && section.getContentJson() != null) {
+            String markdown = richTextService.documentJsonToMarkdown(section.getContentJson());
+            section.setContent(markdown.isBlank() ? null : markdown);
+            changed = true;
+        }
+        ReportSectionStatus desired = section.getPlainText() == null || section.getPlainText().isBlank()
+                ? ReportSectionStatus.NOT_STARTED
+                : section.getStatus() == ReportSectionStatus.NOT_STARTED ? ReportSectionStatus.DRAFT : section.getStatus();
+        if (section.getStatus() != desired) {
+            section.setStatus(desired);
+            changed = true;
+        }
+        if (changed) {
+            sectionRepository.save(section);
+        }
+    }
+
+    private boolean isBlankDoc(String contentJson) {
+        if (contentJson == null || contentJson.isBlank()) return true;
+        try {
+            String plain = richTextService.plainTextFromDocumentJson(contentJson);
+            return plain == null || plain.isBlank();
+        } catch (Exception ignored) {
+            return true;
+        }
+    }
+
+    private void linkPersistedResearchEntities(ResearchReport report, User user) {
+        UUID projectId = report.getProject().getId();
+        for (ResearchReportSection section : sectionRepository.findAllByChapterReportId(report.getId())) {
+            boolean isEmpty = (section.getContent() == null || section.getContent().isBlank())
+                    && (section.getContentJson() == null || section.getContentJson().isBlank() || isBlankDoc(section.getContentJson()));
+            if (!isEmpty) {
+                continue;
+            }
+            switch (section.getType()) {
+                case PROBLEM_STATEMENT -> {
+                    problemRepository.findAllByProjectId(projectId).stream().findFirst().ifPresent(problem -> {
+                        String text = problem.getStatement();
+                        if (text != null && !text.isBlank()) {
+                            section.setContent(text);
+                            section.setContentJson(richTextService.markdownToDocumentJson(text));
+                            section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
+                            section.setStatus(ReportSectionStatus.DRAFT);
+                            sectionRepository.save(section);
+                        }
+                    });
+                }
+                case OBJECTIVES -> {
+                    List<ResearchObjective> objectives = objectiveRepository.findAllByProjectId(projectId);
+                    if (!objectives.isEmpty()) {
+                        StringBuilder sb = new StringBuilder();
+                        for (int i = 0; i < objectives.size(); i++) {
+                            sb.append(i + 1).append(". ").append(objectives.get(i).getText()).append("\n");
+                        }
+                        String text = sb.toString().trim();
+                        section.setContent(text);
+                        section.setContentJson(richTextService.markdownToDocumentJson(text));
+                        section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
+                        section.setStatus(ReportSectionStatus.DRAFT);
+                        sectionRepository.save(section);
+                    }
+                }
+                case METHODOLOGY -> {
+                    methodologyRepository.findAllByProjectIdOrderByRevisionNumberDesc(projectId).stream().findFirst().ifPresent(m -> {
+                        String desc = m.getDesignDescription() != null && !m.getDesignDescription().isBlank() ? m.getDesignDescription() : m.getRationale();
+                        if (desc != null && !desc.isBlank()) {
+                            section.setContent(desc);
+                            section.setContentJson(richTextService.markdownToDocumentJson(desc));
+                            section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
+                            section.setStatus(ReportSectionStatus.DRAFT);
+                            sectionRepository.save(section);
+                        }
+                    });
+                }
+                case FINDINGS -> {
+                    List<ResearchFinding> findings = findingRepository.findAllByProjectIdOrderByDisplayOrderAsc(projectId, Pageable.unpaged()).getContent();
+                    if (!findings.isEmpty()) {
+                        StringBuilder sb = new StringBuilder();
+                        for (ResearchFinding f : findings) {
+                            String detail = f.getFindingText() != null && !f.getFindingText().isBlank() ? f.getFindingText() : f.getStatement();
+                            sb.append("### ").append(f.getTitle()).append("\n\n").append(detail != null ? detail : "").append("\n\n");
+                        }
+                        String text = sb.toString().trim();
+                        section.setContent(text);
+                        section.setContentJson(richTextService.markdownToDocumentJson(text));
+                        section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
+                        section.setStatus(ReportSectionStatus.DRAFT);
+                        sectionRepository.save(section);
+                    }
+                }
+                case CONCLUSIONS -> {
+                    List<ResearchConclusion> conclusions = conclusionRepository.findAllByProjectIdOrderByDisplayOrderAsc(projectId, Pageable.unpaged()).getContent();
+                    if (!conclusions.isEmpty()) {
+                        StringBuilder sb = new StringBuilder();
+                        for (ResearchConclusion c : conclusions) {
+                            String detail = c.getConclusionText() != null && !c.getConclusionText().isBlank() ? c.getConclusionText() : c.getStatement();
+                            sb.append("### ").append(c.getTitle()).append("\n\n").append(detail != null ? detail : "").append("\n\n");
+                        }
+                        String text = sb.toString().trim();
+                        section.setContent(text);
+                        section.setContentJson(richTextService.markdownToDocumentJson(text));
+                        section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
+                        section.setStatus(ReportSectionStatus.DRAFT);
+                        sectionRepository.save(section);
+                    }
+                }
+                case RECOMMENDATIONS -> {
+                    List<ResearchRecommendation> recommendations = recommendationRepository.findAllByProjectIdOrderByDisplayOrderAsc(projectId, Pageable.unpaged()).getContent();
+                    if (!recommendations.isEmpty()) {
+                        StringBuilder sb = new StringBuilder();
+                        for (ResearchRecommendation r : recommendations) {
+                            String detail = r.getRecommendationText() != null && !r.getRecommendationText().isBlank() ? r.getRecommendationText() : r.getRecommendation();
+                            sb.append("### ").append(r.getTitle()).append("\n\n").append(detail != null ? detail : "").append("\n\n");
+                        }
+                        String text = sb.toString().trim();
+                        section.setContent(text);
+                        section.setContentJson(richTextService.markdownToDocumentJson(text));
+                        section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
+                        section.setStatus(ReportSectionStatus.DRAFT);
+                        sectionRepository.save(section);
+                    }
+                }
+                default -> {}
+            }
+        }
+    }
+
+    private void applySectionContent(ResearchReportSection section, String content, String contentJson, String plainText) {
+        if (contentJson != null) {
+            String normalizedJson = contentJson.isBlank() ? richTextService.markdownToDocumentJson("") : contentJson;
+            if (!richTextService.isValidDocumentJson(normalizedJson)) {
+                throw new IllegalArgumentException("Section rich-text JSON is invalid.");
+            }
+            section.setContentJson(normalizedJson);
+            String resolvedPlainText = plainText != null ? optional(plainText) : richTextService.plainTextFromDocumentJson(normalizedJson);
+            section.setPlainText(resolvedPlainText);
+            String markdown = richTextService.documentJsonToMarkdown(normalizedJson);
+            section.setContent(markdown.isBlank() ? resolvedPlainText : markdown);
+            section.setManuallyEdited(true);
+            section.setStatus(resolvedPlainText == null || resolvedPlainText.isBlank() ? ReportSectionStatus.NOT_STARTED : ReportSectionStatus.DRAFT);
+            return;
+        }
+        if (content != null) {
+            String normalized = optional(content);
+            section.setContent(normalized);
+            section.setContentJson(richTextService.markdownToDocumentJson(normalized));
+            section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
+            section.setManuallyEdited(true);
+            section.setStatus(section.getPlainText() == null || section.getPlainText().isBlank() ? ReportSectionStatus.NOT_STARTED : ReportSectionStatus.DRAFT);
+        }
+    }
+
+    private void backfillProjectReferences(UUID projectId, User user) {
+        for (com.researchassistant.document.entity.Document document : documentRepository.findAllByProjectIdAndStatusNot(projectId, DocumentStatus.ARCHIVED, Pageable.unpaged()).getContent()) {
+            if (document.getCurrentVersion() != null && !document.getCurrentVersion().isQuarantined()) {
+                referenceRegistryService.ensureForDocument(document, document.getCurrentVersion(), user);
+            }
+        }
+    }
+
+    private java.util.Set<UUID> citationEnabledDocumentIds(UUID projectId) {
+        java.util.Set<UUID> ids = new java.util.LinkedHashSet<>();
+        for (ProjectReference projectReference : projectReferenceRepository.findAllByProjectIdAndStatusOrderByCitationKeyAsc(projectId, ProjectReferenceStatus.ACTIVE)) {
+            if (!projectReference.isAvailableForCitation()) {
+                continue;
+            }
+            for (var link : referenceSourceLinkRepository.findAllByReferenceId(projectReference.getReference().getId())) {
+                if (link.getDocument() != null) {
+                    ids.add(link.getDocument().getId());
+                }
+            }
+        }
+        return ids;
+    }
+
+    private String normalizeTitle(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
     }
 
     private void assembleFromTemplate(ResearchReport report, User user, String configurationJson) throws Exception {
@@ -673,6 +1066,32 @@ public class AnalysisWorkflowService {
         if (recommendationRepository.countByProjectId(projectId) == 0) info.add(new ValidationIssue("INFO", "NO_RECOMMENDATIONS", "No recommendations are available yet.", projectId));
         for (ResearchReportSection section : sectionRepository.findAllByChapterReportId(reportId)) {
             if (section.isSourceOutOfDate()) warnings.add(new ValidationIssue("WARNING", "STALE_SECTION", "A report section is stale because its source artifact changed.", section.getId()));
+            if (section.getContent() != null && section.getContent().contains("[citation metadata incomplete]")) {
+                errors.add(new ValidationIssue("ERROR", "CITATION_PLACEHOLDER_IN_SECTION", "A report section contains an internal citation metadata placeholder.", section.getId()));
+            }
+            if (section.getContent() != null && markdownRenderer.containsRawMarkdownHeading(section.getContent())) {
+                info.add(new ValidationIssue("INFO", "MARKDOWN_WILL_RENDER_AS_WORD_STRUCTURE", "A report section contains Markdown headings that will be rendered as Word heading styles during export.", section.getId()));
+            }
+            if ((section.getContent() == null || section.getContent().isBlank())
+                    && (section.getContentJson() == null || isBlankDoc(section.getContentJson()))) {
+                if (section.getType() == ReportSectionType.CONCLUSIONS) {
+                    errors.add(new ValidationIssue("ERROR", "MISSING_REQUIRED_SECTION", "Conclusion is required before finalization.", section.getId()));
+                } else if (section.getType() == ReportSectionType.LITERATURE_REVIEW) {
+                    errors.add(new ValidationIssue("ERROR", "MISSING_REQUIRED_SECTION", "Literature Review is required before finalization.", section.getId()));
+                } else {
+                    warnings.add(new ValidationIssue("WARNING", "SECTION_INCOMPLETE", "Section " + section.getHeading() + " has not been completed.", section.getId()));
+                }
+            }
+        }
+        Map<UUID, ReferenceEntry> references = citedReferencesForValidation(reportId);
+        for (ReferenceEntry reference : references.values()) {
+            if (reference == null
+                    || reference.getMetadataStatus() == ReferenceMetadataStatus.INCOMPLETE
+                    || reference.getTitle() == null
+                    || reference.getTitle().isBlank()
+                    || "REFERENCE_METADATA_INCOMPLETE".equalsIgnoreCase(reference.getTitle())) {
+                errors.add(new ValidationIssue("ERROR", "INCOMPLETE_CITED_REFERENCE_METADATA", "A cited reference has incomplete bibliographic metadata and must be reviewed before final export.", reference == null ? reportId : reference.getId()));
+            }
         }
         auditService.record(user.getId(), SecurityAuditEventType.REPORT_VALIDATED);
         return new ReportValidationResponse(errors, warnings, info);
@@ -683,17 +1102,171 @@ public class AnalysisWorkflowService {
         ResearchReport report = loadReport(reportId);
         authorizationService.requireProjectAdminAccess(report.getProject().getId(), user);
         ReportValidationResponse validation = validateReport(reportId, user);
-        if (!validation.errors().isEmpty()) throw new IllegalStateException("Report cannot be finalized while validation errors exist.");
+        if (!validation.errors().isEmpty()) throw new ReportValidationException(validation);
         report.setStatus(ResearchReportStatus.FINAL);
         report.setRevisionNumber(report.getRevisionNumber() + 1);
         auditService.record(user.getId(), SecurityAuditEventType.REPORT_FINALIZED);
         return ReportResponse.from(report);
     }
 
+    @Transactional
+    public FinalDocumentResponse prepareFinalDocument(UUID reportId, User user) {
+        ResearchReport report = loadReportForEdit(reportId, user);
+        ensureReportStructure(report, user);
+
+        List<ResearchReportChapter> chapters = chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(reportId);
+        List<ReportRichTextService.DocumentPart> parts = new ArrayList<>();
+        Map<String, Object> sectionRevisions = new LinkedHashMap<>();
+
+        // 1. Preliminary (e.g. Abstract)
+        for (ResearchReportChapter chapter : chapters) {
+            if (chapter.getType() == ReportChapterType.PRELIMINARY) {
+                List<ResearchReportSection> sections = sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapter.getId());
+                for (ResearchReportSection section : sections) {
+                    ensureRichSection(section);
+                    sectionRevisions.put(section.getId().toString(), section.getRevisionNumber());
+                    parts.add(new ReportRichTextService.DocumentPart(section.getHeading(), 1, section.getContentJson(), section.getPlainText()));
+                }
+            }
+        }
+
+        // 2. Table of Contents
+        TableOfContentsResponse toc = generateTableOfContents(reportId, user);
+        parts.add(new ReportRichTextService.DocumentPart("Table of Contents", 1, richTextService.markdownToDocumentJson(toc.formattedMarkdown()), toc.formattedMarkdown()));
+
+        // 3. Body Chapters & Hierarchical Sections
+        for (ResearchReportChapter chapter : chapters) {
+            if (chapter.getType() == ReportChapterType.PRELIMINARY || chapter.getType() == ReportChapterType.REFERENCES || chapter.getType() == ReportChapterType.APPENDICES) {
+                continue;
+            }
+            parts.add(new ReportRichTextService.DocumentPart(chapter.getTitle(), 1, null, null));
+            List<ResearchReportSection> rootSections = sectionRepository.findAllByChapterIdAndParentSectionIsNullOrderByDisplayOrderAsc(chapter.getId());
+            for (ResearchReportSection section : rootSections) {
+                ensureRichSection(section);
+                sectionRevisions.put(section.getId().toString(), section.getRevisionNumber());
+                String heading = section.getSectionNumber() != null ? section.getSectionNumber() + " " + section.getHeading() : section.getHeading();
+                parts.add(new ReportRichTextService.DocumentPart(heading, 2, section.getContentJson(), section.getPlainText()));
+
+                List<ResearchReportSection> subsections = sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(section.getId());
+                for (ResearchReportSection sub : subsections) {
+                    ensureRichSection(sub);
+                    sectionRevisions.put(sub.getId().toString(), sub.getRevisionNumber());
+                    String subHeading = sub.getSectionNumber() != null ? sub.getSectionNumber() + " " + sub.getHeading() : sub.getHeading();
+                    parts.add(new ReportRichTextService.DocumentPart(subHeading, 3, sub.getContentJson(), sub.getPlainText()));
+
+                    List<ResearchReportSection> subSubs = sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(sub.getId());
+                    for (ResearchReportSection subSub : subSubs) {
+                        ensureRichSection(subSub);
+                        sectionRevisions.put(subSub.getId().toString(), subSub.getRevisionNumber());
+                        String subSubHeading = subSub.getSectionNumber() != null ? subSub.getSectionNumber() + " " + subSub.getHeading() : subSub.getHeading();
+                        parts.add(new ReportRichTextService.DocumentPart(subSubHeading, 4, subSub.getContentJson(), subSub.getPlainText()));
+                    }
+                }
+            }
+
+            if (chapter.getType() == ReportChapterType.LITERATURE_REVIEW && "CHAPTER_TWO".equalsIgnoreCase(report.getLiteratureMatrixInclusion())) {
+                literatureMatrixRepository.findFirstByProjectIdOrderByCreatedAtDesc(report.getProject().getId())
+                        .ifPresent(matrix -> {
+                            if (matrix.getMarkdownTable() != null && !matrix.getMarkdownTable().isBlank()) {
+                                parts.add(new ReportRichTextService.DocumentPart("Literature Evidence Assessment Matrix", 2, richTextService.markdownToDocumentJson(matrix.getMarkdownTable()), matrix.getMarkdownTable()));
+                            }
+                        });
+            }
+        }
+
+        // 4. References Chapter
+        refreshReportReferencesInternal(report, user);
+        for (ResearchReportChapter chapter : chapters) {
+            if (chapter.getType() == ReportChapterType.REFERENCES) {
+                parts.add(new ReportRichTextService.DocumentPart(chapter.getTitle(), 1, null, null));
+                List<ResearchReportSection> sections = sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapter.getId());
+                for (ResearchReportSection section : sections) {
+                    ensureRichSection(section);
+                    sectionRevisions.put(section.getId().toString(), section.getRevisionNumber());
+                    parts.add(new ReportRichTextService.DocumentPart(section.getHeading(), 2, section.getContentJson(), section.getPlainText()));
+                }
+            }
+        }
+
+        // 5. Appendices (including Literature Matrix if configured)
+        for (ResearchReportChapter chapter : chapters) {
+            if (chapter.getType() == ReportChapterType.APPENDICES) {
+                parts.add(new ReportRichTextService.DocumentPart(chapter.getTitle(), 1, null, null));
+                if ("APPENDIX".equalsIgnoreCase(report.getLiteratureMatrixInclusion())) {
+                    literatureMatrixRepository.findFirstByProjectIdOrderByCreatedAtDesc(report.getProject().getId())
+                            .ifPresent(matrix -> {
+                                if (matrix.getMarkdownTable() != null && !matrix.getMarkdownTable().isBlank()) {
+                                    parts.add(new ReportRichTextService.DocumentPart("Appendix: Literature Evidence Assessment Matrix", 2, richTextService.markdownToDocumentJson(matrix.getMarkdownTable()), matrix.getMarkdownTable()));
+                                }
+                            });
+                }
+                List<ResearchReportSection> sections = sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapter.getId());
+                for (ResearchReportSection section : sections) {
+                    ensureRichSection(section);
+                    sectionRevisions.put(section.getId().toString(), section.getRevisionNumber());
+                    parts.add(new ReportRichTextService.DocumentPart(section.getHeading(), 2, section.getContentJson(), section.getPlainText()));
+                }
+            }
+        }
+
+        String assembledJson = richTextService.assembleDocumentJson(parts);
+        String plainText = richTextService.plainTextFromDocumentJson(assembledJson);
+
+        int maxVersion = documentVersionRepository.maxVersionNumber(reportId);
+        int nextVersion = maxVersion + 1;
+
+        ReportDocumentVersion docVersion = new ReportDocumentVersion();
+        docVersion.setReport(report);
+        docVersion.setProject(report.getProject());
+        docVersion.setVersionNumber(nextVersion);
+        docVersion.setTitle(report.getTitle() + " - Final Draft v" + nextVersion);
+        docVersion.setStatus(ReportDocumentVersionStatus.FINAL_REVIEW);
+        docVersion.setCitationStyle(report.getCitationStyle());
+        docVersion.setContentJson(assembledJson);
+        docVersion.setPlainText(plainText);
+        docVersion.setSourceReportRevisionNumber(report.getRevisionNumber());
+        try {
+            docVersion.setSectionRevisionSnapshotJson(objectMapper.writeValueAsString(sectionRevisions));
+            docVersion.setTemplateSnapshotJson(report.getTemplate() != null ? report.getTemplate().getConfigurationJson() : "{}");
+        } catch (Exception ignored) {}
+        docVersion.setCreatedBy(user);
+        docVersion.setUpdatedBy(user);
+
+        ReportDocumentVersion saved = documentVersionRepository.save(docVersion);
+        auditService.record(user.getId(), SecurityAuditEventType.REPORT_FINALIZED);
+        return FinalDocumentResponse.from(saved);
+    }
+
     @Transactional(readOnly = true)
+    public FinalDocumentResponse getFinalDocument(UUID reportId, User user) {
+        ResearchReport report = loadReport(reportId);
+        authorizationService.requireProjectViewer(report.getProject().getId(), user);
+        return documentVersionRepository.findFirstByReportIdOrderByVersionNumberDesc(reportId)
+                .map(FinalDocumentResponse::from)
+                .orElse(null);
+    }
+
+    @Transactional
+    public FinalDocumentResponse updateFinalDocument(UUID reportId, User user, UpdateFinalDocumentRequest request) {
+        ResearchReport report = loadReportForEdit(reportId, user);
+        ReportDocumentVersion version = documentVersionRepository.findFirstByReportIdOrderByVersionNumberDesc(reportId)
+                .orElseThrow(() -> new ResourceNotFoundException("No final document version found for this report. Please prepare one first."));
+        if (request.contentJson() != null && !request.contentJson().isBlank()) {
+            version.setContentJson(request.contentJson());
+            version.setPlainText(request.plainText() != null ? request.plainText() : richTextService.plainTextFromDocumentJson(request.contentJson()));
+        }
+        if (request.status() != null) {
+            version.setStatus(request.status());
+        }
+        version.setUpdatedBy(user);
+        return FinalDocumentResponse.from(version);
+    }
+
+    @Transactional
     public List<ChapterResponse> listChapters(UUID reportId, User user) {
         ResearchReport report = loadReport(reportId);
         authorizationService.requireProjectViewer(report.getProject().getId(), user);
+        ensureReportStructure(report, user);
         return chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(reportId).stream().map(ChapterResponse::from).toList();
     }
 
@@ -706,65 +1279,314 @@ public class AnalysisWorkflowService {
         chapter.setTitle(required(request.title(), "Chapter title is required."));
         chapter.setChapterNumber(request.chapterNumber());
         chapter.setDisplayOrder(request.displayOrder() == null ? 1 : request.displayOrder());
-        return ChapterResponse.from(chapterRepository.save(chapter));
+        chapter.setRequired(request.required() != null && request.required());
+        chapter.setSystemDefined(request.systemDefined() != null && request.systemDefined());
+        ResearchReportChapter saved = chapterRepository.save(chapter);
+        recalculateSectionNumbers(report);
+        return ChapterResponse.from(saved);
     }
 
     @Transactional
     public ChapterResponse updateChapter(UUID chapterId, User user, UpdateChapterRequest request) {
         ResearchReportChapter chapter = chapterRepository.findById(chapterId).orElseThrow(() -> new ResourceNotFoundException("Report chapter not found."));
-        loadReportForEdit(chapter.getReport().getId(), user);
+        ResearchReport report = loadReportForEdit(chapter.getReport().getId(), user);
         if (request.type() != null) chapter.setType(request.type());
         if (request.title() != null) chapter.setTitle(optional(request.title()));
         if (request.chapterNumber() != null) chapter.setChapterNumber(request.chapterNumber());
         if (request.displayOrder() != null) chapter.setDisplayOrder(request.displayOrder());
+        if (request.required() != null) chapter.setRequired(request.required());
+        if (request.systemDefined() != null) chapter.setSystemDefined(request.systemDefined());
+        chapterRepository.save(chapter);
+        recalculateSectionNumbers(report);
         return ChapterResponse.from(chapter);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
+    public void deleteChapter(UUID chapterId, User user) {
+        ResearchReportChapter chapter = chapterRepository.findById(chapterId).orElseThrow(() -> new ResourceNotFoundException("Report chapter not found."));
+        ResearchReport report = loadReportForEdit(chapter.getReport().getId(), user);
+        if (chapter.isRequired()) {
+            throw new IllegalArgumentException("Cannot delete required template chapter: " + chapter.getTitle());
+        }
+        List<ResearchReportSection> sections = sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapterId);
+        for (ResearchReportSection sec : sections) {
+            deleteSectionHierarchy(sec);
+        }
+        chapterRepository.delete(chapter);
+        recalculateSectionNumbers(report);
+    }
+
+    @Transactional
     public List<SectionResponse> listSections(UUID chapterId, User user) {
         ResearchReportChapter chapter = chapterRepository.findById(chapterId).orElseThrow(() -> new ResourceNotFoundException("Report chapter not found."));
         authorizationService.requireProjectViewer(chapter.getReport().getProject().getId(), user);
-        return sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapterId).stream().map(SectionResponse::from).toList();
+        return sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapterId).stream()
+                .peek(this::ensureRichSection)
+                .map(SectionResponse::from)
+                .toList();
     }
 
     @Transactional
     public SectionResponse createSection(UUID chapterId, User user, CreateSectionRequest request) {
         ResearchReportChapter chapter = chapterRepository.findById(chapterId).orElseThrow(() -> new ResourceNotFoundException("Report chapter not found."));
-        loadReportForEdit(chapter.getReport().getId(), user);
+        ResearchReport report = loadReportForEdit(chapter.getReport().getId(), user);
         ResearchReportSection section = new ResearchReportSection();
         section.setChapter(chapter);
+        if (request.parentSectionId() != null) {
+            ResearchReportSection parent = sectionRepository.findById(request.parentSectionId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Parent section not found."));
+            section.setParentSection(parent);
+        }
         section.setType(request.type());
         section.setHeading(required(request.heading(), "Section heading is required."));
-        section.setContent(optional(request.content()));
+        applySectionContent(section, request.content(), request.contentJson(), request.plainText());
+        if (request.status() != null) section.setStatus(request.status());
         section.setDisplayOrder(request.displayOrder() == null ? 1 : request.displayOrder());
+        section.setRequired(request.required() != null && request.required());
+        section.setSystemDefined(request.systemDefined() != null && request.systemDefined());
+        section.setAiEnabled(request.aiEnabled() == null || request.aiEnabled());
         section.setOrigin(defaultOrigin(request.origin()));
         section.setSourceArtifactType(optional(request.sourceArtifactType()));
         section.setSourceArtifactId(request.sourceArtifactId());
         section.setSourceRevisionNumber(resolveSourceRevision(section.getSourceArtifactType(), section.getSourceArtifactId()));
         section.setCreatedBy(user);
-        return SectionResponse.from(sectionRepository.save(section));
+        if (section.getContentJson() == null) {
+            section.setContentJson(richTextService.markdownToDocumentJson(section.getContent()));
+            section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
+        }
+        ResearchReportSection saved = sectionRepository.save(section);
+        recalculateSectionNumbers(report);
+        return SectionResponse.from(saved);
     }
 
     @Transactional
     public SectionResponse updateSection(UUID sectionId, User user, UpdateSectionRequest request) {
         ResearchReportSection section = sectionRepository.findById(sectionId).orElseThrow(() -> new ResourceNotFoundException("Report section not found."));
-        loadReportForEdit(section.getChapter().getReport().getId(), user);
+        ResearchReport report = loadReportForEdit(section.getChapter().getReport().getId(), user);
+        if (request.parentSectionId() != null) {
+            ResearchReportSection parent = sectionRepository.findById(request.parentSectionId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Parent section not found."));
+            section.setParentSection(parent);
+        }
         if (request.type() != null) section.setType(request.type());
         if (request.heading() != null) section.setHeading(optional(request.heading()));
-        if (request.content() != null) { section.setContent(optional(request.content())); section.setManuallyEdited(true); }
+        applySectionContent(section, request.content(), request.contentJson(), request.plainText());
+        if (request.status() != null) section.setStatus(request.status());
         if (request.displayOrder() != null) section.setDisplayOrder(request.displayOrder());
+        if (request.required() != null) section.setRequired(request.required());
+        if (request.systemDefined() != null) section.setSystemDefined(request.systemDefined());
+        if (request.aiEnabled() != null) section.setAiEnabled(request.aiEnabled());
         if (request.origin() != null) section.setOrigin(request.origin());
         if (request.sourceOutOfDate() != null) section.setSourceOutOfDate(request.sourceOutOfDate());
         section.setUpdatedBy(user);
         section.setRevisionNumber(section.getRevisionNumber() + 1);
         auditService.record(user.getId(), SecurityAuditEventType.REPORT_SECTION_UPDATED);
+        recalculateSectionNumbers(report);
         return SectionResponse.from(section);
     }
 
-    public GeneratedDraftResponse generateSection(UUID sectionId, User user) {
+    @Transactional
+    public void deleteSection(UUID sectionId, User user) {
         ResearchReportSection section = sectionRepository.findById(sectionId).orElseThrow(() -> new ResourceNotFoundException("Report section not found."));
-        authorizationService.requireProjectEditor(section.getChapter().getReport().getProject().getId(), user);
-        throw new RagCapabilityUnavailableException("AI report-section generation is disabled. Assembly and manual editing remain available.");
+        ResearchReport report = loadReportForEdit(section.getChapter().getReport().getId(), user);
+        if (section.isRequired()) {
+            throw new IllegalArgumentException("Cannot delete required template section: " + section.getHeading());
+        }
+        deleteSectionHierarchy(section);
+        recalculateSectionNumbers(report);
+    }
+
+    private void deleteSectionHierarchy(ResearchReportSection section) {
+        List<ResearchReportSection> children = sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(section.getId());
+        for (ResearchReportSection child : children) {
+            deleteSectionHierarchy(child);
+        }
+        citationRepository.deleteAllBySectionId(section.getId());
+        sectionRepository.delete(section);
+    }
+
+    @Transactional
+    public ReportStructureResponse getReportStructure(UUID reportId, User user) {
+        ResearchReport report = loadReport(reportId);
+        authorizationService.requireProjectViewer(report.getProject().getId(), user);
+        ensureReportStructure(report, user);
+
+        List<ResearchReportChapter> chapters = chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(reportId);
+        List<ChapterStructureResponse> chapterResponses = new ArrayList<>();
+
+        for (ResearchReportChapter chapter : chapters) {
+            List<ResearchReportSection> allSections = sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapter.getId());
+            Map<UUID, List<ResearchReportSection>> subsectionsByParent = allSections.stream()
+                    .filter(s -> s.getParentSection() != null)
+                    .collect(java.util.stream.Collectors.groupingBy(s -> s.getParentSection().getId()));
+
+            List<SectionStructureResponse> rootResponses = allSections.stream()
+                    .filter(s -> s.getParentSection() == null)
+                    .map(sec -> mapSectionStructure(sec, subsectionsByParent))
+                    .toList();
+
+            chapterResponses.add(new ChapterStructureResponse(
+                    chapter.getId(), reportId, chapter.getType(), chapter.getTitle(),
+                    chapter.getChapterNumber(), chapter.getDisplayOrder(),
+                    chapter.isRequired(), chapter.isSystemDefined(),
+                    rootResponses
+            ));
+        }
+
+        return new ReportStructureResponse(
+                report.getId(), report.getProject().getId(), report.getTitle(), report.getType(),
+                report.getCitationStyle(), report.isIncludeUncitedReferences(),
+                report.getLiteratureMatrixInclusion(),
+                chapterResponses
+        );
+    }
+
+    private SectionStructureResponse mapSectionStructure(ResearchReportSection sec, Map<UUID, List<ResearchReportSection>> subsectionsByParent) {
+        List<ResearchReportSection> children = subsectionsByParent.getOrDefault(sec.getId(), List.of());
+        List<SectionStructureResponse> childResponses = children.stream()
+                .map(c -> mapSectionStructure(c, subsectionsByParent))
+                .toList();
+
+        return new SectionStructureResponse(
+                sec.getId(), sec.getChapter().getId(),
+                sec.getParentSection() != null ? sec.getParentSection().getId() : null,
+                sec.getSectionNumber(), sec.getType(), sec.getHeading(), sec.getStatus(),
+                sec.getDisplayOrder(), sec.isRequired(), sec.isSystemDefined(), sec.isAiEnabled(),
+                sec.isManuallyEdited(), sec.getRevisionNumber(), childResponses
+        );
+    }
+
+    @Transactional
+    public ReportStructureResponse reorderStructure(UUID reportId, ReorderStructureRequest request, User user) {
+        ResearchReport report = loadReportForEdit(reportId, user);
+        if (request.chapters() != null) {
+            for (ReorderItem item : request.chapters()) {
+                chapterRepository.findById(item.id()).ifPresent(ch -> {
+                    if (ch.getReport().getId().equals(reportId)) {
+                        ch.setDisplayOrder(item.displayOrder());
+                    }
+                });
+            }
+        }
+        if (request.sections() != null) {
+            for (ReorderItem item : request.sections()) {
+                sectionRepository.findById(item.id()).ifPresent(sec -> {
+                    if (sec.getChapter().getReport().getId().equals(reportId)) {
+                        sec.setDisplayOrder(item.displayOrder());
+                        if (item.parentId() != null) {
+                            sectionRepository.findById(item.parentId()).ifPresent(sec::setParentSection);
+                        } else {
+                            sec.setParentSection(null);
+                        }
+                    }
+                });
+            }
+        }
+        chapterRepository.flush();
+        sectionRepository.flush();
+        recalculateSectionNumbers(report);
+        return getReportStructure(reportId, user);
+    }
+
+    @Transactional
+    public ReportResponse updateReportSettings(UUID reportId, User user, UpdateReportSettingsRequest request) {
+        ResearchReport report = loadReportForEdit(reportId, user);
+        boolean refreshReferences = false;
+        if (request.includeUncitedReferences() != null && request.includeUncitedReferences() != report.isIncludeUncitedReferences()) {
+            report.setIncludeUncitedReferences(request.includeUncitedReferences());
+            refreshReferences = true;
+        }
+        if (request.literatureMatrixInclusion() != null) {
+            report.setLiteratureMatrixInclusion(request.literatureMatrixInclusion());
+        }
+        if (request.citationStyle() != null && request.citationStyle() != report.getCitationStyle()) {
+            report.setCitationStyle(request.citationStyle());
+            refreshReferences = true;
+        }
+        reportRepository.save(report);
+        if (refreshReferences) {
+            refreshReportReferencesInternal(report, user);
+        }
+        return ReportResponse.from(report);
+    }
+
+    @Transactional(readOnly = true)
+    public LiteratureMatrixResponse getLiteratureMatrix(UUID projectId, User user) {
+        authorizationService.requireProjectViewer(projectId, user);
+        LiteratureMatrix matrix = literatureMatrixRepository.findFirstByProjectIdOrderByCreatedAtDesc(projectId)
+                .orElseThrow(() -> new ResourceNotFoundException("Literature matrix not found for this project."));
+        return LiteratureMatrixResponse.from(matrix);
+    }
+
+    @Transactional
+    public LiteratureMatrixResponse saveLiteratureMatrix(UUID projectId, User user, SaveLiteratureMatrixRequest request) {
+        ResearchProject project = authorizationService.requireProjectEditor(projectId, user).project();
+        LiteratureMatrix matrix = literatureMatrixRepository.findFirstByProjectIdOrderByCreatedAtDesc(projectId)
+                .orElseGet(() -> {
+                    LiteratureMatrix created = new LiteratureMatrix();
+                    created.setProject(project);
+                    created.setCreatedBy(user);
+                    return created;
+                });
+        if (request.title() != null) matrix.setTitle(request.title());
+        if (request.markdownTable() != null) matrix.setMarkdownTable(request.markdownTable());
+        if (request.matrixDataJson() != null) matrix.setMatrixDataJson(request.matrixDataJson());
+        matrix.setOrigin(ContentOrigin.USER);
+        return LiteratureMatrixResponse.from(literatureMatrixRepository.save(matrix));
+    }
+
+    @Transactional
+    public SectionResponse refreshReportReferences(UUID reportId, User user) {
+        ResearchReport report = loadReportForEdit(reportId, user);
+        return SectionResponse.from(refreshReportReferencesInternal(report, user));
+    }
+
+    public GeneratedDraftResponse generateSection(UUID sectionId, User user, GenerateSectionRequest request) {
+        ResearchReportSection section = sectionRepository.findWithChapterReportProjectById(sectionId).orElseThrow(() -> new ResourceNotFoundException("Report section not found."));
+        UUID projectId = section.getChapter().getReport().getProject().getId();
+        authorizationService.requireProjectEditor(projectId, user);
+
+        if (section.getType() == ReportSectionType.REFERENCES) {
+            ResearchReportSection refreshed = refreshReportReferencesInternal(section.getChapter().getReport(), user);
+            return new GeneratedDraftResponse(
+                    refreshed.getContent(),
+                    List.of(),
+                    "DETERMINISTIC_BIBLIOGRAPHY",
+                    List.of(),
+                    null,
+                    refreshed.getUpdatedAt()
+            );
+        }
+
+        String prompt = buildSectionGenerationPrompt(section, request);
+        String retrievalQuery = buildSectionRetrievalQuery(section, request);
+        java.util.Set<UUID> documentIds = request == null || request.documentIds() == null
+                ? java.util.Set.of()
+                : new java.util.LinkedHashSet<>(request.documentIds());
+        if (documentIds.isEmpty()) {
+            documentIds = citationEnabledDocumentIds(projectId);
+        }
+        SubmitRagQueryRequest ragRequest = new SubmitRagQueryRequest(
+                prompt,
+                documentIds.isEmpty() ? RetrievalScopeType.PROJECT_ALL_DOCUMENTS : RetrievalScopeType.SELECTED_DOCUMENTS,
+                documentIds.isEmpty() ? null : documentIds,
+                request == null || request.evidenceLimit() == null ? 12 : request.evidenceLimit(),
+                retrievalQuery
+        );
+        GroundedAnswerResponse answer = section.getType() == ReportSectionType.LITERATURE_REVIEW
+                ? ragQueryService.submitLiteratureReviewForProject(
+                        projectId,
+                        user,
+                        ragRequest,
+                        "Generate " + section.getHeading()
+                )
+                : ragQueryService.submitForProject(
+                        projectId,
+                        user,
+                        ragRequest,
+                        "Generate " + section.getHeading()
+                );
+        return persistGeneratedSection(sectionId, answer, user);
     }
 
     @Transactional(readOnly = true)
@@ -803,12 +1625,12 @@ public class AnalysisWorkflowService {
 
     private void createDefaultChapters(ResearchReport report, User user) {
         Object[][] chapters = {
-                {ReportChapterType.PRELIMINARY, "Preliminary Pages", null},
+                {ReportChapterType.PRELIMINARY, "Abstract", null},
                 {ReportChapterType.INTRODUCTION, "Chapter One: Introduction", 1},
                 {ReportChapterType.LITERATURE_REVIEW, "Chapter Two: Literature Review", 2},
                 {ReportChapterType.METHODOLOGY, "Chapter Three: Methodology", 3},
-                {ReportChapterType.RESULTS, "Chapter Four: Results / Findings", 4},
-                {ReportChapterType.DISCUSSION, "Chapter Five: Discussion, Conclusions and Recommendations", 5},
+                {ReportChapterType.RESULTS, "Chapter Four: Results and Discussion", 4},
+                {ReportChapterType.CONCLUSION_RECOMMENDATIONS, "Chapter Five: Conclusion and Recommendations", 5},
                 {ReportChapterType.REFERENCES, "References", null},
                 {ReportChapterType.APPENDICES, "Appendices", null}
         };
@@ -820,6 +1642,8 @@ public class AnalysisWorkflowService {
             chapter.setTitle((String) spec[1]);
             chapter.setChapterNumber((Integer) spec[2]);
             chapter.setDisplayOrder(order++);
+            chapter.setRequired(true);
+            chapter.setSystemDefined(true);
             ResearchReportChapter saved = chapterRepository.save(chapter);
             createSeedSection(saved, user);
         }
@@ -831,15 +1655,344 @@ public class AnalysisWorkflowService {
         section.setDisplayOrder(1);
         section.setCreatedBy(user);
         section.setOrigin(ContentOrigin.USER);
+        section.setRequired(true);
+        section.setSystemDefined(true);
+        section.setAiEnabled(chapter.getType() != ReportChapterType.REFERENCES);
         switch (chapter.getType()) {
+            case PRELIMINARY -> { section.setType(ReportSectionType.ABSTRACT); section.setHeading("Abstract"); section.setSourceArtifactType("Abstract"); }
             case INTRODUCTION -> { section.setType(ReportSectionType.PROBLEM_STATEMENT); section.setHeading("Problem Statement"); section.setSourceArtifactType("ResearchProblem"); }
             case LITERATURE_REVIEW -> { section.setType(ReportSectionType.LITERATURE_REVIEW); section.setHeading("Literature Review"); section.setSourceArtifactType("LiteratureReview"); }
             case METHODOLOGY -> { section.setType(ReportSectionType.METHODOLOGY); section.setHeading("Methodology"); section.setSourceArtifactType("Methodology"); }
             case RESULTS -> { section.setType(ReportSectionType.FINDINGS); section.setHeading("Findings"); section.setSourceArtifactType("ResearchFinding"); }
-            case DISCUSSION -> { section.setType(ReportSectionType.DISCUSSION); section.setHeading("Discussion, Conclusions and Recommendations"); section.setSourceArtifactType("DiscussionOfFinding"); }
+            case DISCUSSION, CONCLUSION_RECOMMENDATIONS -> { section.setType(ReportSectionType.CONCLUSIONS); section.setHeading("Conclusion and Recommendations"); section.setSourceArtifactType("ResearchConclusion"); }
+            case REFERENCES -> { section.setType(ReportSectionType.REFERENCES); section.setHeading("References"); section.setAiEnabled(false); }
             default -> { section.setType(ReportSectionType.CUSTOM); section.setHeading(chapter.getTitle()); }
         }
         sectionRepository.save(section);
+    }
+
+    private String buildSectionGenerationPrompt(ResearchReportSection section, GenerateSectionRequest request) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Write only the body content for the report section titled '")
+                .append(section.getHeading())
+                .append("' for ")
+                .append(section.getChapter().getTitle())
+                .append(". ");
+        prompt.append("The report template owns the section heading, chapter heading, title page, table of contents, references, and appendices. ");
+        prompt.append("Do not repeat the outer section heading. Do not include preliminary pages, title page labels, table of contents, references, or bibliography content. ");
+        if (section.getType() == ReportSectionType.LITERATURE_REVIEW) {
+            prompt.append("Produce a professional academic literature review with thematic synthesis, methodological comparison, agreements, disagreements, limitations, and research gaps. ");
+        } else {
+            prompt.append("Use a professional academic report style and cite every source-grounded claim. ");
+        }
+        prompt.append("Use Markdown only when structure is needed for subsection headings, lists, or tables; do not use Markdown for the known outer section heading. ");
+        prompt.append("Use only retrieved evidence and cite supplied evidence markers. Do not fabricate authors, years, journals, DOI, page numbers, or findings.");
+        if (request != null && request.instructions() != null && !request.instructions().isBlank()) {
+            prompt.append("\n\nCustom instructions:\n").append(request.instructions().trim());
+        }
+        return prompt.toString();
+    }
+
+    private String buildSectionRetrievalQuery(ResearchReportSection section, GenerateSectionRequest request) {
+        StringBuilder query = new StringBuilder();
+        query.append(section.getHeading()).append(" ");
+        if (section.getType() == ReportSectionType.LITERATURE_REVIEW) {
+            query.append("research objective methodology findings limitations theory research gaps thematic literature review");
+        } else {
+            query.append(section.getChapter().getTitle()).append(" academic report evidence");
+        }
+        if (request != null && request.instructions() != null && !request.instructions().isBlank()) {
+            query.append(" ").append(request.instructions().trim());
+        }
+        return query.toString();
+    }
+
+    private GeneratedDraftResponse persistGeneratedSection(UUID sectionId, GroundedAnswerResponse answer, User user) {
+        return transactionTemplate.execute(status -> {
+            ResearchReportSection managedSection = sectionRepository.findByIdForUpdate(sectionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Report section not found."));
+            String normalizedMarkdown = markdownRenderer.normalizeSectionMarkdown(managedSection.getHeading(), answer.answer());
+            managedSection.setContent(normalizedMarkdown);
+            managedSection.setContentJson(richTextService.markdownToDocumentJson(normalizedMarkdown));
+            managedSection.setPlainText(richTextService.plainTextFromDocumentJson(managedSection.getContentJson()));
+            managedSection.setStatus(managedSection.getPlainText() == null || managedSection.getPlainText().isBlank() ? ReportSectionStatus.NOT_STARTED : ReportSectionStatus.DRAFT);
+            managedSection.setOrigin(ContentOrigin.AI_GENERATED);
+            managedSection.setUpdatedBy(user);
+            managedSection.setSourceOutOfDate(false);
+            managedSection.setRevisionNumber(managedSection.getRevisionNumber() + 1);
+            sectionRepository.save(managedSection);
+            persistSectionCitations(managedSection, answer, user);
+            auditService.record(user.getId(), SecurityAuditEventType.REPORT_SECTION_UPDATED);
+            return new GeneratedDraftResponse(
+                    managedSection.getContent(),
+                    answer.citations().stream().map(com.researchassistant.rag.dto.response.CitationResponse::documentId).distinct().toList(),
+                    "SOURCE_GROUNDED_RAG",
+                    answer.citations(),
+                    answer.retrievalSummary(),
+                    managedSection.getUpdatedAt()
+            );
+        });
+    }
+
+    private void persistSectionCitations(ResearchReportSection section, GroundedAnswerResponse answer, User user) {
+        citationRepository.deleteAllBySectionId(section.getId());
+        citationRepository.flush();
+        List<RagQueryEvidence> evidence = ragEvidenceRepository.findWithTraceByQueryIdOrderByEvidenceOrdinalAsc(answer.queryId());
+        List<ResearchReportCitation> citations = new ArrayList<>();
+        int ordinal = 1;
+        for (com.researchassistant.rag.dto.response.CitationResponse renderedCitation : answer.citations()) {
+            RagQueryEvidence matched = evidence.stream()
+                    .filter(item -> item.getDocumentId().equals(renderedCitation.documentId()))
+                    .filter(item -> item.getDocumentVersionId().equals(renderedCitation.documentVersionId()))
+                    .filter(item -> item.getPageNumber() == renderedCitation.pageNumber())
+                    .filter(item -> item.getChunkNumber() == renderedCitation.chunkNumber())
+                    .findFirst()
+                    .orElse(null);
+            if (matched == null) {
+                continue;
+            }
+            var chunk = matched.getChunk();
+            var version = chunk.getDocumentVersion();
+            var document = version.getDocument();
+            ProjectReference projectReference = referenceRegistryService.ensureForDocument(document, version, user);
+            ResearchReportCitation citation = new ResearchReportCitation();
+            citation.setSection(section);
+            citation.setDocument(document);
+            citation.setDocumentVersion(version);
+            citation.setPage(chunk.getPage());
+            citation.setChunk(chunk);
+            citation.setDocumentCode(matched.getDocumentCode());
+            citation.setCitationOrdinal(ordinal++);
+            citation.setSupportingTextSnapshot(matched.getTextSnapshot());
+            citation.setReference(projectReference.getReference());
+            citation.setProjectReference(projectReference);
+            citations.add(citation);
+        }
+        citationRepository.saveAll(citations);
+        refreshReportReferencesInternal(section.getChapter().getReport(), user);
+    }
+
+    private void cleanLiteratureReviewAndExtractMatrix(ResearchReport report, User user) {
+        List<ResearchReportSection> sections = sectionRepository.findAllByChapterReportId(report.getId());
+        for (ResearchReportSection section : sections) {
+            if (section.getType() == ReportSectionType.LITERATURE_REVIEW && section.getContent() != null) {
+                String content = section.getContent();
+                if (content.contains("Source-level evidence assessment") || (content.contains("| Source") && content.contains("| Relevance"))) {
+                    int tableStart = content.indexOf("### Source-level evidence assessment");
+                    if (tableStart == -1) {
+                        tableStart = content.indexOf("| Source");
+                    }
+                    if (tableStart == -1) {
+                        continue;
+                    }
+
+                    int proseStart = -1;
+                    int nextHeading = content.indexOf("\n### ", tableStart + 35);
+                    if (nextHeading != -1) {
+                        proseStart = nextHeading + 1;
+                    } else {
+                        nextHeading = content.indexOf("\n## ", tableStart + 35);
+                        if (nextHeading != -1) {
+                            proseStart = nextHeading + 1;
+                        }
+                    }
+
+                    String tablePart = proseStart != -1 ? content.substring(tableStart, proseStart).trim() : content.substring(tableStart).trim();
+                    String prosePart = proseStart != -1 ? (content.substring(0, tableStart) + "\n\n" + content.substring(proseStart)).trim() : "";
+
+                    ResearchProject project = report.getProject();
+                    Optional<LiteratureMatrix> existingOpt = literatureMatrixRepository.findFirstByProjectIdOrderByCreatedAtDesc(project.getId());
+                    if (existingOpt.isEmpty() || existingOpt.get().getMarkdownTable() == null || existingOpt.get().getMarkdownTable().isBlank()) {
+                        LiteratureMatrix matrix = existingOpt.orElseGet(LiteratureMatrix::new);
+                        matrix.setProject(project);
+                        matrix.setTitle("Source-Level Evidence Matrix");
+                        matrix.setOrigin(ContentOrigin.USER);
+                        matrix.setCreatedBy(user != null ? user : report.getCreatedBy());
+                        matrix.setMarkdownTable(tablePart);
+                        literatureMatrixRepository.save(matrix);
+                    }
+
+                    if (!prosePart.isBlank()) {
+                        section.setContent(prosePart);
+                        section.setContentJson(richTextService.markdownToDocumentJson(prosePart));
+                        section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
+                        sectionRepository.save(section);
+                    }
+                }
+            }
+        }
+    }
+
+    private void ensureReferencesSection(ResearchReport report, User user) {
+        List<ResearchReportChapter> chapters = chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId());
+        ResearchReportChapter refChapter = chapters.stream()
+                .filter(ch -> ch.getType() == ReportChapterType.REFERENCES)
+                .findFirst()
+                .orElseGet(() -> {
+                    ResearchReportChapter ch = new ResearchReportChapter();
+                    ch.setReport(report);
+                    ch.setType(ReportChapterType.REFERENCES);
+                    ch.setTitle("References");
+                    ch.setRequired(true);
+                    ch.setSystemDefined(true);
+                    ch.setDisplayOrder(chOrderValue(chapters));
+                    return chapterRepository.save(ch);
+                });
+
+        List<ResearchReportSection> sections = sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(refChapter.getId());
+        ResearchReportSection refSection = sections.stream()
+                .filter(s -> s.getType() == ReportSectionType.REFERENCES)
+                .findFirst()
+                .orElseGet(() -> {
+                    ResearchReportSection s = new ResearchReportSection();
+                    s.setChapter(refChapter);
+                    s.setType(ReportSectionType.REFERENCES);
+                    s.setHeading("References");
+                    s.setRequired(true);
+                    s.setSystemDefined(true);
+                    s.setAiEnabled(false);
+                    s.setDisplayOrder(1);
+                    s.setOrigin(ContentOrigin.USER);
+                    s.setCreatedBy(user);
+                    return sectionRepository.save(s);
+                });
+
+        if (refSection.getType() != ReportSectionType.REFERENCES) {
+            refSection.setType(ReportSectionType.REFERENCES);
+            refSection.setAiEnabled(false);
+            sectionRepository.save(refSection);
+        }
+
+        if (refSection.getContent() == null || refSection.getContent().isBlank() || refSection.getContent().contains("The supplied evidence presents") || refSection.getContent().contains("### Cross-study synthesis")) {
+            refreshReportReferencesInternal(report, user);
+        }
+    }
+
+    private void recalculateSectionNumbers(ResearchReport report) {
+        List<ResearchReportChapter> chapters = chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId());
+        for (ResearchReportChapter chapter : chapters) {
+            if (chapter.getChapterNumber() == null) {
+                List<ResearchReportSection> allSections = sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapter.getId());
+                for (ResearchReportSection s : allSections) {
+                    if (s.getSectionNumber() != null) {
+                        s.setSectionNumber(null);
+                        sectionRepository.save(s);
+                    }
+                }
+                continue;
+            }
+            int chNum = chapter.getChapterNumber();
+            List<ResearchReportSection> rootSections = sectionRepository.findAllByChapterIdAndParentSectionIsNullOrderByDisplayOrderAsc(chapter.getId());
+            for (int i = 0; i < rootSections.size(); i++) {
+                ResearchReportSection root = rootSections.get(i);
+                String rootNum = chNum + "." + (i + 1);
+                root.setSectionNumber(rootNum);
+                sectionRepository.save(root);
+
+                List<ResearchReportSection> subSections = sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(root.getId());
+                for (int j = 0; j < subSections.size(); j++) {
+                    ResearchReportSection sub = subSections.get(j);
+                    String subNum = rootNum + "." + (j + 1);
+                    sub.setSectionNumber(subNum);
+                    sectionRepository.save(sub);
+
+                    List<ResearchReportSection> subSubs = sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(sub.getId());
+                    for (int k = 0; k < subSubs.size(); k++) {
+                        ResearchReportSection subSub = subSubs.get(k);
+                        String subSubNum = subNum + "." + (k + 1);
+                        subSub.setSectionNumber(subSubNum);
+                        sectionRepository.save(subSub);
+                    }
+                }
+            }
+        }
+    }
+
+    private ResearchReportSection refreshReportReferencesInternal(ResearchReport report, User user) {
+        List<ResearchReportChapter> chapters = chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId());
+        ResearchReportChapter refChapter = chapters.stream()
+                .filter(ch -> ch.getType() == ReportChapterType.REFERENCES)
+                .findFirst()
+                .orElseGet(() -> {
+                    ResearchReportChapter created = new ResearchReportChapter();
+                    created.setReport(report);
+                    created.setType(ReportChapterType.REFERENCES);
+                    created.setTitle("References");
+                    created.setRequired(true);
+                    created.setSystemDefined(true);
+                    created.setDisplayOrder(chOrderValue(chapters));
+                    return chapterRepository.save(created);
+                });
+
+        ResearchReportSection refSection = sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(refChapter.getId()).stream()
+                .filter(sec -> sec.getType() == ReportSectionType.REFERENCES)
+                .findFirst()
+                .orElseGet(() -> {
+                    ResearchReportSection created = new ResearchReportSection();
+                    created.setChapter(refChapter);
+                    created.setType(ReportSectionType.REFERENCES);
+                    created.setHeading("References");
+                    created.setRequired(true);
+                    created.setSystemDefined(true);
+                    created.setAiEnabled(false);
+                    created.setDisplayOrder(1);
+                    created.setCreatedBy(user);
+                    created.setOrigin(ContentOrigin.USER);
+                    return sectionRepository.save(created);
+                });
+
+        Map<UUID, ReferenceEntry> referencesMap = new LinkedHashMap<>();
+        List<ResearchReportCitation> citations = citationRepository.findAllBySectionChapterReportIdOrderByCitationOrdinalAsc(report.getId());
+        for (ResearchReportCitation citation : citations) {
+            ReferenceEntry reference = citation.getReference();
+            if (reference == null && citation.getProjectReference() != null) {
+                reference = citation.getProjectReference().getReference();
+            }
+            if (reference != null) {
+                referencesMap.putIfAbsent(reference.getId(), reference);
+            }
+        }
+
+        if (report.isIncludeUncitedReferences()) {
+            for (ProjectReference pr : projectReferenceRepository.findAllByProjectId(report.getProject().getId())) {
+                if (pr.getReference() != null) {
+                    referencesMap.putIfAbsent(pr.getReference().getId(), pr.getReference());
+                }
+            }
+        }
+
+        List<ReferenceEntry> references = new ArrayList<>(referencesMap.values());
+        CitationStyle style = report.getCitationStyle() != null ? report.getCitationStyle() : CitationStyle.APA_7;
+
+        if (style != CitationStyle.IEEE && style != CitationStyle.VANCOUVER && style != CitationStyle.NUMERIC_APA) {
+            references.sort((r1, r2) -> {
+                String k1 = (r1.getTitle() == null ? "" : r1.getTitle()).toLowerCase();
+                String k2 = (r2.getTitle() == null ? "" : r2.getTitle()).toLowerCase();
+                return k1.compareTo(k2);
+            });
+        }
+
+        StringBuilder markdownBuilder = new StringBuilder();
+        int num = 1;
+        for (ReferenceEntry ref : references) {
+            var formatted = citationFormattingService.format(ref, style, CitationContext.REFERENCE_LIST, num++);
+            String entryText = formatted.text();
+            if (entryText != null && !entryText.isBlank()) {
+                markdownBuilder.append(entryText.trim()).append("\n\n");
+            }
+        }
+
+        String formattedMarkdown = markdownBuilder.toString().trim();
+        refSection.setType(ReportSectionType.REFERENCES);
+        refSection.setContent(formattedMarkdown);
+        refSection.setContentJson(richTextService.markdownToDocumentJson(formattedMarkdown));
+        refSection.setPlainText(richTextService.plainTextFromDocumentJson(refSection.getContentJson()));
+        refSection.setStatus(references.isEmpty() ? ReportSectionStatus.NOT_STARTED : ReportSectionStatus.ACCEPTED);
+        refSection.setOrigin(ContentOrigin.USER);
+        refSection.setAiEnabled(false);
+        refSection.setUpdatedBy(user);
+        refSection.setRevisionNumber(refSection.getRevisionNumber() + 1);
+        return sectionRepository.save(refSection);
     }
 
     private ResearchFinding loadFinding(UUID id) { return findingRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Finding not found.")); }
@@ -898,4 +2051,17 @@ public class AnalysisWorkflowService {
     private void afterResearchOutputChanged(UUID projectId, UUID userId, SecurityAuditEventType eventType) { cacheInvalidationService.evictProjectMetadata(projectId); auditService.record(userId, eventType); }
     private Integer resolveSourceRevision(String type, UUID id) { if (type == null || id == null) return null; return switch (type) { case "ResearchFinding" -> findingRepository.findById(id).map(ResearchFinding::getRevisionNumber).orElse(null); case "DiscussionOfFinding" -> discussionRepository.findById(id).map(FindingDiscussion::getRevisionNumber).orElse(null); case "ResearchConclusion" -> conclusionRepository.findById(id).map(ResearchConclusion::getRevisionNumber).orElse(null); case "ResearchRecommendation" -> recommendationRepository.findById(id).map(ResearchRecommendation::getRevisionNumber).orElse(null); default -> null; }; }
     private void markSectionsStale(String artifactType, UUID artifactId) { sectionRepository.findAll().stream().filter(s -> artifactType.equals(s.getSourceArtifactType()) && artifactId.equals(s.getSourceArtifactId()) && s.isManuallyEdited()).forEach(s -> s.setSourceOutOfDate(true)); }
+    private Map<UUID, ReferenceEntry> citedReferencesForValidation(UUID reportId) {
+        Map<UUID, ReferenceEntry> references = new LinkedHashMap<>();
+        for (ResearchReportCitation citation : citationRepository.findAllBySectionChapterReportIdOrderByCitationOrdinalAsc(reportId)) {
+            ReferenceEntry reference = citation.getReference();
+            if (reference == null && citation.getProjectReference() != null) {
+                reference = citation.getProjectReference().getReference();
+            }
+            if (reference != null) {
+                references.putIfAbsent(reference.getId(), reference);
+            }
+        }
+        return references;
+    }
 }

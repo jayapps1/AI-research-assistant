@@ -13,6 +13,7 @@ import com.researchassistant.workspace.repository.WorkspaceRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -129,5 +130,54 @@ class AiCreditServiceTest {
 
         assertThat(wallet.getPromotionalBalance()).isEqualByComparingTo(new BigDecimal("70.00"));
         verify(ledgerRepository).save(any(AiCreditLedgerEntry.class));
+    }
+
+    @Test
+    void reconcileReservationCapsWalletConsumptionWhenActualExceedsAvailableCredits() {
+        wallet.setPurchasedBalance(new BigDecimal("1.0000"));
+        wallet.setPromotionalBalance(new BigDecimal("0.5000"));
+        wallet.setReservedBalance(new BigDecimal("1.5000"));
+        when(walletRepository.findByWorkspaceIdForUpdate(workspaceId)).thenReturn(Optional.of(wallet));
+        when(walletRepository.save(any(AiCreditWallet.class))).thenAnswer(i -> i.getArgument(0));
+        givenNoIncludedAllowance();
+
+        UUID aiRequestId = UUID.randomUUID();
+        AiCreditReservation reservation = new AiCreditReservation(
+                workspaceId,
+                new BigDecimal("1.5000"),
+                BigDecimal.ZERO,
+                new BigDecimal("1.5000")
+        );
+
+        creditService.reconcileReservation(reservation, new BigDecimal("2.0646"), aiRequestId, null);
+
+        assertThat(wallet.getReservedBalance()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(wallet.getPromotionalBalance()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(wallet.getPurchasedBalance()).isEqualByComparingTo(BigDecimal.ZERO);
+
+        ArgumentCaptor<AiCreditLedgerEntry> ledgerCaptor = ArgumentCaptor.forClass(AiCreditLedgerEntry.class);
+        verify(ledgerRepository, times(2)).save(ledgerCaptor.capture());
+        assertThat(ledgerCaptor.getAllValues()).anySatisfy(entry -> {
+            assertThat(entry.getBucket()).isEqualTo(AiCreditBucket.PROMOTIONAL);
+            assertThat(entry.getCreditAmount()).isEqualByComparingTo(new BigDecimal("0.5000"));
+            assertThat(entry.getBalanceAfter()).isEqualByComparingTo(BigDecimal.ZERO);
+        });
+        assertThat(ledgerCaptor.getAllValues()).anySatisfy(entry -> {
+            assertThat(entry.getBucket()).isEqualTo(AiCreditBucket.PURCHASED);
+            assertThat(entry.getCreditAmount()).isEqualByComparingTo(new BigDecimal("1.0000"));
+            assertThat(entry.getBalanceAfter()).isEqualByComparingTo(BigDecimal.ZERO);
+        });
+    }
+
+    private void givenNoIncludedAllowance() {
+        com.researchassistant.subscription.WorkspaceSubscription sub = new com.researchassistant.subscription.WorkspaceSubscription();
+        sub.setBillingInterval(com.researchassistant.subscription.BillingInterval.MONTHLY);
+        sub.setCurrentPeriodStart(java.time.OffsetDateTime.now().minusDays(5));
+        sub.setCurrentPeriodEnd(java.time.OffsetDateTime.now().plusDays(25));
+        when(entitlementService.effectiveSubscription(workspaceId)).thenReturn(sub);
+        when(entitlementService.getEntitlement(eq(workspaceId), eq(com.researchassistant.subscription.PlanFeature.AI_GENERATION_CREDITS_MONTHLY)))
+                .thenReturn(new com.researchassistant.subscription.Entitlement(com.researchassistant.subscription.PlanFeature.AI_GENERATION_CREDITS_MONTHLY, false, null, null));
+        when(entitlementService.getEntitlement(eq(workspaceId), eq(com.researchassistant.subscription.PlanFeature.AI_GENERATION)))
+                .thenReturn(new com.researchassistant.subscription.Entitlement(com.researchassistant.subscription.PlanFeature.AI_GENERATION, false, null, null));
     }
 }

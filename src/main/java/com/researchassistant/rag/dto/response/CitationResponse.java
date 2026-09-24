@@ -11,6 +11,9 @@ public record CitationResponse(
         int versionNumber,
         int pageNumber,
         int chunkNumber,
-        String supportingExcerpt
+        String supportingExcerpt,
+        String formattedCitation,
+        boolean metadataComplete,
+        String metadataWarning
 ) {
 }

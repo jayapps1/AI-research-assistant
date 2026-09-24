@@ -69,6 +69,42 @@ public class RagQuery {
     @Column(name = "retrieval_duration_ms")
     private Long retrievalDurationMs;
 
+    @Column(name = "selected_document_count")
+    private Integer selectedDocumentCount;
+
+    @Column(name = "analyzed_source_count")
+    private Integer analyzedSourceCount;
+
+    @Column(name = "sources_with_relevant_evidence_count")
+    private Integer sourcesWithRelevantEvidenceCount;
+
+    @Column(name = "candidate_chunk_count")
+    private Integer candidateChunkCount;
+
+    @Column(name = "selected_evidence_count")
+    private Integer selectedEvidenceCount;
+
+    @Column(name = "estimated_input_tokens")
+    private Integer estimatedInputTokens;
+
+    @Column(name = "actual_input_tokens")
+    private Integer actualInputTokens;
+
+    @Column(name = "actual_output_tokens")
+    private Integer actualOutputTokens;
+
+    @Column(name = "context_budget_tokens")
+    private Integer contextBudgetTokens;
+
+    @Column(name = "truncated_evidence_count")
+    private Integer truncatedEvidenceCount;
+
+    @Column(name = "generation_strategy", length = 60)
+    private String generationStrategy;
+
+    @Column(name = "configured_model", length = 120)
+    private String configuredModel;
+
     @Column(name = "failure_code", length = 100)
     private String failureCode;
 

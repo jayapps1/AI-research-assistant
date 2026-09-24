@@ -32,7 +32,14 @@ public final class AnalysisDtos {
                                        String resultValueSnapshot, Integer displayOrder, ContentOrigin origin) {}
     public record GenerateFindingRequest(@NotNull UUID objectiveId, UUID questionId, UUID hypothesisId,
                                          @NotEmpty List<UUID> analysisResultIds, String instructions) {}
-    public record GeneratedDraftResponse(String draftText, List<UUID> sourceIds, String safetyPolicy) {}
+    public record GeneratedDraftResponse(
+            String draftText,
+            List<UUID> sourceIds,
+            String safetyPolicy,
+            List<com.researchassistant.rag.dto.response.CitationResponse> citations,
+            com.researchassistant.rag.dto.response.RetrievalSummaryResponse retrievalSummary,
+            OffsetDateTime savedAt
+    ) {}
 
     public record CreateDiscussionRequest(String title, @NotBlank String discussionText, String relationToLiterature,
                                           String implications, String limitations, @Positive Integer displayOrder,
@@ -67,13 +74,48 @@ public final class AnalysisDtos {
                                       String supervisorName, String degreeProgram, Integer submissionYear,
                                       CitationStyle citationStyle) {}
     public record CreateChapterRequest(@NotNull ReportChapterType type, @NotBlank String title,
-                                       Integer chapterNumber, @Positive Integer displayOrder) {}
-    public record UpdateChapterRequest(ReportChapterType type, String title, Integer chapterNumber, Integer displayOrder) {}
+                                       Integer chapterNumber, @Positive Integer displayOrder,
+                                       Boolean required, Boolean systemDefined) {}
+    public record UpdateChapterRequest(ReportChapterType type, String title, Integer chapterNumber,
+                                       Integer displayOrder, Boolean required, Boolean systemDefined) {}
     public record CreateSectionRequest(@NotNull ReportSectionType type, @NotBlank String heading, String content,
+                                       String contentJson, String plainText, ReportSectionStatus status,
                                        @Positive Integer displayOrder, ContentOrigin origin,
-                                       String sourceArtifactType, UUID sourceArtifactId) {}
-    public record UpdateSectionRequest(ReportSectionType type, String heading, String content, Integer displayOrder,
-                                       ContentOrigin origin, Boolean sourceOutOfDate) {}
+                                       String sourceArtifactType, UUID sourceArtifactId,
+                                       UUID parentSectionId, String sectionNumber,
+                                       Boolean required, Boolean systemDefined, Boolean aiEnabled) {}
+    public record UpdateSectionRequest(ReportSectionType type, String heading, String content, String contentJson,
+                                       String plainText, ReportSectionStatus status, Integer displayOrder,
+                                       ContentOrigin origin, Boolean sourceOutOfDate,
+                                       UUID parentSectionId, String sectionNumber,
+                                       Boolean required, Boolean systemDefined, Boolean aiEnabled) {}
+    public record ReorderItem(UUID id, int displayOrder, UUID parentId) {}
+    public record ReorderStructureRequest(List<ReorderItem> chapters, List<ReorderItem> sections) {}
+    public record UpdateReportSettingsRequest(Boolean includeUncitedReferences, String literatureMatrixInclusion,
+                                             CitationStyle citationStyle) {}
+    public record SaveLiteratureMatrixRequest(String title, String markdownTable, String matrixDataJson) {}
+    public record LiteratureMatrixResponse(UUID id, UUID projectId, String title, String markdownTable,
+                                          String matrixDataJson, OffsetDateTime updatedAt) {
+        public static LiteratureMatrixResponse from(com.researchassistant.literature.entity.LiteratureMatrix matrix) {
+            return new LiteratureMatrixResponse(matrix.getId(), matrix.getProject().getId(), matrix.getTitle(),
+                    matrix.getMarkdownTable(), matrix.getMatrixDataJson(), matrix.getUpdatedAt() != null ? matrix.getUpdatedAt() : matrix.getCreatedAt());
+        }
+    }
+    public record SectionStructureResponse(UUID id, UUID chapterId, UUID parentSectionId, String sectionNumber,
+                                           ReportSectionType type, String heading, ReportSectionStatus status,
+                                           int displayOrder, boolean required, boolean systemDefined, boolean aiEnabled,
+                                           boolean manuallyEdited, int revisionNumber,
+                                           List<SectionStructureResponse> subsections) {}
+    public record ChapterStructureResponse(UUID id, UUID reportId, ReportChapterType type, String title,
+                                           Integer chapterNumber, int displayOrder, boolean required, boolean systemDefined,
+                                           List<SectionStructureResponse> sections) {}
+    public record ReportStructureResponse(UUID reportId, UUID projectId, String title, ResearchReportType type,
+                                          CitationStyle citationStyle, boolean includeUncitedReferences,
+                                          String literatureMatrixInclusion,
+                                          List<ChapterStructureResponse> chapters) {}
+    public record GenerateSectionRequest(List<UUID> documentIds, String instructions, Integer evidenceLimit) {}
+    public record PrepareFinalDocumentRequest(Boolean refresh) {}
+    public record UpdateFinalDocumentRequest(String contentJson, String plainText, ReportDocumentVersionStatus status) {}
 
     public record AnalysisRunResponse(UUID id, UUID projectId, UUID objectiveId, UUID questionId, UUID hypothesisId,
                                       UUID datasetId, AnalysisRun.QualitativeSourceType qualitativeSourceType,
@@ -147,36 +189,55 @@ public final class AnalysisDtos {
                     recommendation.getDisplayOrder(), recommendation.getRevisionNumber());
         }
     }
-    public record ReportResponse(UUID id, UUID projectId, String title, ResearchReportType type, ResearchReportStatus status,
-                                 CitationStyle citationStyle, int revisionNumber, OffsetDateTime updatedAt) {
+    public record ReportResponse(UUID id, UUID projectId, UUID templateId, String templateName, String title,
+                                 ResearchReportType type, ResearchReportStatus status,
+                                 CitationStyle citationStyle, boolean includeUncitedReferences,
+                                 String literatureMatrixInclusion, int revisionNumber, OffsetDateTime updatedAt) {
         public static ReportResponse from(ResearchReport report) {
-            return new ReportResponse(report.getId(), report.getProject().getId(), report.getTitle(), report.getType(),
-                    report.getStatus(), report.getCitationStyle(), report.getRevisionNumber(), report.getUpdatedAt());
+            return new ReportResponse(report.getId(), report.getProject().getId(),
+                    report.getTemplate() == null ? null : report.getTemplate().getId(),
+                    report.getTemplate() == null ? null : report.getTemplate().getName(),
+                    report.getTitle(), report.getType(),
+                    report.getStatus(), report.getCitationStyle(),
+                    report.isIncludeUncitedReferences(),
+                    report.getLiteratureMatrixInclusion(),
+                    report.getRevisionNumber(), report.getUpdatedAt());
         }
     }
-    public record ChapterResponse(UUID id, UUID reportId, ReportChapterType type, String title, Integer chapterNumber, int displayOrder) {
+    public record ChapterResponse(UUID id, UUID reportId, ReportChapterType type, String title, Integer chapterNumber,
+                                  int displayOrder, boolean required, boolean systemDefined) {
         public static ChapterResponse from(ResearchReportChapter chapter) {
             return new ChapterResponse(chapter.getId(), chapter.getReport().getId(), chapter.getType(), chapter.getTitle(),
-                    chapter.getChapterNumber(), chapter.getDisplayOrder());
+                    chapter.getChapterNumber(), chapter.getDisplayOrder(), chapter.isRequired(), chapter.isSystemDefined());
         }
     }
-    public record SectionResponse(UUID id, UUID chapterId, ReportSectionType type, String heading, String content,
+    public record SectionResponse(UUID id, UUID chapterId, UUID parentSectionId, String sectionNumber,
+                                  ReportSectionType type, String heading, String content,
+                                  String contentJson, String plainText, ReportSectionStatus status,
                                   int displayOrder, ContentOrigin origin, String sourceArtifactType, UUID sourceArtifactId,
                                   Integer sourceRevisionNumber, boolean sourceOutOfDate, boolean manuallyEdited,
+                                  boolean required, boolean systemDefined, boolean aiEnabled,
                                   int revisionNumber) {
         public static SectionResponse from(ResearchReportSection section) {
-            return new SectionResponse(section.getId(), section.getChapter().getId(), section.getType(), section.getHeading(),
-                    section.getContent(), section.getDisplayOrder(), section.getOrigin(), section.getSourceArtifactType(),
+            return new SectionResponse(section.getId(), section.getChapter().getId(),
+                    section.getParentSection() != null ? section.getParentSection().getId() : null,
+                    section.getSectionNumber(),
+                    section.getType(), section.getHeading(),
+                    section.getContent(), section.getContentJson(), section.getPlainText(), section.getStatus(),
+                    section.getDisplayOrder(), section.getOrigin(), section.getSourceArtifactType(),
                     section.getSourceArtifactId(), section.getSourceRevisionNumber(), section.isSourceOutOfDate(),
-                    section.isManuallyEdited(), section.getRevisionNumber());
+                    section.isManuallyEdited(), section.isRequired(), section.isSystemDefined(), section.isAiEnabled(),
+                    section.getRevisionNumber());
         }
     }
     public record CitationResponse(UUID id, UUID sectionId, UUID documentId, UUID documentVersionId, UUID pageId, UUID chunkId,
-                                   String documentCode, int citationOrdinal, String supportingTextSnapshot) {
+                                   String documentCode, int citationOrdinal, String supportingTextSnapshot,
+                                   UUID referenceId, UUID projectReferenceId) {
         public static CitationResponse from(ResearchReportCitation citation) {
             return new CitationResponse(citation.getId(), citation.getSection().getId(), citation.getDocument().getId(),
                     citation.getDocumentVersion().getId(), AnalysisDtos.id(citation.getPage()), AnalysisDtos.id(citation.getChunk()), citation.getDocumentCode(),
-                    citation.getCitationOrdinal(), citation.getSupportingTextSnapshot());
+                    citation.getCitationOrdinal(), citation.getSupportingTextSnapshot(),
+                    AnalysisDtos.id(citation.getReference()), AnalysisDtos.id(citation.getProjectReference()));
         }
     }
     public record ValidationIssue(String severity, String code, String message, UUID artifactId) {}
@@ -202,6 +263,22 @@ public final class AnalysisDtos {
     public record TableOfContentsSectionItem(String heading, Integer displayOrder, ReportSectionType type) {}
     public record TableOfContentsItem(String title, Integer chapterNumber, Integer displayOrder, List<TableOfContentsSectionItem> sections) {}
     public record TableOfContentsResponse(UUID reportId, String reportTitle, List<TableOfContentsItem> chapters, String formattedMarkdown) {}
+    public record FinalDocumentResponse(UUID id, UUID reportId, UUID projectId, int versionNumber, String title,
+                                        ReportDocumentVersionStatus status, CitationStyle citationStyle,
+                                        String contentJson, String plainText, int sourceReportRevisionNumber,
+                                        int currentReportRevisionNumber, boolean stale,
+                                        String sectionRevisionSnapshotJson, String referencesSnapshotJson,
+                                        String templateSnapshotJson, OffsetDateTime updatedAt) {
+        public static FinalDocumentResponse from(ReportDocumentVersion version) {
+            ResearchReport report = version.getReport();
+            return new FinalDocumentResponse(version.getId(), report.getId(), version.getProject().getId(),
+                    version.getVersionNumber(), version.getTitle(), version.getStatus(), version.getCitationStyle(),
+                    version.getContentJson(), version.getPlainText(), version.getSourceReportRevisionNumber(),
+                    report.getRevisionNumber(), version.getSourceReportRevisionNumber() != report.getRevisionNumber(),
+                    version.getSectionRevisionSnapshotJson(), version.getReferencesSnapshotJson(),
+                    version.getTemplateSnapshotJson(), version.getUpdatedAt());
+        }
+    }
 
     private static UUID id(Object entity) {
         if (entity == null) return null;
@@ -212,6 +289,8 @@ public final class AnalysisDtos {
         if (entity instanceof com.researchassistant.document.entity.DocumentPage value) return value.getId();
         if (entity instanceof com.researchassistant.document.entity.DocumentChunk value) return value.getId();
         if (entity instanceof com.researchassistant.rag.entity.RagQueryEvidence value) return value.getId();
+        if (entity instanceof com.researchassistant.reference.entity.ReferenceEntry value) return value.getId();
+        if (entity instanceof com.researchassistant.reference.entity.ProjectReference value) return value.getId();
         throw new IllegalArgumentException("Unsupported entity reference.");
     }
 }

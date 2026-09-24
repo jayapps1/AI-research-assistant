@@ -231,6 +231,24 @@ public class DocumentController {
         return documentService.reprocessCurrentVersion(documentId, user);
     }
 
+    @PostMapping("/documents/{documentId}/reference-metadata/rescan")
+    public DocumentResponse rescanReferenceMetadata(
+            Authentication authentication,
+            @PathVariable UUID documentId
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return documentService.rescanReferenceMetadata(documentId, user);
+    }
+
+    @PostMapping("/projects/{projectId}/documents/reference-metadata/rescan")
+    public List<DocumentResponse> rescanProjectReferenceMetadata(
+            Authentication authentication,
+            @PathVariable UUID projectId
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return documentService.rescanProjectReferenceMetadata(projectId, user);
+    }
+
     private Pageable pageable(int page, int size) {
         int safePage = Math.max(0, page);
         int safeSize = size <= 0

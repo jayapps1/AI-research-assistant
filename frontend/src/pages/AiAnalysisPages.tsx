@@ -20,7 +20,7 @@ export function AiAssistantPage() {
   const { selectedWorkspaceId: workspaceId } = useWorkspace();
   const [conversationId, setConversationId] = useState('');
   const [answer, setAnswer] = useState<RagAnswer | null>(null);
-  const [scopeType, setScopeType] = useState('ALL_PROJECT_DOCUMENTS');
+  const [scopeType, setScopeType] = useState('PROJECT_ALL_DOCUMENTS');
   const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [showBuyCredits, setShowBuyCredits] = useState(false);
@@ -86,7 +86,7 @@ export function AiAssistantPage() {
           <div className="grid cols-2">
             <Field label="Retrieval scope">
               <Select value={scopeType} onChange={(event) => setScopeType(event.target.value)}>
-                <option value="ALL_PROJECT_DOCUMENTS">All project documents</option>
+                <option value="PROJECT_ALL_DOCUMENTS">All project documents</option>
                 <option value="SELECTED_DOCUMENTS">Selected documents</option>
               </Select>
             </Field>
@@ -111,11 +111,19 @@ export function AiAssistantPage() {
             if (message.includes('AI provider is not configured') || message.includes('Grounded answer generation is not enabled') || code === 'CAPABILITY_UNAVAILABLE') {
               return <div className="alert warning">AI provider is not configured.</div>;
             }
-            if (status === 402 || code === 'AI_CREDITS_EXHAUSTED' || message.includes('Insufficient AI credits') || message.includes('AI credits exhausted')) {
+            if (status === 402 || code === 'AI_CREDITS_INSUFFICIENT' || code === 'AI_CREDITS_EXHAUSTED' || message.includes('Insufficient AI credits') || message.includes('AI credits exhausted')) {
+              const details = err?.response?.data?.validationErrors ?? {};
+              const estimated = details.estimatedRequiredCredits;
+              const available = details.availableCredits ?? details.totalAvailable;
               return (
                 <div className="alert warning" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                   <div>
-                    <strong>AI Credits Exhausted:</strong> Your workspace has insufficient AI credits or monthly allowance for this generation. Top up credits or upgrade your plan to continue.
+                    <strong>Not enough AI credits</strong>
+                    <div>
+                      {estimated && available
+                        ? `Estimated requirement: ${estimated} credits. Available: ${available} credits.`
+                        : 'Your workspace has insufficient AI credits or monthly allowance for this generation.'}
+                    </div>
                   </div>
                   <Button type="button" variant="primary" onClick={() => setShowBuyCredits(true)}>
                     Top Up AI Credits
@@ -128,6 +136,9 @@ export function AiAssistantPage() {
             }
             if (code === 'AI_PROVIDER_REQUEST_INVALID') {
               return <div className="alert warning">{aiUserMessage(code, message)}</div>;
+            }
+            if (code === 'CONTEXT_TOO_LARGE') {
+              return <div className="alert warning">This request is too large for the configured AI model. Reduce selected sources or generate a concise review.</div>;
             }
             return <ErrorState title="AI request failed" error={ask.error} />;
           })() : null}

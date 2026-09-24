@@ -17,6 +17,8 @@ import com.researchassistant.usage.UsageLedgerEntryRepository;
 import com.researchassistant.usage.UsageMetricType;
 import com.researchassistant.workspace.entity.Workspace;
 import com.researchassistant.workspace.repository.WorkspaceRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -31,6 +33,7 @@ import java.util.UUID;
 @Transactional
 public class AiCreditService {
 
+    private static final Logger log = LoggerFactory.getLogger(AiCreditService.class);
     private static final BigDecimal SCALE_FACTOR = new BigDecimal("10000");
 
     private final AiCreditWalletRepository walletRepository;
@@ -96,7 +99,7 @@ public class AiCreditService {
 
         if ("DISABLED".equalsIgnoreCase(included.limitMode()) && wallet.totalAvailableBalance().compareTo(BigDecimal.ZERO) <= 0) {
             throw new AiCreditsExhaustedException(workspaceId, BigDecimal.ZERO, wallet.getPromotionalBalance(),
-                    wallet.getPurchasedBalance(), BigDecimal.ZERO, hasActivePacks());
+                    wallet.getPurchasedBalance(), BigDecimal.ZERO, estimatedCredits, hasActivePacks());
         }
 
         BigDecimal reservedFromIncluded = BigDecimal.ZERO;
@@ -116,7 +119,7 @@ public class AiCreditService {
                 if (availableInWallet.compareTo(neededFromWallet) < 0) {
                     BigDecimal totalAvail = incRem.add(availableInWallet.max(BigDecimal.ZERO));
                     throw new AiCreditsExhaustedException(workspaceId, incRem, wallet.getPromotionalBalance(),
-                            wallet.getPurchasedBalance(), totalAvail, hasActivePacks());
+                            wallet.getPurchasedBalance(), totalAvail, estimatedCredits, hasActivePacks());
                 }
 
                 wallet.setReservedBalance(wallet.getReservedBalance().add(neededFromWallet));
@@ -131,13 +134,17 @@ public class AiCreditService {
     public void reconcileReservation(AiCreditReservation reservation, BigDecimal actualCredits, UUID aiRequestId, User user) {
         if (reservation == null) return;
         UUID workspaceId = reservation.workspaceId();
-        BigDecimal actual = actualCredits != null && actualCredits.compareTo(BigDecimal.ZERO) > 0 ? actualCredits : BigDecimal.ZERO;
+        BigDecimal actual = positive(actualCredits);
 
         AiCreditWallet wallet = getOrCreateWalletForUpdate(workspaceId);
 
-        // Release the entire reservation from wallet
-        if (reservation.reservedFromWallet() != null && reservation.reservedFromWallet().compareTo(BigDecimal.ZERO) > 0) {
-            wallet.setReservedBalance(wallet.getReservedBalance().subtract(reservation.reservedFromWallet()).max(BigDecimal.ZERO));
+        if (aiRequestId != null && alreadyReconciled(workspaceId, aiRequestId)) {
+            return;
+        }
+
+        BigDecimal reservedFromWallet = positive(reservation.reservedFromWallet());
+        if (reservedFromWallet.compareTo(BigDecimal.ZERO) > 0) {
+            wallet.setReservedBalance(positive(wallet.getReservedBalance()).subtract(reservedFromWallet).max(BigDecimal.ZERO));
         }
 
         if (actual.compareTo(BigDecimal.ZERO) == 0) {
@@ -145,33 +152,49 @@ public class AiCreditService {
             return;
         }
 
-        // 1. Consume from included allowance first
-        BigDecimal fromIncluded = actual.min(reservation.reservedFromIncluded());
+        BigDecimal fromIncluded = calculateIncludedDebit(workspaceId, actual);
         if (fromIncluded.compareTo(BigDecimal.ZERO) > 0) {
             recordIncludedUsage(workspaceId, fromIncluded, aiRequestId);
         }
 
-        // 2. Consume remainder from wallet: promotional first, then purchased
         BigDecimal remainingToDeduct = actual.subtract(fromIncluded);
         if (remainingToDeduct.compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal fromPromo = remainingToDeduct.min(wallet.getPromotionalBalance());
+            BigDecimal spendableFromWallet = wallet.totalAvailableBalance()
+                    .subtract(positive(wallet.getReservedBalance()))
+                    .max(BigDecimal.ZERO);
+            BigDecimal walletDebit = remainingToDeduct.min(spendableFromWallet);
+
+            BigDecimal fromPromo = walletDebit.min(positive(wallet.getPromotionalBalance()));
             if (fromPromo.compareTo(BigDecimal.ZERO) > 0) {
                 BigDecimal before = wallet.getPromotionalBalance();
                 BigDecimal after = before.subtract(fromPromo);
                 wallet.setPromotionalBalance(after);
                 recordLedgerEntry(wallet.getWorkspace(), AiCreditBucket.PROMOTIONAL, AiCreditLedgerType.CONSUMPTION,
                         fromPromo, before, after, "AI_REQUEST", aiRequestId, aiRequestId, null, null, null,
-                        "CONSUMPTION:PROMO:" + aiRequestId, user);
+                        aiRequestId != null ? "CONSUMPTION:PROMO:" + aiRequestId : null, user);
             }
 
-            BigDecimal fromPurchased = remainingToDeduct.subtract(fromPromo);
+            BigDecimal fromPurchased = walletDebit.subtract(fromPromo).min(positive(wallet.getPurchasedBalance()));
             if (fromPurchased.compareTo(BigDecimal.ZERO) > 0) {
                 BigDecimal before = wallet.getPurchasedBalance();
                 BigDecimal after = before.subtract(fromPurchased);
                 wallet.setPurchasedBalance(after);
                 recordLedgerEntry(wallet.getWorkspace(), AiCreditBucket.PURCHASED, AiCreditLedgerType.CONSUMPTION,
                         fromPurchased, before, after, "AI_REQUEST", aiRequestId, aiRequestId, null, null, null,
-                        "CONSUMPTION:PURCHASED:" + aiRequestId, user);
+                        aiRequestId != null ? "CONSUMPTION:PURCHASED:" + aiRequestId : null, user);
+            }
+
+            BigDecimal uncovered = remainingToDeduct.subtract(fromPromo).subtract(fromPurchased);
+            if (uncovered.compareTo(BigDecimal.ZERO) > 0) {
+                log.warn(
+                        "AI credit actual usage exceeded available credits after reservation: workspaceId={} aiRequestId={} estimatedCredits={} actualCredits={} reservedFromWallet={} uncoveredCredits={}",
+                        workspaceId,
+                        aiRequestId,
+                        reservation.estimatedCredits(),
+                        actual,
+                        reservedFromWallet,
+                        uncovered
+                );
             }
         }
 
@@ -284,6 +307,10 @@ public class AiCreditService {
         if (ws == null) return;
         long scaled = amount.multiply(SCALE_FACTOR).setScale(0, RoundingMode.HALF_UP).longValue();
         if (scaled <= 0) return;
+        String idempotencyKey = aiRequestId != null ? "INCLUDED_CREDIT:" + aiRequestId : null;
+        if (idempotencyKey != null && usageLedgerRepository.existsByIdempotencyKey(idempotencyKey)) {
+            return;
+        }
 
         UsageLedgerEntry entry = new UsageLedgerEntry();
         entry.setWorkspace(ws);
@@ -291,7 +318,7 @@ public class AiCreditService {
         entry.setQuantity(scaled);
         entry.setSourceType("AI_REQUEST");
         entry.setSourceId(aiRequestId);
-        entry.setIdempotencyKey("INCLUDED_CREDIT:" + aiRequestId);
+        entry.setIdempotencyKey(idempotencyKey);
         entry.setOccurredAt(OffsetDateTime.now());
         usageLedgerRepository.save(entry);
     }
@@ -312,6 +339,9 @@ public class AiCreditService {
             String idempotencyKey,
             User user
     ) {
+        if (idempotencyKey != null && ledgerRepository.existsByWorkspaceIdAndIdempotencyKey(workspace.getId(), idempotencyKey)) {
+            return;
+        }
         AiCreditLedgerEntry entry = new AiCreditLedgerEntry();
         entry.setWorkspace(workspace);
         entry.setBucket(bucket);
@@ -328,6 +358,28 @@ public class AiCreditService {
         entry.setIdempotencyKey(idempotencyKey);
         entry.setCreatedBy(user);
         ledgerRepository.save(entry);
+    }
+
+    private boolean alreadyReconciled(UUID workspaceId, UUID aiRequestId) {
+        return usageLedgerRepository.existsByIdempotencyKey("INCLUDED_CREDIT:" + aiRequestId)
+                || ledgerRepository.existsByWorkspaceIdAndIdempotencyKey(workspaceId, "CONSUMPTION:PROMO:" + aiRequestId)
+                || ledgerRepository.existsByWorkspaceIdAndIdempotencyKey(workspaceId, "CONSUMPTION:PURCHASED:" + aiRequestId);
+    }
+
+    private BigDecimal calculateIncludedDebit(UUID workspaceId, BigDecimal actual) {
+        AiCreditBalanceResponse.IncludedAllowance included = calculateIncludedAllowance(workspaceId);
+        if ("UNLIMITED".equalsIgnoreCase(included.limitMode())) {
+            return actual;
+        }
+        if (!"LIMITED".equalsIgnoreCase(included.limitMode())) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal remaining = positive(included.remaining());
+        return actual.min(remaining);
+    }
+
+    private static BigDecimal positive(BigDecimal amount) {
+        return amount != null && amount.compareTo(BigDecimal.ZERO) > 0 ? amount : BigDecimal.ZERO;
     }
 
     private boolean hasActivePacks() {

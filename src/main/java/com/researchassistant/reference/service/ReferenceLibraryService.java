@@ -117,8 +117,61 @@ public class ReferenceLibraryService {
         if (request.publisherPlace() != null) entry.setPublisherPlace(blankToNull(request.publisherPlace()));
         if (request.doi() != null) { entry.setDoi(blankToNull(request.doi())); entry.setNormalizedDoi(normalizationService.normalizeDoi(request.doi())); }
         if (request.url() != null) entry.setUrl(blankToNull(request.url()));
-        if (request.metadataStatus() != null) entry.setMetadataStatus(request.metadataStatus());
+        if (request.metadataStatus() != null) {
+            entry.setMetadataStatus(request.metadataStatus());
+        } else if (touchesBibliographicMetadata(request)) {
+            entry.setMetadataStatus(ReferenceMetadataStatus.VERIFIED);
+            entry.setMetadataSource("USER_CONFIRMED");
+            entry.setMetadataConfidence(1.0d);
+            entry.setMetadataReviewStatus(ReferenceMetadataStatus.VERIFIED.name());
+            entry.setVerifiedAt(OffsetDateTime.now());
+        }
         if (request.authors() != null) { authorRepository.deleteAll(authorRepository.findAllByReferenceIdOrderByDisplayOrderAsc(entry.getId())); saveAuthors(entry, request.authors()); }
+        if (request.availableForCitation() != null) {
+            pr.setAvailableForCitation(request.availableForCitation());
+        }
+        if (request.availableForResearchAi() != null) {
+            pr.setAvailableForResearchAi(request.availableForResearchAi());
+        }
+        if (request.citationKey() != null && !request.citationKey().isBlank()) {
+            String cleanKey = request.citationKey().trim().replaceAll("[^A-Za-z0-9_-]", "");
+            if (!cleanKey.isEmpty()) {
+                pr.setCitationKey(cleanKey);
+            }
+        }
+        projectReferenceRepository.save(pr);
+        auditService.record(user.getId(), SecurityAuditEventType.REFERENCE_UPDATED);
+        return response(pr);
+    }
+
+    @Transactional
+    public ReferenceResponse setAvailableForCitation(UUID referenceId, User user, boolean available) {
+        ProjectReference pr = loadProjectReference(referenceId);
+        authorizationService.requireProjectEditor(pr.getProject().getId(), user);
+        pr.setAvailableForCitation(available);
+        auditService.record(user.getId(), SecurityAuditEventType.REFERENCE_UPDATED);
+        return response(pr);
+    }
+
+    @Transactional
+    public ReferenceResponse setAvailableForResearchAi(UUID referenceId, User user, boolean available) {
+        ProjectReference pr = loadProjectReference(referenceId);
+        authorizationService.requireProjectEditor(pr.getProject().getId(), user);
+        pr.setAvailableForResearchAi(available);
+        auditService.record(user.getId(), SecurityAuditEventType.REFERENCE_UPDATED);
+        return response(pr);
+    }
+
+    @Transactional
+    public ReferenceResponse setUsageScope(UUID referenceId, User user, Boolean availableForResearchAi, Boolean availableForCitation) {
+        ProjectReference pr = loadProjectReference(referenceId);
+        authorizationService.requireProjectEditor(pr.getProject().getId(), user);
+        if (availableForResearchAi != null) {
+            pr.setAvailableForResearchAi(availableForResearchAi);
+        }
+        if (availableForCitation != null) {
+            pr.setAvailableForCitation(availableForCitation);
+        }
         auditService.record(user.getId(), SecurityAuditEventType.REFERENCE_UPDATED);
         return response(pr);
     }
@@ -218,7 +271,9 @@ public class ReferenceLibraryService {
                 .toList();
         List<ReferenceInteroperabilityService.ReferenceExportView> views = refs.stream().map(pr -> new ReferenceInteroperabilityService.ReferenceExportView(
                 pr.getReference().getType(), pr.getReference().getTitle(), pr.getReference().getContainerTitle(), pr.getReference().getPublicationYear(),
-                pr.getReference().getDoi(), pr.getReference().getUrl(), authorRepository.findAllByReferenceIdOrderByDisplayOrderAsc(pr.getReference().getId()).stream().map(this::displayAuthor).toList())).toList();
+                pr.getReference().getVolume(), pr.getReference().getIssue(), pr.getReference().getPages(), pr.getReference().getPublisher(),
+                pr.getReference().getDoi(), pr.getReference().getUrl(), pr.getReference().getIsbn(), pr.getReference().getIssn(),
+                authorRepository.findAllByReferenceIdOrderByDisplayOrderAsc(pr.getReference().getId()).stream().map(this::displayAuthor).toList())).toList();
         String content = interoperabilityService.export(format, views);
         auditService.record(user.getId(), SecurityAuditEventType.REFERENCE_EXPORT_CREATED);
         String extension = format == ReferenceImportFormat.RIS ? "ris" : format == ReferenceImportFormat.BIBTEX ? "bib" : "xml";
@@ -273,7 +328,10 @@ public class ReferenceLibraryService {
         List<AuthorResponse> authors = authorRepository.findAllByReferenceIdOrderByDisplayOrderAsc(pr.getReference().getId()).stream()
                 .map(a -> new AuthorResponse(a.getFamilyName(), a.getGivenName(), a.getLiteralName(), a.getRole(), a.getDisplayOrder())).toList();
         ReferenceEntry e = pr.getReference();
-        return new ReferenceResponse(e.getId(), pr.getId(), pr.getCitationKey(), e.getType(), e.getTitle(), e.getPublicationYear(), e.getDoi(), e.getUrl(), e.getMetadataStatus(), authors, e.getUpdatedAt());
+        return new ReferenceResponse(e.getId(), pr.getId(), pr.getCitationKey(), e.getType(), e.getTitle(),
+                e.getContainerTitle(), e.getPublicationYear(), e.getVolume(), e.getIssue(), e.getPages(),
+                e.getPublisher(), e.getDoi(), e.getUrl(), e.getMetadataStatus(), e.getMetadataSource(),
+                e.getMetadataConfidence(), pr.isAvailableForCitation(), pr.isAvailableForResearchAi(), authors, e.getUpdatedAt());
     }
 
     private ProjectReference loadProjectReference(UUID id) {
@@ -333,5 +391,18 @@ public class ReferenceLibraryService {
     private String blankToNull(String value) { return value == null || value.isBlank() ? null : value.trim(); }
     private String required(String value) { String v = blankToNull(value); if (v == null) throw new IllegalArgumentException("Reference title is required."); return v; }
     private String safeName(String value) { return blankToNull(value) == null ? "references.txt" : value.replaceAll("[^A-Za-z0-9._-]", "_"); }
+    private boolean touchesBibliographicMetadata(UpdateReferenceRequest request) {
+        return request.title() != null
+                || request.containerTitle() != null
+                || request.publicationYear() != null
+                || request.volume() != null
+                || request.issue() != null
+                || request.pages() != null
+                || request.publisher() != null
+                || request.publisherPlace() != null
+                || request.doi() != null
+                || request.url() != null
+                || request.authors() != null;
+    }
     public record ExportedReferences(String filename, String contentType, String content) {}
 }

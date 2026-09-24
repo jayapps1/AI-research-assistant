@@ -18,6 +18,7 @@ public class AiCreditMeter {
     private static final BigDecimal DEFAULT_INPUT_RATE = new BigDecimal("200.0000");
     private static final BigDecimal DEFAULT_CACHED_RATE = new BigDecimal("20.0000");
     private static final BigDecimal DEFAULT_OUTPUT_RATE = new BigDecimal("1200.0000");
+    private static final BigDecimal RESERVATION_BUFFER_MULTIPLIER = new BigDecimal("1.25");
 
     private final AiCreditRateRepository rateRepository;
 
@@ -89,6 +90,8 @@ public class AiCreditMeter {
     public BigDecimal estimateReservation(String provider, String model, int estimatedInputTokens, int maxOutputTokens) {
         int inTokens = Math.max(500, estimatedInputTokens);
         int outTokens = maxOutputTokens > 0 ? maxOutputTokens : 4096;
-        return calculateCredits(provider, model, inTokens, outTokens, 0);
+        return calculateCredits(provider, model, inTokens, outTokens, 0)
+                .multiply(RESERVATION_BUFFER_MULTIPLIER)
+                .setScale(4, RoundingMode.HALF_UP);
     }
 }

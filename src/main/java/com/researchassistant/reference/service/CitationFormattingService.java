@@ -26,14 +26,33 @@ public class CitationFormattingService {
         List<ReferenceAuthor> authors = authorRepository.findAllByReferenceIdAndRoleOrderByDisplayOrderAsc(reference.getId(), AuthorRole.AUTHOR);
         List<String> warnings = warnings(reference, authors);
         String text;
-        if (context == CitationContext.NUMERIC || style == CitationStyle.IEEE || style == CitationStyle.VANCOUVER) {
+        boolean incomplete = !warnings.isEmpty()
+                || reference.getMetadataStatus() == ReferenceMetadataStatus.INCOMPLETE
+                || looksLikeFilenameTitle(reference.getTitle());
+        if (style == CitationStyle.NUMERIC_APA) {
+            if (context == CitationContext.REFERENCE_LIST) {
+                if (incomplete) {
+                    text = "[" + (citationNumber == null ? "?" : citationNumber) + "] REFERENCE_METADATA_INCOMPLETE.";
+                } else {
+                    text = "[" + (citationNumber == null ? "?" : citationNumber) + "] " + authorYearReference(reference, authors, style);
+                }
+            } else {
+                text = "[" + (citationNumber == null ? "?" : citationNumber) + "]";
+            }
+        } else if (context == CitationContext.NUMERIC || style == CitationStyle.IEEE || style == CitationStyle.VANCOUVER) {
             text = context == CitationContext.REFERENCE_LIST ? numericReference(reference, authors, citationNumber, style) : "[" + (citationNumber == null ? "?" : citationNumber) + "]";
         } else if (context == CitationContext.REFERENCE_LIST) {
             text = authorYearReference(reference, authors, style);
+        } else if (incomplete) {
+            text = "REFERENCE_METADATA_INCOMPLETE";
         } else {
-            String author = shortAuthor(authors);
+            String author = shortAuthor(authors, style, context);
             String year = reference.getPublicationYear() == null ? "n.d." : reference.getPublicationYear().toString();
-            text = context == CitationContext.IN_TEXT_NARRATIVE ? author + " (" + year + ")" : "(" + author + ", " + year + ")";
+            if (style == CitationStyle.MLA_9) {
+                text = context == CitationContext.IN_TEXT_NARRATIVE ? author : "(" + author + ")";
+            } else {
+                text = context == CitationContext.IN_TEXT_NARRATIVE ? author + " (" + year + ")" : "(" + author + ", " + year + ")";
+            }
         }
         return new FormattedCitation(text, warnings, warnings.isEmpty());
     }
@@ -54,6 +73,9 @@ public class CitationFormattingService {
     }
 
     private String numericReference(ReferenceEntry ref, List<ReferenceAuthor> authors, Integer number, CitationStyle style) {
+        if (ref.getMetadataStatus() == ReferenceMetadataStatus.INCOMPLETE || looksLikeFilenameTitle(ref.getTitle())) {
+            return "[" + (number == null ? "?" : number) + "] REFERENCE_METADATA_INCOMPLETE.";
+        }
         StringJoiner joiner = new StringJoiner(", ");
         for (ReferenceAuthor author : authors) joiner.add(displayName(author));
         String prefix = "[" + (number == null ? "?" : number) + "] ";
@@ -62,10 +84,17 @@ public class CitationFormattingService {
                 + (ref.getPublicationYear() == null ? "" : ", " + ref.getPublicationYear()) + ".";
     }
 
-    private String shortAuthor(List<ReferenceAuthor> authors) {
+    private String shortAuthor(List<ReferenceAuthor> authors, CitationStyle style, CitationContext context) {
         if (authors.isEmpty()) return "Unknown author";
         if (authors.size() == 1) return displayShort(authors.getFirst());
-        if (authors.size() == 2) return displayShort(authors.get(0)) + " & " + displayShort(authors.get(1));
+        if (authors.size() == 2) {
+            String separator = context == CitationContext.IN_TEXT_NARRATIVE
+                    || style == CitationStyle.HARVARD
+                    || style == CitationStyle.CHICAGO_AUTHOR_DATE
+                    ? " and "
+                    : " & ";
+            return displayShort(authors.get(0)) + separator + displayShort(authors.get(1));
+        }
         return displayShort(authors.getFirst()) + " et al.";
     }
 
@@ -92,7 +121,17 @@ public class CitationFormattingService {
         if (authors.isEmpty()) warnings.add("Missing author.");
         if (ref.getPublicationYear() == null) warnings.add("Missing publication year.");
         if (ref.getTitle() == null || ref.getTitle().isBlank()) warnings.add("Missing title.");
+        if (looksLikeFilenameTitle(ref.getTitle())) warnings.add("Reference title appears to be a filename or internal placeholder.");
         if (ref.getType() == ReferenceType.JOURNAL_ARTICLE && ref.getContainerTitle() == null) warnings.add("Missing journal/container title.");
         return warnings;
+    }
+
+    private boolean looksLikeFilenameTitle(String title) {
+        if (title == null || title.isBlank()) return false;
+        String value = title.trim();
+        if ("REFERENCE_METADATA_INCOMPLETE".equalsIgnoreCase(value)) return true;
+        if (value.matches("(?i).+\\.(pdf|docx?|txt)$")) return true;
+        if (value.contains(" ")) return false;
+        return value.matches("[A-Za-z0-9._-]{8,}") && (value.contains("-") || value.contains("_") || value.matches(".*\\d{3,}.*"));
     }
 }

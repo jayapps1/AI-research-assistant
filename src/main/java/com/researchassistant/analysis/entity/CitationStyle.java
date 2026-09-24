@@ -7,5 +7,6 @@ public enum CitationStyle {
     CHICAGO_AUTHOR_DATE,
     VANCOUVER,
     MLA_9,
-    CUSTOM
+    CUSTOM,
+    NUMERIC_APA
 }

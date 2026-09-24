@@ -56,6 +56,21 @@ public class ReferenceController {
         return service.archive(referenceId, user(authentication));
     }
 
+    @PostMapping("/references/{referenceId}/citation-enabled")
+    public ReferenceResponse setCitationEnabled(Authentication authentication, @PathVariable UUID referenceId, @RequestParam boolean enabled) {
+        return service.setAvailableForCitation(referenceId, user(authentication), enabled);
+    }
+
+    @PostMapping("/references/{referenceId}/research-enabled")
+    public ReferenceResponse setResearchEnabled(Authentication authentication, @PathVariable UUID referenceId, @RequestParam boolean enabled) {
+        return service.setAvailableForResearchAi(referenceId, user(authentication), enabled);
+    }
+
+    @PostMapping("/references/{referenceId}/usage-scope")
+    public ReferenceResponse setUsageScope(Authentication authentication, @PathVariable UUID referenceId, @RequestBody UpdateReferenceUsageScopeRequest request) {
+        return service.setUsageScope(referenceId, user(authentication), request.availableForResearchAi(), request.availableForCitation());
+    }
+
     @PostMapping("/projects/{projectId}/references/check-duplicates")
     public DuplicateCheckResponse checkDuplicates(Authentication authentication, @PathVariable UUID projectId, @RequestBody DuplicateCheckRequest request) {
         return service.checkDuplicates(projectId, user(authentication), request);

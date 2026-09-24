@@ -9,6 +9,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -61,6 +62,6 @@ class AiCreditMeterTest {
         assertThat(estimate).isGreaterThan(BigDecimal.ZERO);
         // Reservation buffer is 1.25x
         BigDecimal raw = creditMeter.calculateCredits("OPENAI", "gpt-5.6-luna", 1500, 4096);
-        assertThat(estimate).isGreaterThanOrEqualTo(raw);
+        assertThat(estimate).isEqualByComparingTo(raw.multiply(new BigDecimal("1.25")).setScale(4, RoundingMode.HALF_UP));
     }
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -24,10 +24,13 @@ import type { DocumentItem } from '../types/api';
 interface UploadQueueItem {
   id: string;
   file: File;
-  status: 'QUEUED' | 'UPLOADING' | 'READY' | 'FAILED' | 'QUOTA_EXCEEDED';
+  status: 'QUEUED' | 'UPLOADING' | 'READY' | 'FAILED' | 'QUOTA_EXCEEDED' | 'FILE_TOO_LARGE';
   documentCode?: string;
   errorMessage?: string | null;
 }
+
+const MAX_DOCUMENT_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+const MAX_DOCUMENT_FILE_SIZE_LABEL = '50 MB';
 
 type DialogState =
   | { type: 'details'; doc: DocumentItem }
@@ -66,6 +69,7 @@ export function SourcesPage() {
   const [newVersionFile, setNewVersionFile] = useState<File | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const lastStatusSignature = useRef('');
 
   const sourcesQuery = useQuery({
     queryKey: ['documents', projectId, page, showTrash ? 'trash' : 'active'],
@@ -74,10 +78,26 @@ export function SourcesPage() {
     refetchInterval: (query) => {
       const data = query.state.data;
       const items = pageContent(data) as DocumentItem[];
-      const hasPending = items.some((doc) => doc.status === 'PROCESSING' || doc.status === 'UPLOADING');
+      const hasPending = items.some((doc) => isNonTerminalDocumentStatus(doc.status));
       return hasPending ? 3000 : false;
     },
   });
+
+  useEffect(() => {
+    const items = pageContent(sourcesQuery.data) as DocumentItem[];
+    const statusSignature = items
+      .map((doc) => `${doc.id}:${doc.status}:${doc.currentVersion?.status ?? ''}`)
+      .join('|');
+    if (lastStatusSignature.current && statusSignature !== lastStatusSignature.current) {
+      void Promise.all([
+        client.invalidateQueries({ queryKey: ['project-dashboard', projectId] }),
+        client.invalidateQueries({ queryKey: ['project', projectId] }),
+        client.invalidateQueries({ queryKey: ['rag-conversations', projectId] }),
+        client.invalidateQueries({ queryKey: ['workspace-usage'] }),
+      ]);
+    }
+    lastStatusSignature.current = statusSignature;
+  }, [client, projectId, sourcesQuery.data]);
 
   const detailsDoc = dialog?.type === 'details' ? dialog.doc : null;
   const versionsQuery = useQuery({
@@ -147,12 +167,21 @@ export function SourcesPage() {
           );
         } catch (err: any) {
           const errStatus = err?.status ?? err?.response?.status;
-          const errCode = err?.code ?? err?.response?.data?.code;
+          const errCode = err?.code ?? err?.response?.data?.code ?? err?.response?.data?.errorCode;
           const isQuota = errStatus === 429 || errCode === 'QUOTA_EXCEEDED';
+          const isTooLarge = errCode === 'DOCUMENT_FILE_TOO_LARGE' || errStatus === 413;
           setUploadQueue((prev) =>
             prev.map((item) =>
               item.id === currentItem.id
-                ? { ...item, status: isQuota ? 'QUOTA_EXCEEDED' : 'FAILED', errorMessage: isQuota ? 'Storage quota exceeded' : err?.message || 'Upload failed' }
+                ? {
+                    ...item,
+                    status: isQuota ? 'QUOTA_EXCEEDED' : isTooLarge ? 'FILE_TOO_LARGE' : 'FAILED',
+                    errorMessage: isQuota
+                      ? 'Storage quota exceeded'
+                      : isTooLarge
+                      ? 'This file exceeds the 50 MB limit.'
+                      : err?.response?.data?.message || err?.message || 'Upload failed',
+                  }
                 : item,
             ),
           );
@@ -217,7 +246,7 @@ export function SourcesPage() {
     setDialog({ type: 'rename', doc });
   };
 
-  const bulkAction = async (kind: 'trash' | 'retry' | 'download') => {
+  const bulkAction = async (kind: 'trash' | 'retry' | 'download' | 'rescan') => {
     setBulkWorking(true);
     setErrorMessage(null);
     try {
@@ -225,6 +254,7 @@ export function SourcesPage() {
         if (kind === 'trash') await documentApi.delete(doc.id);
         if (kind === 'retry' && canRetry(doc)) await documentApi.retryProcessing(doc.id);
         if (kind === 'download') await downloadDocument(doc);
+        if (kind === 'rescan') await documentApi.rescanReferenceMetadata(doc.id);
       }
       await invalidateDocuments();
     } catch (err: any) {
@@ -263,7 +293,7 @@ export function SourcesPage() {
             <h2 style={{ fontSize: '1.1rem', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
               <Upload size={18} /> Upload Research Sources
             </h2>
-            <span className="muted" style={{ fontSize: '0.8rem' }}>PDF, DOCX, TXT up to 50MB per file</span>
+            <span className="muted" style={{ fontSize: '0.8rem' }}>Maximum file size: {MAX_DOCUMENT_FILE_SIZE_LABEL} per file</span>
           </div>
 
           {hasQuotaExceeded && (
@@ -287,9 +317,12 @@ export function SourcesPage() {
                       const newItems: UploadQueueItem[] = Array.from(event.target.files).map((file) => ({
                         id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                         file,
-                        status: 'QUEUED',
+                        status: file.size > MAX_DOCUMENT_FILE_SIZE_BYTES ? 'FILE_TOO_LARGE' : 'QUEUED',
+                        errorMessage: file.size > MAX_DOCUMENT_FILE_SIZE_BYTES ? 'This file exceeds the 50 MB limit.' : null,
                       }));
                       setUploadQueue((prev) => [...prev, ...newItems]);
+                      const oversized = newItems.find((item) => item.status === 'FILE_TOO_LARGE');
+                      setErrorMessage(oversized ? `${oversized.file.name} (${formatBytes(oversized.file.size)}): This file exceeds the 50 MB limit.` : null);
                     }
                     event.target.value = '';
                   }}
@@ -298,7 +331,7 @@ export function SourcesPage() {
             </div>
             {uploadQueue.length > 0 && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
-                <Button type="button" variant="primary" disabled={isUploadingQueue} onClick={startBatchUpload}>
+                <Button type="button" variant="primary" disabled={isUploadingQueue || uploadQueue.every((q) => q.status !== 'QUEUED' && q.status !== 'FAILED')} onClick={startBatchUpload}>
                   {isUploadingQueue ? <RefreshCw size={14} className="spin" /> : <Upload size={14} />}
                   {isUploadingQueue ? 'Uploading...' : `Upload ${uploadQueue.filter((q) => q.status === 'QUEUED' || q.status === 'FAILED').length} Files`}
                 </Button>
@@ -339,6 +372,11 @@ export function SourcesPage() {
               {!showTrash && (
                 <Button type="button" variant="secondary" disabled={bulkWorking} onClick={() => bulkAction('retry')}>
                   <RefreshCw size={13} /> Retry Eligible
+                </Button>
+              )}
+              {!showTrash && (
+                <Button type="button" variant="secondary" disabled={bulkWorking} onClick={() => bulkAction('rescan')}>
+                  <RefreshCw size={13} /> Re-scan Metadata
                 </Button>
               )}
               {!showTrash && (
@@ -423,6 +461,7 @@ export function SourcesPage() {
                         <MenuButton label="Open / Preview" onClick={() => setDialog({ type: 'details', doc })} />
                         <MenuButton label="Download" onClick={() => downloadDocument(doc)} icon={<Download size={13} />} />
                         {!showTrash && <MenuButton label="Edit metadata" onClick={() => openMetadataDialog(doc)} icon={<Edit3 size={13} />} />}
+                        {!showTrash && <MenuButton label="Re-scan Metadata" onClick={() => runForDoc(doc, () => documentApi.rescanReferenceMetadata(doc.id))} icon={<RefreshCw size={13} />} />}
                         {!showTrash && <MenuButton label="Upload New Version" onClick={() => setDialog({ type: 'new-version', doc })} icon={<Upload size={13} />} />}
                         {!showTrash && canRetry(doc) && <MenuButton label="Retry Processing" onClick={() => runForDoc(doc, () => documentApi.retryProcessing(doc.id))} icon={<RefreshCw size={13} />} />}
                         {!showTrash && <MenuButton label="Delete" destructive onClick={() => setDialog({ type: 'trash', doc })} icon={<Trash2 size={13} />} />}
@@ -554,7 +593,16 @@ export function SourcesPage() {
           >
             <p className="muted" style={{ margin: 0 }}>{docCode(dialog.doc)} will keep the same source code and receive the next version number.</p>
             <Field label="Replacement file">
-              <Input type="file" accept=".pdf,.doc,.docx,.txt" onChange={(event) => setNewVersionFile(event.target.files?.[0] ?? null)} />
+              <Input type="file" accept=".pdf,.doc,.docx,.txt" onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                if (file && file.size > MAX_DOCUMENT_FILE_SIZE_BYTES) {
+                  setNewVersionFile(null);
+                  setErrorMessage(`${file.name} (${formatBytes(file.size)}): This file exceeds the 50 MB limit.`);
+                } else {
+                  setNewVersionFile(file);
+                  setErrorMessage(null);
+                }
+              }} />
             </Field>
             <Button type="submit" disabled={!newVersionFile || workingId === dialog.doc.id}>Upload Version</Button>
           </form>
@@ -597,6 +645,7 @@ function UploadStatus({ item }: { item: UploadQueueItem }) {
   if (item.status === 'UPLOADING') return <Badge tone="info"><RefreshCw size={12} className="spin" style={{ marginRight: 4 }} /> Uploading...</Badge>;
   if (item.status === 'QUEUED') return <Badge tone="info">Queued</Badge>;
   if (item.status === 'QUOTA_EXCEEDED') return <Badge tone="warning">Quota Exceeded</Badge>;
+  if (item.status === 'FILE_TOO_LARGE') return <Badge tone="danger">{item.errorMessage || 'File too large'}</Badge>;
   return <Badge tone="danger">{item.errorMessage || 'Failed'}</Badge>;
 }
 
@@ -631,6 +680,9 @@ function DetailGrid({ doc }: { doc: DocumentItem }) {
     ['URL', doc.url ?? 'Missing metadata'],
     ['Source type', doc.sourceType ?? 'Missing metadata'],
     ['Keywords', doc.keywords ?? 'Missing metadata'],
+    ['Reference metadata status', doc.bibliographicMetadataStatus ?? 'INCOMPLETE'],
+    ['Metadata source', doc.bibliographicMetadataSource ?? 'Not scanned'],
+    ['Metadata confidence', typeof doc.bibliographicMetadataConfidence === 'number' ? `${Math.round(doc.bibliographicMetadataConfidence * 100)}%` : 'Not scored'],
     ['Original filename', filename(doc)],
     ['Current version', `v${doc.currentVersion?.versionNumber ?? doc.version ?? 1}`],
     ['MIME type', doc.currentVersion?.mimeType ?? 'Unknown'],
@@ -655,6 +707,11 @@ function DetailGrid({ doc }: { doc: DocumentItem }) {
 
 function canRetry(doc: DocumentItem) {
   return doc.status === 'FAILED' || doc.status === 'PROCESSING' || doc.status === 'OCR_REQUIRED';
+}
+
+function isNonTerminalDocumentStatus(status?: string | null) {
+  return ['UPLOADING', 'UPLOADED', 'QUEUED', 'PROCESSING', 'EXTRACTING', 'CHUNKING', 'EMBEDDING', 'INDEXING', 'STORED']
+    .includes((status ?? '').toUpperCase());
 }
 
 function docCode(doc: DocumentItem) {

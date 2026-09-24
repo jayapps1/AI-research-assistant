@@ -16,13 +16,15 @@ import {
   ListOrdered,
   Plus,
   Trash2,
-  ClipboardList
+  ClipboardList,
+  Download
 } from 'lucide-react';
-import { projectApi, researchApi, datasetApi, researchDesignApi } from '../api/endpoints';
+import { projectApi, researchApi, datasetApi, researchDesignApi, reportApi } from '../api/endpoints';
 import { Breadcrumbs, Button, Card, Field, Input, Textarea, Badge } from '../components/ui';
 import { EmptyState, PageLoading } from '../components/states';
 import { useProjectId } from '../hooks/useProjectId';
 import { paths } from '../routes/paths';
+import { pageContent } from '../utils/collections';
 
 const RESEARCH_TYPES: { id: string; label: string; description: string; icon: any }[] = [
   { id: 'SOFTWARE_SYSTEM_PROJECT', label: 'Software / System Project', description: 'System architecture, requirements, tech stack, testing, and deployment', icon: Cpu },
@@ -99,6 +101,23 @@ export function ResearchPage() {
     queryKey: ['datasets', projectId],
     queryFn: () => datasetApi.list(projectId),
     enabled: Boolean(projectId),
+  });
+
+  // References query for literature grounding
+  const referencesQuery = useQuery({
+    queryKey: ['references', projectId],
+    queryFn: () => reportApi.references(projectId, 0, 100),
+    enabled: Boolean(projectId),
+  });
+
+  const updateScopeMutation = useMutation({
+    mutationFn: ({ referenceId, enabled, citationEnabled }: { referenceId: string; enabled: boolean; citationEnabled: boolean }) =>
+      reportApi.setUsageScope(referenceId, { availableForResearchAi: enabled, availableForCitation: citationEnabled }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['references', projectId] });
+      setSaveStatus('Literature scope for research updated.');
+      setTimeout(() => setSaveStatus(null), 3000);
+    },
   });
 
   // Populate data when project loads
@@ -197,6 +216,45 @@ export function ResearchPage() {
     },
   });
 
+  const [exportingFormat, setExportingFormat] = useState<string | null>(null);
+
+  const exportResearchProtocol = async (format: 'docx' | 'markdown') => {
+    try {
+      setExportingFormat(format);
+      const res = await researchDesignApi.exportProtocol(projectId, format);
+      reportApi.saveBlob(res.blob, res.filename);
+      setSaveStatus(`Research protocol exported as ${format.toUpperCase()} with complete references.`);
+      setTimeout(() => setSaveStatus(null), 3500);
+    } catch (err: any) {
+      setSaveStatus(err?.message || 'Export failed.');
+      setTimeout(() => setSaveStatus(null), 4000);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  // Generate Setup with AI mutation
+  const generateResearchSetupMutation = useMutation({
+    mutationFn: () => researchDesignApi.generate(projectId),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['research-design', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      if (data) {
+        if (data.problemStatement) setProblemStatement(data.problemStatement);
+        if (data.researchAim) setResearchAim(data.researchAim);
+        if (Array.isArray(data.objectives) && data.objectives.length > 0) setObjectives(data.objectives);
+        if (Array.isArray(data.questions) && data.questions.length > 0) setQuestions(data.questions);
+        if (Array.isArray(data.hypotheses) && data.hypotheses.length > 0) setHypotheses(data.hypotheses);
+      }
+      setSaveStatus('AI synthesized research problem, aim, objectives, and questions from uploaded papers.');
+      setTimeout(() => setSaveStatus(null), 4500);
+    },
+    onError: (err: any) => {
+      setSaveStatus(err?.message || 'Failed to synthesize research setup.');
+      setTimeout(() => setSaveStatus(null), 5000);
+    },
+  });
+
   // Generate with AI mutation
   const generateMethodologyMutation = useMutation({
     mutationFn: () => researchApi.generateMethodology(projectId),
@@ -210,6 +268,10 @@ export function ResearchPage() {
         if (data.samplingTechnique) setSamplingTechnique(data.samplingTechnique);
         if (data.sampleSize) setSampleSize(String(data.sampleSize));
         if (data.dataCollectionStrategy) setDataCollectionStrategy(data.dataCollectionStrategy);
+        if (data.systemArchitecture) setSystemArchitecture(data.systemArchitecture);
+        if (data.functionalRequirements) setFunctionalRequirements(data.functionalRequirements);
+        if (data.techStack) setTechStack(data.techStack);
+        if (data.testingStrategy) setTestingStrategy(data.testingStrategy);
       }
       setSaveStatus('AI generated research design based on your project topic and sources.');
       setTimeout(() => setSaveStatus(null), 4000);
@@ -285,6 +347,8 @@ export function ResearchPage() {
   const currentTypeConfig = RESEARCH_TYPES.find((t) => t.id === researchType) ?? RESEARCH_TYPES[0];
   const isSoftware = researchType === 'SOFTWARE_SYSTEM_PROJECT';
   const isQuantitative = researchType === 'QUANTITATIVE_SURVEY' || researchType === 'EXPERIMENTAL_RESEARCH';
+  const allProjectRefs = pageContent(referencesQuery.data) as any[];
+  const activeResearchRefs = allProjectRefs.filter((r) => r.availableForResearchAi !== false);
 
   return (
     <main className="page">
@@ -305,6 +369,28 @@ export function ResearchPage() {
         </div>
 
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <Button
+            variant="secondary"
+            onClick={() => exportResearchProtocol('docx')}
+            disabled={exportingFormat !== null}
+            title="Download full research protocol dossier as formatted Word document with numbered references"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+          >
+            <Download size={16} />
+            {exportingFormat === 'docx' ? 'Exporting DOCX...' : 'Export Protocol (DOCX)'}
+          </Button>
+
+          <Button
+            variant="secondary"
+            onClick={() => exportResearchProtocol('markdown')}
+            disabled={exportingFormat !== null}
+            title="Download research protocol as academic Markdown file"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+          >
+            <Download size={16} />
+            {exportingFormat === 'markdown' ? 'Exporting MD...' : 'Export Protocol (MD)'}
+          </Button>
+
           <Button
             variant="secondary"
             onClick={() => navigate(paths.projectAdvanced(projectId))}
@@ -453,6 +539,127 @@ export function ResearchPage() {
       {/* TAB 1: SETUP & OBJECTIVES */}
       {activeTab === 'setup' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* AI Grounded Literature Synthesis Banner */}
+          <Card style={{
+            padding: '1.25rem 1.5rem',
+            background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.06) 0%, rgba(79, 70, 229, 0.06) 100%)',
+            border: '1px solid rgba(37, 99, 235, 0.25)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '1rem'
+          }}>
+            <div style={{ maxWidth: '650px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '4px' }}>
+                <Sparkles size={18} className="text-primary" />
+                <strong style={{ fontSize: '1rem' }}>AI Research Synthesis Grounded in Uploaded Literature</strong>
+              </div>
+              <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+                Leverage RAG over your uploaded papers to automatically formulate a rigorous Problem Statement, Research Aim, Specific Objectives, Research Questions, and Hypotheses.
+              </p>
+            </div>
+            <Button
+              variant="primary"
+              onClick={() => generateResearchSetupMutation.mutate()}
+              disabled={generateResearchSetupMutation.isPending}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <Sparkles size={16} />
+              {generateResearchSetupMutation.isPending ? 'Synthesizing with AI...' : 'Synthesize from Uploaded Literature (AI)'}
+            </Button>
+          </Card>
+
+          {/* Literature Active for Research Design Partition */}
+          <Card style={{ padding: '1.25rem 1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <BookOpen size={18} className="text-primary" />
+                  Literature Partitioned for Research Design ({activeResearchRefs.length} of {allProjectRefs.length} Papers Active)
+                </h3>
+                <p className="muted" style={{ margin: '2px 0 0', fontSize: '0.82rem' }}>
+                  Select which papers specifically ground this study's Problem Statement, Objectives, and Research Protocol export.
+                </p>
+              </div>
+
+              {allProjectRefs.length > 0 && (
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="btn-compact"
+                    onClick={() => {
+                      allProjectRefs.forEach((r: any) => {
+                        updateScopeMutation.mutate({ referenceId: r.id, enabled: true, citationEnabled: r.availableForCitation !== false });
+                      });
+                    }}
+                  >
+                    Select All
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="btn-compact"
+                    onClick={() => {
+                      allProjectRefs.forEach((r: any) => {
+                        updateScopeMutation.mutate({ referenceId: r.id, enabled: false, citationEnabled: r.availableForCitation !== false });
+                      });
+                    }}
+                  >
+                    Deselect All
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {allProjectRefs.length === 0 ? (
+              <p className="muted" style={{ fontSize: '0.85rem', fontStyle: 'italic', margin: '0.5rem 0 0' }}>
+                No project documents or references found. Upload PDFs in the Documents page to partition literature for research.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '220px', overflowY: 'auto', marginTop: '0.5rem' }}>
+                {allProjectRefs.map((ref: any, idx: number) => {
+                  const isResearchActive = ref.availableForResearchAi !== false;
+                  return (
+                    <div
+                      key={ref.id || idx}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border)',
+                        background: isResearchActive ? 'var(--surface-hover)' : 'transparent',
+                        opacity: isResearchActive ? 1 : 0.7,
+                        gap: '0.75rem'
+                      }}
+                    >
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', flex: 1, overflow: 'hidden' }}>
+                        <input
+                          type="checkbox"
+                          checked={isResearchActive}
+                          onChange={(e) => updateScopeMutation.mutate({
+                            referenceId: ref.id,
+                            enabled: e.target.checked,
+                            citationEnabled: ref.availableForCitation !== false
+                          })}
+                        />
+                        <span style={{ fontSize: '0.85rem', fontWeight: isResearchActive ? 600 : 400, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                          [{idx + 1}] {ref.title || 'Untitled Reference'} {ref.year ? `(${ref.year})` : ''}
+                        </span>
+                      </label>
+                      <Badge tone={isResearchActive ? 'success' : undefined} style={{ fontSize: '0.72rem', flexShrink: 0 }}>
+                        {isResearchActive ? 'Grounding Research' : 'Report Only'}
+                      </Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+
           <Card style={{ padding: '1.5rem' }}>
             <h3 style={{ fontSize: '1.15rem', fontWeight: 600, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <BookOpen size={20} className="text-primary" />

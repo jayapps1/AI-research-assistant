@@ -12,6 +12,7 @@ import jakarta.validation.Valid;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -184,6 +185,11 @@ public class AnalysisWorkflowController {
         return service.createReport(projectId, user(authentication), request);
     }
 
+    @PostMapping("/projects/{projectId}/reports/ensure")
+    public ReportResponse ensureReportInitialized(Authentication authentication, @PathVariable UUID projectId) {
+        return service.ensureReportInitialized(projectId, user(authentication));
+    }
+
     @GetMapping("/projects/{projectId}/reports")
     public PageResponse<ReportResponse> listReports(Authentication authentication, @PathVariable UUID projectId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
         return PageResponse.from(service.listReports(projectId, user(authentication), page(page, size)));
@@ -229,6 +235,27 @@ public class AnalysisWorkflowController {
         return service.finalizeReport(reportId, user(authentication));
     }
 
+    @PostMapping("/reports/{reportId}/final-document/prepare")
+    public FinalDocumentResponse prepareFinalDocument(Authentication authentication, @PathVariable UUID reportId) {
+        return service.prepareFinalDocument(reportId, user(authentication));
+    }
+
+    @GetMapping("/reports/{reportId}/final-document")
+    public ResponseEntity<FinalDocumentResponse> getFinalDocument(Authentication authentication, @PathVariable UUID reportId) {
+        FinalDocumentResponse response = service.getFinalDocument(reportId, user(authentication));
+        return response == null ? ResponseEntity.noContent().build() : ResponseEntity.ok(response);
+    }
+
+    @PatchMapping("/reports/{reportId}/final-document")
+    public FinalDocumentResponse updateFinalDocument(Authentication authentication, @PathVariable UUID reportId, @Valid @RequestBody UpdateFinalDocumentRequest request) {
+        return service.updateFinalDocument(reportId, user(authentication), request);
+    }
+
+    @PutMapping("/reports/{reportId}/final-document")
+    public FinalDocumentResponse putFinalDocument(Authentication authentication, @PathVariable UUID reportId, @Valid @RequestBody UpdateFinalDocumentRequest request) {
+        return service.updateFinalDocument(reportId, user(authentication), request);
+    }
+
     @GetMapping("/reports/{reportId}/chapters")
     public java.util.List<ChapterResponse> listChapters(Authentication authentication, @PathVariable UUID reportId) {
         return service.listChapters(reportId, user(authentication));
@@ -243,6 +270,22 @@ public class AnalysisWorkflowController {
     @PatchMapping("/report-chapters/{chapterId}")
     public ChapterResponse updateChapter(Authentication authentication, @PathVariable UUID chapterId, @Valid @RequestBody UpdateChapterRequest request) {
         return service.updateChapter(chapterId, user(authentication), request);
+    }
+
+    @GetMapping("/reports/{reportId}/structure")
+    public ReportStructureResponse getReportStructure(Authentication authentication, @PathVariable UUID reportId) {
+        return service.getReportStructure(reportId, user(authentication));
+    }
+
+    @PostMapping("/reports/{reportId}/structure/reorder")
+    public ReportStructureResponse reorderStructure(Authentication authentication, @PathVariable UUID reportId, @Valid @RequestBody ReorderStructureRequest request) {
+        return service.reorderStructure(reportId, request, user(authentication));
+    }
+
+    @DeleteMapping("/report-chapters/{chapterId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteChapter(Authentication authentication, @PathVariable UUID chapterId) {
+        service.deleteChapter(chapterId, user(authentication));
     }
 
     @GetMapping("/report-chapters/{chapterId}/sections")
@@ -261,9 +304,35 @@ public class AnalysisWorkflowController {
         return service.updateSection(sectionId, user(authentication), request);
     }
 
+    @DeleteMapping("/report-sections/{sectionId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteSection(Authentication authentication, @PathVariable UUID sectionId) {
+        service.deleteSection(sectionId, user(authentication));
+    }
+
+    @PostMapping("/reports/{reportId}/references/refresh")
+    public SectionResponse refreshReportReferences(Authentication authentication, @PathVariable UUID reportId) {
+        return service.refreshReportReferences(reportId, user(authentication));
+    }
+
+    @PatchMapping("/reports/{reportId}/settings")
+    public ReportResponse updateReportSettings(Authentication authentication, @PathVariable UUID reportId, @Valid @RequestBody UpdateReportSettingsRequest request) {
+        return service.updateReportSettings(reportId, user(authentication), request);
+    }
+
+    @GetMapping("/projects/{projectId}/literature-matrix")
+    public LiteratureMatrixResponse getLiteratureMatrix(Authentication authentication, @PathVariable UUID projectId) {
+        return service.getLiteratureMatrix(projectId, user(authentication));
+    }
+
+    @PostMapping("/projects/{projectId}/literature-matrix")
+    public LiteratureMatrixResponse saveLiteratureMatrix(Authentication authentication, @PathVariable UUID projectId, @Valid @RequestBody SaveLiteratureMatrixRequest request) {
+        return service.saveLiteratureMatrix(projectId, user(authentication), request);
+    }
+
     @PostMapping("/report-sections/{sectionId}/generate")
-    public GeneratedDraftResponse generateSection(Authentication authentication, @PathVariable UUID sectionId) {
-        return service.generateSection(sectionId, user(authentication));
+    public GeneratedDraftResponse generateSection(Authentication authentication, @PathVariable UUID sectionId, @RequestBody(required = false) GenerateSectionRequest request) {
+        return service.generateSection(sectionId, user(authentication), request);
     }
 
     @GetMapping("/report-sections/{sectionId}/citations")

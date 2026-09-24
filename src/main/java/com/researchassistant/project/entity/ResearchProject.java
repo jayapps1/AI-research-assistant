@@ -90,6 +90,19 @@ public class ResearchProject {
     private boolean citationStyleLocked;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "citation_presentation", nullable = false, length = 40)
+    private com.researchassistant.analysis.entity.CitationPresentation citationPresentation = com.researchassistant.analysis.entity.CitationPresentation.PARENTHETICAL;
+
+    @Column(name = "bibliography_sort", nullable = false, length = 40)
+    private String bibliographySort = "STYLE_DEFAULT";
+
+    @Column(name = "include_doi", nullable = false)
+    private boolean includeDoi = true;
+
+    @Column(name = "include_url", nullable = false)
+    private boolean includeUrl = true;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     private ResearchProjectStatus status = ResearchProjectStatus.DRAFT;
 
@@ -128,6 +141,12 @@ public class ResearchProject {
         updatedAt = now;
         if (status == null) {
             status = ResearchProjectStatus.DRAFT;
+        }
+        if (citationPresentation == null) {
+            citationPresentation = com.researchassistant.analysis.entity.CitationPresentation.PARENTHETICAL;
+        }
+        if (bibliographySort == null || bibliographySort.isBlank()) {
+            bibliographySort = "STYLE_DEFAULT";
         }
         if (nextDocumentNumber < 1L) {
             nextDocumentNumber = 1L;

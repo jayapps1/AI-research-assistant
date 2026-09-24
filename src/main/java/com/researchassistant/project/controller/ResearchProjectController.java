@@ -133,6 +133,15 @@ public class ResearchProjectController {
         return projectService.completeProject(projectId, user);
     }
 
+    @PostMapping("/projects/{projectId}/hold")
+    public ResearchProjectResponse holdProject(
+            Authentication authentication,
+            @PathVariable UUID projectId
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return projectService.holdProject(projectId, user);
+    }
+
     @PostMapping("/projects/{projectId}/archive")
     public ResearchProjectResponse archiveProject(
             Authentication authentication,

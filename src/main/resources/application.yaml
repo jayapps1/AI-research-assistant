@@ -22,7 +22,7 @@ spring:
   servlet:
     multipart:
       max-file-size: 50MB
-      max-request-size: 55MB
+      max-request-size: 105MB
 
   cache:
     type: simple
@@ -61,7 +61,7 @@ spring:
       type: none
 
 server:
-  port: 8096
+  port: ${PORT:8096}
 
 management:
   endpoints:
@@ -126,6 +126,7 @@ app:
     totp:
       issuer: ${TOTP_ISSUER:AI Research Assistant}
   document:
+    # 50 MiB per file (50 * 1024 * 1024 bytes). Keep Spring multipart max-file-size in sync.
     max-upload-size-bytes: ${DOCUMENT_MAX_UPLOAD_SIZE_BYTES:52428800}
     storage:
       type: local

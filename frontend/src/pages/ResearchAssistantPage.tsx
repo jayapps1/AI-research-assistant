@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Copy,
   Download,
+  Edit3,
   Layers,
   MessageSquare,
   Plus,
@@ -86,11 +87,76 @@ const SUGGESTED_QUESTIONS = [
   'Summarize the relationship between social media use and academic performance.',
 ];
 
+const CUSTOM_INSTRUCTIONS_MAX = 4000;
+
+type GeneratedSectionResponse = {
+  draftText?: string;
+  content?: string;
+  sourceIds?: string[];
+  citations?: Citation[];
+  retrievalSummary?: Record<string, unknown>;
+  savedAt?: string;
+};
+
+function reportSectionType(sectionKey: string) {
+  switch (sectionKey) {
+    case 'POPULATION_SAMPLING':
+    case 'DATA_COLLECTION_METHOD':
+    case 'RESEARCH_INSTRUMENT':
+      return 'METHODOLOGY';
+    case 'CONCLUSION':
+      return 'CONCLUSIONS';
+    case 'CUSTOM':
+      return 'CUSTOM';
+    default:
+      return sectionKey;
+  }
+}
+
+function reportChapterType(sectionKey: string) {
+  if (sectionKey === 'LITERATURE_REVIEW' || sectionKey === 'RESEARCH_GAP' || sectionKey === 'CONCEPTUAL_FRAMEWORK' || sectionKey === 'THEORETICAL_FRAMEWORK') {
+    return 'LITERATURE_REVIEW';
+  }
+  if (sectionKey === 'PROBLEM_STATEMENT' || sectionKey === 'BACKGROUND' || sectionKey === 'OBJECTIVES' || sectionKey === 'RESEARCH_QUESTIONS' || sectionKey === 'HYPOTHESES') {
+    return 'INTRODUCTION';
+  }
+  if (sectionKey === 'METHODOLOGY' || sectionKey === 'POPULATION_SAMPLING' || sectionKey === 'DATA_COLLECTION_METHOD' || sectionKey === 'RESEARCH_INSTRUMENT') {
+    return 'METHODOLOGY';
+  }
+  if (sectionKey === 'FINDINGS') return 'RESULTS';
+  if (sectionKey === 'DISCUSSION' || sectionKey === 'CONCLUSION' || sectionKey === 'RECOMMENDATIONS') return 'DISCUSSION';
+  return 'INTRODUCTION';
+}
+
 function aiUserMessage(code: string | null | undefined, fallback: string) {
+  if (code === 'AI_CREDITS_INSUFFICIENT' || code === 'AI_CREDITS_EXHAUSTED') {
+    return 'Not enough AI credits';
+  }
+  if (code === 'AI_PROVIDER_AUTHENTICATION_FAILED') {
+    return fallback || 'The AI provider could not authenticate the configured API key.';
+  }
   if (code === 'AI_PROVIDER_REQUEST_INVALID') {
     return 'The AI provider rejected this request configuration. Please try again shortly or contact support if it continues.';
   }
+  if (code === 'AI_MODEL_UNAVAILABLE') return fallback || 'The configured AI model is not available.';
+  if (code === 'AI_PROVIDER_RATE_LIMITED') return fallback || 'The AI provider is rate limited. Try again shortly.';
+  if (code === 'AI_PROVIDER_QUOTA_EXHAUSTED') return fallback || 'The AI provider quota is exhausted.';
+  if (code === 'AI_PROVIDER_TIMEOUT') return fallback || 'The AI provider request timed out.';
+  if (code === 'AI_CONTEXT_BUDGET_EXCEEDED' || code === 'CONTEXT_TOO_LARGE') return fallback || 'The selected sources are too large for one AI request.';
+  if (code === 'AI_RESPONSE_INVALID') return fallback || 'The AI response could not be parsed safely.';
+  if (code === 'AI_CITATION_VERIFICATION_FAILED') return fallback || 'The generated draft could not be verified against the selected sources.';
+  if (code === 'AI_INSUFFICIENT_EVIDENCE') return fallback || 'The selected sources do not contain enough relevant evidence for this request.';
   return fallback;
+}
+
+function aiCreditDetail(error: any) {
+  const meta = error?.response?.data?.validationErrors ?? error?.response?.data?.metadata ?? {};
+  const required = Number(meta.estimatedRequiredCredits ?? meta.estimatedRequired ?? NaN);
+  const available = Number(meta.availableCredits ?? meta.totalAvailable ?? NaN);
+  if (Number.isFinite(required) && Number.isFinite(available)) {
+    return `This request may require approximately ${required.toLocaleString(undefined, { maximumFractionDigits: 1 })} AI credits, but ${available.toLocaleString(undefined, { maximumFractionDigits: 1 })} credits are available.`;
+  }
+  return 'This request may require more AI credits than are currently available.';
 }
 
 export function ResearchAssistantPage() {
@@ -104,6 +170,8 @@ export function ResearchAssistantPage() {
   const initialSection = searchParams.get('section') || 'LITERATURE_REVIEW';
 
   const [conversationId, setConversationId] = useState('');
+  const [renamingConversationId, setRenamingConversationId] = useState('');
+  const [conversationTitleDraft, setConversationTitleDraft] = useState('');
   const [scopeType, setScopeType] = useState<'PROJECT_ALL_DOCUMENTS' | 'SELECTED_DOCUMENTS'>('PROJECT_ALL_DOCUMENTS');
   const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
@@ -139,7 +207,7 @@ export function ResearchAssistantPage() {
     enabled: Boolean(projectId),
     refetchInterval: (query) => {
       const docs = (pageContent(query.state.data) as DocumentItem[]) ?? [];
-      const hasProcessing = docs.some((d) => d.status === 'PROCESSING' || d.status === 'UPLOADING');
+      const hasProcessing = docs.some((d) => isNonTerminalDocumentStatus(d.status));
       return hasProcessing ? 3000 : false;
     },
   });
@@ -163,12 +231,159 @@ export function ResearchAssistantPage() {
     enabled: Boolean(workspaceId),
   });
 
+  const persistedMatrixQuery = useQuery({
+    queryKey: ['literature-matrix', projectId],
+    queryFn: () => reportApi.literatureMatrix(projectId),
+    enabled: Boolean(projectId) && mode === 'analyze',
+  });
+
   const activeConversationId = conversationId || conversationsQuery.data?.[0]?.id || '';
 
+  const saveDraftToReport = async (content: string) => {
+    const reports = await reportApi.reports(projectId);
+    let reportId: string;
+    const reportList = pageContent(reports);
+    if (reportList.length > 0) {
+      reportId = reportList[0].id as string;
+    } else {
+      const createdReport = await reportApi.createReport(projectId, {
+        title: projectQuery.data?.title ?? 'Research Report',
+        type: 'RESEARCH_REPORT',
+        citationStyle: projectQuery.data?.citationStyle ?? 'APA_7',
+      });
+      reportId = createdReport.id as string;
+    }
+
+    let chapters = await reportApi.chapters(reportId);
+    if (chapters.length === 0) {
+      await reportApi.assemble(reportId);
+      chapters = await reportApi.chapters(reportId);
+    }
+
+    const sectionMeta = SECTION_OPTIONS.find((s) => s.key === selectedSection);
+    const heading = selectedSection === 'CUSTOM' ? (customSectionTitle || 'Custom Section') : sectionMeta?.label;
+
+    const targetChapterType = reportChapterType(selectedSection);
+    const targetSectionType = reportSectionType(selectedSection);
+    let targetChapter = chapters.find((ch: any) => ch.type === targetChapterType) ?? chapters[0];
+
+    if (!targetChapter) {
+      targetChapter = await reportApi.createChapter(reportId, {
+        title: 'Research Sections',
+        type: 'CUSTOM',
+        displayOrder: 1,
+      });
+    }
+
+    const sections = await reportApi.sections(targetChapter.id as string);
+    const existingSection = sections.find((s: any) => s.heading === heading || s.type === targetSectionType);
+
+    if (existingSection) {
+      await reportApi.updateSection(existingSection.id as string, {
+        content,
+        origin: 'AI_GENERATED',
+      });
+    } else {
+      await reportApi.createSection(targetChapter.id as string, {
+        heading,
+        type: targetSectionType,
+        content,
+        displayOrder: sections.length + 1,
+        origin: 'AI_GENERATED',
+      });
+    }
+
+    if (selectedSection === 'PROBLEM_STATEMENT' && projectQuery.data) {
+      await projectApi.update(projectId, {
+        description: content.slice(0, 4900),
+      });
+    }
+
+    await Promise.all([
+      client.invalidateQueries({ queryKey: ['project-dashboard', projectId] }),
+      client.invalidateQueries({ queryKey: ['reports', projectId] }),
+      client.invalidateQueries({ queryKey: ['references', projectId] }),
+    ]);
+  };
+
+  const ensureTargetReportSection = async () => {
+    const reports = await reportApi.reports(projectId);
+    let reportId: string;
+    const reportList = pageContent(reports);
+    if (reportList.length > 0) {
+      reportId = reportList[0].id as string;
+    } else {
+      const createdReport = await reportApi.createReport(projectId, {
+        title: projectQuery.data?.title ?? 'Research Report',
+        type: 'RESEARCH_REPORT',
+        citationStyle: projectQuery.data?.citationStyle ?? 'APA_7',
+      });
+      reportId = createdReport.id as string;
+    }
+
+    let chapters = await reportApi.chapters(reportId);
+    if (chapters.length === 0) {
+      await reportApi.assemble(reportId);
+      chapters = await reportApi.chapters(reportId);
+    }
+
+    const sectionMeta = SECTION_OPTIONS.find((s) => s.key === selectedSection);
+    const heading = selectedSection === 'CUSTOM' ? (customSectionTitle || 'Custom Section') : sectionMeta?.label;
+    const targetChapterType = reportChapterType(selectedSection);
+    const targetSectionType = reportSectionType(selectedSection);
+    let targetChapter = chapters.find((ch: any) => ch.type === targetChapterType) ?? chapters[0];
+
+    if (!targetChapter) {
+      targetChapter = await reportApi.createChapter(reportId, {
+        title: 'Research Sections',
+        type: targetChapterType,
+        displayOrder: 1,
+      });
+    }
+
+    const sections = await reportApi.sections(targetChapter.id as string);
+    const existingSection = sections.find((s: any) => s.heading === heading || s.type === targetSectionType);
+    if (existingSection) {
+      return existingSection;
+    }
+
+    return reportApi.createSection(targetChapter.id as string, {
+      heading,
+      type: targetSectionType,
+      displayOrder: sections.length + 1,
+      origin: 'USER',
+    });
+  };
+
   const createConversation = useMutation({
-    mutationFn: () => ragApi.createConversation(projectId, { title: 'Research Session' }),
+    mutationFn: (title?: string) => ragApi.createConversation(projectId, { title: title || 'New conversation' }),
     onSuccess: (data) => {
       setConversationId(data.id);
+      client.invalidateQueries({ queryKey: ['rag-conversations', projectId] });
+    },
+  });
+
+  const renameConversation = useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) => ragApi.updateConversation(id, { title }),
+    onSuccess: () => {
+      setRenamingConversationId('');
+      setConversationTitleDraft('');
+      client.invalidateQueries({ queryKey: ['rag-conversations', projectId] });
+    },
+  });
+
+  const archiveConversation = useMutation({
+    mutationFn: (id: string) => ragApi.archiveConversation(id),
+    onSuccess: (_data, id) => {
+      if (conversationId === id) setConversationId('');
+      client.invalidateQueries({ queryKey: ['rag-conversations', projectId] });
+    },
+  });
+
+  const deleteConversation = useMutation({
+    mutationFn: (id: string) => ragApi.deleteConversation(id),
+    onSuccess: (_data, id) => {
+      if (conversationId === id) setConversationId('');
       client.invalidateQueries({ queryKey: ['rag-conversations', projectId] });
     },
   });
@@ -178,7 +393,7 @@ export function ResearchAssistantPage() {
     mutationFn: async (question: string) => {
       let targetConvId = activeConversationId;
       if (!targetConvId) {
-        const newConv = await ragApi.createConversation(projectId, { title: 'Research Session' });
+        const newConv = await ragApi.createConversation(projectId, { title: question.slice(0, 80) });
         targetConvId = newConv.id;
         setConversationId(newConv.id);
       }
@@ -269,15 +484,6 @@ export function ResearchAssistantPage() {
         );
       }
 
-      let activeConvId = activeConversationId;
-      if (!activeConvId) {
-        const newConv = await ragApi.createConversation(projectId, {
-          title: `Generate ${selectedSection}`,
-        });
-        activeConvId = newConv.id;
-        setConversationId(newConv.id);
-      }
-
       const project = projectQuery.data;
       const sectionName = selectedSection === 'CUSTOM' ? (customSectionTitle || 'Custom Section') : sectionMeta?.label;
 
@@ -363,97 +569,34 @@ export function ResearchAssistantPage() {
 
       prompt += `\nProvide an academic, publication-grade draft with comprehensive coverage and verified citations to the provided sources.`;
 
-      const result = await ragApi.ask(activeConvId, {
-        question: prompt,
-        scopeType,
-        documentIds: scopeType === 'SELECTED_DOCUMENTS' ? selectedDocuments : undefined,
-        evidenceLimit: 12,
-      });
+      const targetSection = await ensureTargetReportSection();
+      const documentIds = scopeType === 'SELECTED_DOCUMENTS'
+        ? selectedDocuments
+        : readyDocuments.map((doc) => doc.id);
 
-      return result;
+      return reportApi.generateSection(String(targetSection.id), {
+        documentIds,
+        instructions: prompt,
+        evidenceLimit: Math.max(12, documentIds.length * 6),
+      }) as Promise<GeneratedSectionResponse>;
     },
     onSuccess: (data) => {
-      setGeneratedDraft(data.answer ?? '');
-      setDraftCitations(data.citations ?? data.evidence ?? []);
+      const draftText = data.draftText ?? data.content ?? '';
+      setGeneratedDraft(draftText);
+      setDraftCitations(data.citations ?? []);
       setIsEditingDraft(true);
-      setSaveStatus(null);
+      setSaveStatus(`Draft saved automatically ${data.savedAt ? new Date(data.savedAt).toLocaleTimeString() : new Date().toLocaleTimeString()}`);
       creditsQuery.refetch();
+      client.invalidateQueries({ queryKey: ['reports', projectId] });
+      client.invalidateQueries({ queryKey: ['references', projectId] });
     },
   });
 
   // Save draft to project report sections / writing workspace
   const saveDraftMutation = useMutation({
-    mutationFn: async () => {
-      // Find or create default report
-      const reports = await reportApi.reports(projectId);
-      let reportId: string;
-      const reportList = pageContent(reports);
-      if (reportList.length > 0) {
-        reportId = reportList[0].id as string;
-      } else {
-        const createdReport = await reportApi.createReport(projectId, {
-          title: projectQuery.data?.title ?? 'Research Report',
-          type: 'RESEARCH_REPORT',
-          citationStyle: 'APA_7',
-        });
-        reportId = createdReport.id as string;
-      }
-
-      // Find chapters and appropriate section
-      const chapters = await reportApi.chapters(reportId);
-      const sectionMeta = SECTION_OPTIONS.find((s) => s.key === selectedSection);
-      const heading = selectedSection === 'CUSTOM' ? (customSectionTitle || 'Custom Section') : sectionMeta?.label;
-
-      let targetChapter = chapters.find((ch: any) => {
-        if (selectedSection === 'LITERATURE_REVIEW') return ch.type === 'LITERATURE_REVIEW';
-        if (selectedSection === 'PROBLEM_STATEMENT' || selectedSection === 'BACKGROUND' || selectedSection === 'OBJECTIVES') return ch.type === 'INTRODUCTION';
-        if (selectedSection === 'METHODOLOGY' || selectedSection === 'POPULATION_SAMPLING') return ch.type === 'METHODOLOGY';
-        if (selectedSection === 'FINDINGS') return ch.type === 'RESULTS';
-        if (selectedSection === 'DISCUSSION' || selectedSection === 'CONCLUSION' || selectedSection === 'RECOMMENDATIONS') return ch.type === 'DISCUSSION';
-        return false;
-      }) ?? chapters[0];
-
-      if (!targetChapter) {
-        // Create chapter if none exists
-        targetChapter = await reportApi.createChapter(reportId, {
-          title: 'Research Sections',
-          type: 'CUSTOM',
-          displayOrder: 1,
-        });
-      }
-
-      // Check existing sections in chapter
-      const sections = await reportApi.sections(targetChapter.id as string);
-      const existingSection = sections.find((s: any) => s.heading === heading || s.type === selectedSection);
-
-      if (existingSection) {
-        await reportApi.updateSection(existingSection.id as string, {
-          content: generatedDraft,
-          origin: 'AI_GENERATED',
-        });
-      } else {
-        await reportApi.createSection(targetChapter.id as string, {
-          heading,
-          type: selectedSection === 'CUSTOM' ? 'CUSTOM' : selectedSection,
-          content: generatedDraft,
-          displayOrder: sections.length + 1,
-          origin: 'AI_GENERATED',
-        });
-      }
-
-      // Also update project description/aim if problem statement was generated
-      if (selectedSection === 'PROBLEM_STATEMENT' && projectQuery.data) {
-        await projectApi.update(projectId, {
-          description: generatedDraft.slice(0, 4900),
-        });
-      }
-
-      return true;
-    },
+    mutationFn: async () => saveDraftToReport(generatedDraft),
     onSuccess: () => {
-      setSaveStatus('Saved to Project Writing Workspace!');
-      client.invalidateQueries({ queryKey: ['project-dashboard', projectId] });
-      client.invalidateQueries({ queryKey: ['reports', projectId] });
+      setSaveStatus(`Draft saved ${new Date().toLocaleTimeString()}`);
     },
   });
 
@@ -476,8 +619,12 @@ export function ResearchAssistantPage() {
       : 'Findings and empirical results required. Cannot synthesize section without real research results.';
   } else if (allDocuments.length === 0) {
     generateBlocker = 'No research sources uploaded yet. Please upload research papers in Sources.';
+  } else if (customInstructions.length > CUSTOM_INSTRUCTIONS_MAX) {
+    generateBlocker = 'CUSTOM_INSTRUCTIONS_TOO_LONG: Custom instructions must be 4,000 characters or fewer.';
+  } else if (scopeType === 'SELECTED_DOCUMENTS' && selectedDocuments.length === 0) {
+    generateBlocker = 'Select at least one ready source, or switch to All ready sources.';
   } else if (readyDocuments.length === 0) {
-    const hasProcessing = allDocuments.some((d) => d.status === 'PROCESSING' || d.status === 'UPLOADING');
+    const hasProcessing = allDocuments.some((d) => isNonTerminalDocumentStatus(d.status));
     if (hasProcessing) {
       generateBlocker = 'Uploaded sources are currently being processed. Please wait for indexing to finish.';
     } else {
@@ -727,10 +874,14 @@ export function ResearchAssistantPage() {
                 <Field label="Custom Instructions (Optional)">
                   <Textarea
                     rows={3}
+                    maxLength={CUSTOM_INSTRUCTIONS_MAX + 1}
                     placeholder="e.g., Focus on Ghanaian university studies; Use thematic organization; Compare quantitative vs qualitative findings; Write approx. 1,500 words."
                     value={customInstructions}
                     onChange={(e) => setCustomInstructions(e.target.value)}
                   />
+                  <span className="muted" style={{ fontSize: '0.76rem' }}>
+                    {customInstructions.length}/{CUSTOM_INSTRUCTIONS_MAX} characters
+                  </span>
                 </Field>
               </div>
 
@@ -797,23 +948,35 @@ export function ResearchAssistantPage() {
 
               {generateMutation.isError && (() => {
                 const err = generateMutation.error as any;
-                const code = err?.response?.data?.errorCode || err?.response?.data?.code || 'AI_GENERATION_FAILED';
-                const msg = err?.response?.data?.message || err?.message || 'Generation failed.';
+                const code = err?.code || err?.response?.data?.errorCode || err?.response?.data?.code || 'AI_GENERATION_FAILED';
+                const msg = err?.message || err?.response?.data?.message || 'Generation failed.';
                 const displayMessage = aiUserMessage(code, msg);
+                const insufficientCredits = code === 'AI_CREDITS_INSUFFICIENT' || code === 'AI_CREDITS_EXHAUSTED';
                 return (
-                  <div className="alert danger" style={{ marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div className={`alert ${insufficientCredits ? 'warning' : 'danger'}`} style={{ marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Badge tone="danger">{code}</Badge>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        style={{ fontSize: '0.78rem', padding: '2px 8px' }}
-                        onClick={() => generateMutation.mutate()}
-                      >
-                        <RefreshCw size={12} style={{ marginRight: 4 }} /> Retry
-                      </Button>
+                      <Badge tone={insufficientCredits ? 'warning' : 'danger'}>{insufficientCredits ? 'AI_CREDITS_INSUFFICIENT' : code}</Badge>
+                      {!insufficientCredits && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          style={{ fontSize: '0.78rem', padding: '2px 8px' }}
+                          onClick={() => generateMutation.mutate()}
+                        >
+                          <RefreshCw size={12} style={{ marginRight: 4 }} /> Retry
+                        </Button>
+                      )}
                     </div>
                     <span style={{ fontSize: '0.88rem' }}>{displayMessage}</span>
+                    {insufficientCredits && (
+                      <>
+                        <span style={{ fontSize: '0.84rem' }}>{aiCreditDetail(err)}</span>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <Button type="button" variant="secondary" onClick={() => setScopeType('SELECTED_DOCUMENTS')}>Reduce Request</Button>
+                          <Button type="button" variant="primary" onClick={() => setShowBuyCredits(true)}>Manage AI Credits</Button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 );
               })()}
@@ -934,20 +1097,68 @@ export function ResearchAssistantPage() {
 
               {conversationsQuery.data && conversationsQuery.data.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflowY: 'auto' }}>
-                  {conversationsQuery.data.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      className={`button ${activeConversationId === c.id ? 'primary' : 'secondary'}`}
-                      style={{ textAlign: 'left', justifyContent: 'flex-start', fontSize: '0.82rem', padding: '6px 10px' }}
-                      onClick={() => setConversationId(c.id)}
-                    >
-                      <MessageSquare size={13} style={{ marginRight: 6 }} />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {c.title || 'Research Session'}
-                      </span>
-                    </button>
-                  ))}
+                  {conversationsQuery.data.map((c) => {
+                    const isRenaming = renamingConversationId === c.id;
+                    return (
+                      <div key={c.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 6, alignItems: 'center' }}>
+                        {isRenaming ? (
+                          <form
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              renameConversation.mutate({ id: c.id, title: conversationTitleDraft.trim() || 'Research Session' });
+                            }}
+                          >
+                            <Input
+                              value={conversationTitleDraft}
+                              onChange={(event) => setConversationTitleDraft(event.target.value)}
+                              autoFocus
+                            />
+                          </form>
+                        ) : (
+                          <button
+                            type="button"
+                            className={`button ${activeConversationId === c.id ? 'primary' : 'secondary'}`}
+                            style={{ textAlign: 'left', justifyContent: 'flex-start', fontSize: '0.82rem', padding: '6px 10px', minWidth: 0 }}
+                            onClick={() => setConversationId(c.id)}
+                          >
+                            <MessageSquare size={13} style={{ marginRight: 6 }} />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {c.title || 'Research Session'}
+                            </span>
+                          </button>
+                        )}
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="btn-compact"
+                            onClick={() => {
+                              setRenamingConversationId(c.id);
+                              setConversationTitleDraft(c.title || 'Research Session');
+                            }}
+                          >
+                            <Edit3 size={12} />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="btn-compact"
+                            onClick={() => archiveConversation.mutate(c.id)}
+                          >
+                            Archive
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="btn-compact"
+                            onClick={() => deleteConversation.mutate(c.id)}
+                          >
+                            <Trash2 size={12} />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="muted" style={{ fontSize: '0.82rem' }}>No conversations yet. Start asking questions below.</p>
@@ -995,12 +1206,22 @@ export function ResearchAssistantPage() {
                 const code = err?.response?.data?.errorCode || err?.response?.data?.code || 'AI_QUERY_FAILED';
                 const msg = err?.response?.data?.message || err?.message || 'Query failed.';
                 const displayMessage = aiUserMessage(code, msg);
+                const insufficientCredits = code === 'AI_CREDITS_INSUFFICIENT' || code === 'AI_CREDITS_EXHAUSTED';
                 return (
-                  <div className="alert danger" style={{ marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div className={`alert ${insufficientCredits ? 'warning' : 'danger'}`} style={{ marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Badge tone="danger">{code}</Badge>
+                      <Badge tone={insufficientCredits ? 'warning' : 'danger'}>{insufficientCredits ? 'AI_CREDITS_INSUFFICIENT' : code}</Badge>
                     </div>
                     <span style={{ fontSize: '0.88rem' }}>{displayMessage}</span>
+                    {insufficientCredits && (
+                      <>
+                        <span style={{ fontSize: '0.84rem' }}>{aiCreditDetail(err)}</span>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <Button type="button" variant="secondary" onClick={() => setScopeType('SELECTED_DOCUMENTS')}>Reduce Request</Button>
+                          <Button type="button" variant="primary" onClick={() => setShowBuyCredits(true)}>Manage AI Credits</Button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 );
               })()}
@@ -1234,6 +1455,41 @@ export function ResearchAssistantPage() {
                     </div>
                   )}
                 </div>
+              ) : selectedAnalysis === 'LITERATURE_MATRIX' && persistedMatrixQuery.data?.markdownTable ? (
+                <div style={{ overflowX: 'auto' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, padding: '8px 12px', background: 'rgba(59, 130, 246, 0.08)', borderRadius: 6, border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Table size={16} className="text-primary" />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Persisted Project Evidence Matrix (Extracted from Literature Review)</span>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      className="btn-compact"
+                      onClick={() => {
+                        navigator.clipboard.writeText(persistedMatrixQuery.data?.markdownTable ?? '');
+                        setSaveStatus('Matrix copied to clipboard!');
+                        setTimeout(() => setSaveStatus(null), 3000);
+                      }}
+                      style={{ fontSize: '0.78rem' }}
+                    >
+                      <Copy size={13} style={{ marginRight: 4 }} /> Copy
+                    </Button>
+                  </div>
+                  <div
+                    style={{
+                      padding: 16,
+                      borderRadius: 8,
+                      background: 'var(--surface-hover)',
+                      border: '1px solid var(--border)',
+                      fontSize: '0.85rem',
+                      lineHeight: 1.6,
+                      whiteSpace: 'pre-wrap',
+                      fontFamily: 'var(--font-mono, monospace)',
+                    }}
+                  >
+                    {persistedMatrixQuery.data.markdownTable}
+                  </div>
+                </div>
               ) : !analyzeMutation.isPending && (
                 <EmptyState
                   title="Run Literature Analysis"
@@ -1422,4 +1678,9 @@ function BuyAiCreditsModal({ open, onClose, workspaceId }: { open: boolean; onCl
       )}
     </Modal>
   );
+}
+
+function isNonTerminalDocumentStatus(status?: string | null) {
+  return ['UPLOADING', 'UPLOADED', 'QUEUED', 'PROCESSING', 'EXTRACTING', 'CHUNKING', 'EMBEDDING', 'INDEXING', 'STORED']
+    .includes((status ?? '').toUpperCase());
 }

@@ -9,11 +9,14 @@ import com.researchassistant.ai.provider.AiGenerationProvider;
 import com.researchassistant.ai.provider.AiProviderType;
 import com.researchassistant.ai.usage.AiRequestStatus;
 import com.researchassistant.rag.evidence.EvidenceBundle;
+import com.researchassistant.rag.evidence.EvidenceItem;
 import com.researchassistant.rag.generation.GeneratedAnswerDraft;
 import com.researchassistant.rag.generation.GroundedAnswerGenerator;
 import com.researchassistant.rag.generation.GroundingPromptBuilder;
+import com.researchassistant.rag.citation.CitationVerificationResult;
 
 import com.researchassistant.ai.usage.AiProviderBudgetService;
+import com.researchassistant.rag.service.RagContextBudgetService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -43,19 +46,22 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
     private final GroundingPromptBuilder promptBuilder;
     private final ObjectMapper objectMapper;
     private final AiProviderBudgetService budgetService;
+    private final RagContextBudgetService contextBudgetService;
 
     public OpenAiGenerationProvider(
             AiProperties properties,
             ObjectProvider<ChatModel> chatModel,
             GroundingPromptBuilder promptBuilder,
             ObjectMapper objectMapper,
-            AiProviderBudgetService budgetService
+            AiProviderBudgetService budgetService,
+            RagContextBudgetService contextBudgetService
     ) {
         this.properties = properties;
         this.chatModel = chatModel.getIfAvailable();
         this.promptBuilder = promptBuilder;
         this.objectMapper = objectMapper;
         this.budgetService = budgetService;
+        this.contextBudgetService = contextBudgetService;
     }
 
     @Override
@@ -81,7 +87,8 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
             throw new IllegalStateException("OpenAI generation provider is disabled or unavailable.");
         }
 
-        budgetService.checkBudgetBeforeCall(providerName(), modelName(), 2000, properties.generation().maxOutputTokens());
+        int estimatedInputTokens = contextBudgetService.estimatePromptTokens(request.promptText());
+        budgetService.checkBudgetBeforeCall(providerName(), modelName(), estimatedInputTokens, properties.generation().maxOutputTokens());
 
         long startTime = System.currentTimeMillis();
         OffsetDateTime startedAt = OffsetDateTime.now();
@@ -90,6 +97,16 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
             OpenAiChatOptions options = buildChatOptions();
 
             Prompt prompt = new Prompt(request.promptText(), options);
+            log.info(
+                    "OpenAI request dispatch: correlationId={} taskType={} projectId={} selectedDocumentCount={} retrievedChunkCount={} estimatedInputTokens={} configuredModel={}",
+                    MDC.get("requestId"),
+                    request.taskType(),
+                    request.projectId(),
+                    selectedDocumentCount(request.evidenceBundle()),
+                    retrievedChunkCount(request.evidenceBundle()),
+                    estimatedInputTokens,
+                    modelName()
+            );
             ChatResponse response = chatModel.call(prompt);
 
             long latencyMs = System.currentTimeMillis() - startTime;
@@ -156,14 +173,19 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
             String correlationId = MDC.get("requestId");
 
             log.error(
-                    "OpenAI generation failed: provider=OPENAI model={} exception={} httpStatus={} providerCode={} providerParam={} providerRequestId={} correlationId={} safeProviderMessage={}",
+                    "OpenAI generation failed: correlationId={} taskType={} projectId={} selectedDocumentCount={} retrievedChunkCount={} estimatedInputTokens={} configuredModel={} provider=OPENAI exception={} httpStatus={} providerCode={} providerParam={} providerRequestId={} safeProviderMessage={}",
+                    correlationId,
+                    request.taskType(),
+                    request.projectId(),
+                    selectedDocumentCount(request.evidenceBundle()),
+                    retrievedChunkCount(request.evidenceBundle()),
+                    estimatedInputTokens,
                     modelName(),
                     e.getClass().getName(),
                     providerError.httpStatus(),
                     providerError.providerCode(),
                     providerError.parameter(),
                     providerError.providerRequestId(),
-                    correlationId,
                     providerError.safeMessage()
             );
 
@@ -234,6 +256,89 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
         throw new com.researchassistant.ai.exception.AiGenerationException(failureCode, failureReason, result.cause());
     }
 
+    @Override
+    public boolean supportsCitationRepair() {
+        return true;
+    }
+
+    @Override
+    public GeneratedAnswerDraft repairCitations(
+            EvidenceBundle evidenceBundle,
+            GeneratedAnswerDraft draft,
+            CitationVerificationResult verification
+    ) {
+        String promptText = buildCitationRepairPrompt(evidenceBundle, draft, verification);
+        AiTaskRequest taskRequest = new AiTaskRequest(
+                com.researchassistant.ai.orchestration.AiTaskType.GROUNDED_QA,
+                null,
+                evidenceBundle.scope() != null ? evidenceBundle.scope().workspaceId() : null,
+                evidenceBundle.scope() != null ? evidenceBundle.scope().projectId() : null,
+                evidenceBundle.query(),
+                promptText,
+                evidenceBundle.scope(),
+                evidenceBundle,
+                GeneratedAnswerDraft.class,
+                properties.privacy().externalResearchContentEnabled()
+        );
+        AiTaskResult<GeneratedAnswerDraft> result = generate(taskRequest, GeneratedAnswerDraft.class);
+        if (result.status() == AiRequestStatus.COMPLETED && result.result() != null) {
+            return result.result();
+        }
+        String failureReason = !result.warnings().isEmpty()
+                ? String.join(", ", result.warnings())
+                : (result.failureCategory() != null ? result.failureCategory() : "AI citation repair failed");
+        String failureCode = result.failureCode() != null ? result.failureCode()
+                : (result.failureCategory() != null ? result.failureCategory() : "AI_CITATION_REPAIR_FAILED");
+        throw new com.researchassistant.ai.exception.AiGenerationException(failureCode, failureReason, result.cause());
+    }
+
+    private String buildCitationRepairPrompt(
+            EvidenceBundle evidenceBundle,
+            GeneratedAnswerDraft draft,
+            CitationVerificationResult verification
+    ) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("""
+                You are repairing citations in a source-grounded academic answer.
+                Return only the repaired answer text.
+                Use ONLY the supplied evidence IDs.
+                Replace invalid citations with valid supplied evidence IDs only where the evidence supports the claim.
+                Remove unsupported claims when no supplied evidence supports them.
+                If the generated answer is empty, write a new concise source-grounded answer from the supplied evidence.
+                Do not invent evidence IDs, authors, years, document codes, bibliography entries, page numbers, or URLs.
+                Keep supported content unchanged unless needed to repair citations.
+                Use [E1] for one citation and [E1][E4] for multiple citations.
+
+                Allowed evidence IDs:
+                """);
+        for (EvidenceItem item : evidenceBundle.items()) {
+            prompt.append("E").append(item.evidenceOrdinal()).append("\n");
+        }
+        prompt.append("\nInvalid citation markers detected:\n");
+        for (String marker : verification.invalidCitationMarkers()) {
+            prompt.append(marker).append("\n");
+        }
+        prompt.append("\nEvidence summaries:\n");
+        for (EvidenceItem item : evidenceBundle.items()) {
+            prompt.append("<evidence id=\"E")
+                    .append(item.evidenceOrdinal())
+                    .append("\">")
+                    .append(abbreviate(item.text(), 800))
+                    .append("</evidence>\n");
+        }
+        prompt.append("\nGenerated answer to repair:\n")
+                .append(draft.answerText() == null ? "" : draft.answerText());
+        return prompt.toString();
+    }
+
+    private String abbreviate(String text, int maxChars) {
+        if (text == null) {
+            return "";
+        }
+        String trimmed = text.trim();
+        return trimmed.length() <= maxChars ? trimmed : trimmed.substring(0, maxChars);
+    }
+
     private String cleanGeneratedText(String rawText) {
         if (rawText == null) {
             return "";
@@ -264,14 +369,11 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
                 java.util.List<com.researchassistant.rag.generation.GeneratedCitation> citations = new java.util.ArrayList<>();
                 java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\[?E(\\d+)]?").matcher(rawText != null ? rawText : "");
                 java.util.Set<Integer> seen = new java.util.HashSet<>();
-                java.util.Set<Integer> validOrdinals = evidenceBundle != null
-                        ? evidenceBundle.items().stream().map(com.researchassistant.rag.evidence.EvidenceItem::evidenceOrdinal).collect(java.util.stream.Collectors.toSet())
-                        : null;
 
                 while (m.find()) {
                     try {
                         int ordinal = Integer.parseInt(m.group(1));
-                        if ((validOrdinals == null || validOrdinals.contains(ordinal)) && seen.add(ordinal)) {
+                        if (seen.add(ordinal)) {
                             citations.add(new com.researchassistant.rag.generation.GeneratedCitation(ordinal, "Evidence reference E" + ordinal));
                         }
                     } catch (NumberFormatException ignored) {}
@@ -503,6 +605,9 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
         if ((httpStatus != null && httpStatus == 404) || "model_not_found".equals(providerCode) || (msg.contains("model") && (msg.contains("not found") || msg.contains("does not exist") || msg.contains("not permitted") || msg.contains("permission")))) {
             return new SafeErrorDetails("AI_MODEL_UNAVAILABLE", "The configured AI model is not available.");
         }
+        if ("context_length_exceeded".equals(providerCode) || msg.contains("context_length_exceeded") || msg.contains("maximum context length") || msg.contains("context length")) {
+            return new SafeErrorDetails("AI_CONTEXT_BUDGET_EXCEEDED", "The AI request would exceed the configured model context window.");
+        }
         if ((httpStatus != null && httpStatus == 400) || msg.contains("400") || msg.contains("bad request") || msg.contains("invalid request") || msg.contains("invalid_request_error")) {
             return new SafeErrorDetails("AI_PROVIDER_REQUEST_INVALID", "The AI request was rejected by the provider as invalid.");
         }
@@ -513,6 +618,14 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
             return new SafeErrorDetails("AI_PROVIDER_UNAVAILABLE", "Unable to connect to the AI provider. Please check network connectivity.");
         }
         return new SafeErrorDetails("AI_GENERATION_FAILED", "An error occurred while communicating with the AI service.");
+    }
+
+    private int selectedDocumentCount(EvidenceBundle bundle) {
+        return bundle == null || bundle.scope() == null ? 0 : bundle.scope().authorizedDocumentIds().size();
+    }
+
+    private int retrievedChunkCount(EvidenceBundle bundle) {
+        return bundle == null || bundle.items() == null ? 0 : bundle.items().size();
     }
 
     private record ProviderErrorDetails(

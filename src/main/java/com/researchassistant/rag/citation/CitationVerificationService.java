@@ -7,7 +7,7 @@ import com.researchassistant.rag.generation.GeneratedCitation;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,6 +21,15 @@ public class CitationVerificationService {
 
     private static final Pattern DOC_REFERENCE =
             Pattern.compile("\\bDOC-\\d{3,}\\b");
+    private final CitationMarkerParser markerParser;
+
+    public CitationVerificationService() {
+        this(new CitationMarkerParser());
+    }
+
+    public CitationVerificationService(CitationMarkerParser markerParser) {
+        this.markerParser = markerParser;
+    }
 
     public CitationVerificationResult verify(
             GeneratedAnswerDraft draft,
@@ -32,14 +41,30 @@ public class CitationVerificationService {
                         RagQueryEvidence::getEvidenceOrdinal,
                         Function.identity()
                 ));
-        Set<Integer> seen = new HashSet<>();
+        CitationMarkerParser.ParsedCitationMarkers parsedMarkers =
+                markerParser.parse(draft.answerText());
+        Set<Integer> citedOrdinals = new LinkedHashSet<>(parsedMarkers.evidenceOrdinals());
         for (GeneratedCitation citation : draft.citations()) {
-            if (!byOrdinal.containsKey(citation.evidenceOrdinal())) {
-                errors.add("Citation references evidence that was not supplied.");
+            citedOrdinals.add(citation.evidenceOrdinal());
+        }
+
+        List<Integer> missingOrdinals = citedOrdinals.stream()
+                .filter(ordinal -> !byOrdinal.containsKey(ordinal))
+                .toList();
+        List<String> invalidMarkers = missingOrdinals.stream()
+                .map(ordinal -> "[E" + ordinal + "]")
+                .distinct()
+                .toList();
+        if (!missingOrdinals.isEmpty()) {
+            errors.add("Citation references evidence that was not supplied.");
+        }
+        for (GeneratedCitation citation : draft.citations()) {
+            if (citation.evidenceOrdinal() <= 0) {
+                errors.add("Citation references an invalid evidence identifier.");
             }
-            if (!seen.add(citation.evidenceOrdinal())) {
-                errors.add("Duplicate evidence citation reference.");
-            }
+        }
+        if (citedOrdinals.isEmpty()) {
+            errors.add("Generated answer did not cite any supplied evidence.");
         }
         Matcher matcher = DOC_REFERENCE.matcher(draft.answerText() == null ? "" : draft.answerText());
         while (matcher.find()) {
@@ -54,6 +79,16 @@ public class CitationVerificationService {
         if (draft.answerText() == null || draft.answerText().isBlank()) {
             errors.add("Generated answer is empty.");
         }
-        return new CitationVerificationResult(errors.isEmpty(), errors);
+        List<Integer> verifiedOrdinals = citedOrdinals.stream()
+                .filter(byOrdinal::containsKey)
+                .toList();
+        return new CitationVerificationResult(
+                errors.isEmpty(),
+                errors,
+                verifiedOrdinals,
+                parsedMarkers.markers(),
+                invalidMarkers,
+                missingOrdinals
+        );
     }
 }

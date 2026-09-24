@@ -135,6 +135,18 @@ public class ResearchProjectService {
         } else if (template != null) {
             project.setCitationStyleLocked(template.isCitationStyleLocked());
         }
+        if (request.citationPresentation() != null) {
+            project.setCitationPresentation(request.citationPresentation());
+        }
+        if (normalizeOptionalText(request.bibliographySort()) != null) {
+            project.setBibliographySort(normalizeOptionalText(request.bibliographySort()));
+        }
+        if (request.includeDoi() != null) {
+            project.setIncludeDoi(request.includeDoi());
+        }
+        if (request.includeUrl() != null) {
+            project.setIncludeUrl(request.includeUrl());
+        }
         project.setStatus(ResearchProjectStatus.DRAFT);
         project.setCreatedBy(currentUser);
         project.setNextDocumentNumber(1L);
@@ -324,6 +336,21 @@ public class ResearchProjectService {
         if (request.citationStyleLocked() != null) {
             project.setCitationStyleLocked(request.citationStyleLocked());
         }
+        if (request.citationPresentation() != null) {
+            project.setCitationPresentation(request.citationPresentation());
+        }
+        if (request.bibliographySort() != null) {
+            project.setBibliographySort(normalizeOptionalText(request.bibliographySort()) == null ? "STYLE_DEFAULT" : normalizeOptionalText(request.bibliographySort()));
+        }
+        if (request.includeDoi() != null) {
+            project.setIncludeDoi(request.includeDoi());
+        }
+        if (request.includeUrl() != null) {
+            project.setIncludeUrl(request.includeUrl());
+        }
+        if (request.status() != null) {
+            changeStatus(project, request.status());
+        }
 
         auditService.record(
                 currentUser.getId(),
@@ -335,6 +362,22 @@ public class ResearchProjectService {
                 project,
                 context.projectMembership().orElse(null)
         );
+    }
+
+    private void changeStatus(ResearchProject project, ResearchProjectStatus targetStatus) {
+        if (project.getStatus() == targetStatus) {
+            return;
+        }
+        if (project.getStatus() == ResearchProjectStatus.TRASHED && targetStatus != ResearchProjectStatus.ACTIVE) {
+            throw new InvalidProjectOperationException("Trashed projects must be restored before changing status.");
+        }
+        if (project.getStatus() == ResearchProjectStatus.ARCHIVED && targetStatus != ResearchProjectStatus.ACTIVE) {
+            throw new InvalidProjectOperationException("Archived projects must be restored before changing status.");
+        }
+        if (targetStatus == ResearchProjectStatus.TRASHED || targetStatus == ResearchProjectStatus.ARCHIVED) {
+            throw new InvalidProjectOperationException("Use archive or trash actions for destructive status changes.");
+        }
+        project.setStatus(targetStatus);
     }
 
     public ResearchProjectResponse activateProject(
@@ -349,7 +392,8 @@ public class ResearchProjectService {
 
         ResearchProject project = context.project();
         if (project.getStatus() != ResearchProjectStatus.DRAFT
-                && project.getStatus() != ResearchProjectStatus.COMPLETED) {
+                && project.getStatus() != ResearchProjectStatus.COMPLETED
+                && project.getStatus() != ResearchProjectStatus.ON_HOLD) {
             throw new InvalidProjectOperationException(
                     "Only draft or completed projects can be activated."
             );
@@ -396,6 +440,20 @@ public class ResearchProjectService {
                 project,
                 context.projectMembership().orElse(null)
         );
+    }
+
+    public ResearchProjectResponse holdProject(UUID projectId, User currentUser) {
+        ProjectAuthorizationContext context =
+                authorizationService.requireProjectAdminAccess(projectId, currentUser);
+        ResearchProject project = context.project();
+        if (project.getStatus() == ResearchProjectStatus.ARCHIVED
+                || project.getStatus() == ResearchProjectStatus.TRASHED) {
+            throw new InvalidProjectOperationException("Archived or trashed projects cannot be put on hold.");
+        }
+        project.setStatus(ResearchProjectStatus.ON_HOLD);
+        auditService.record(currentUser.getId(), SecurityAuditEventType.RESEARCH_PROJECT_UPDATED);
+        cacheInvalidationService.evictProjectMetadata(projectId);
+        return toProjectResponse(project, context.projectMembership().orElse(null));
     }
 
     public ResearchProjectResponse archiveProject(
@@ -730,6 +788,10 @@ public class ResearchProjectService {
                 project.getReportTemplate() == null ? null : project.getReportTemplate().getName(),
                 project.getCitationStyle() == null ? com.researchassistant.analysis.entity.CitationStyle.APA_7 : project.getCitationStyle(),
                 project.isCitationStyleLocked(),
+                project.getCitationPresentation() == null ? com.researchassistant.analysis.entity.CitationPresentation.PARENTHETICAL : project.getCitationPresentation(),
+                project.getBibliographySort(),
+                project.isIncludeDoi(),
+                project.isIncludeUrl(),
                 project.getStatus(),
                 project.getCreatedBy().getId(),
                 currentUserMembership == null

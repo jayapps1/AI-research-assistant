@@ -42,6 +42,10 @@ public class ResearchReport {
     private Integer submissionYear;
     @Enumerated(EnumType.STRING) @Column(name = "citation_style", nullable = false, length = 60)
     private CitationStyle citationStyle = CitationStyle.APA_7;
+    @Column(name = "include_uncited_references", nullable = false)
+    private boolean includeUncitedReferences = false;
+    @Column(name = "literature_matrix_inclusion", nullable = false, length = 40)
+    private String literatureMatrixInclusion = "NONE";
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 30)
     private ContentOrigin origin = ContentOrigin.USER;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "created_by", nullable = false)

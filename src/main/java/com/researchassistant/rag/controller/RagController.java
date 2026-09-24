@@ -4,6 +4,7 @@ import com.researchassistant.identity.entity.User;
 import com.researchassistant.identity.service.AuthenticatedUserResolver;
 import com.researchassistant.rag.dto.request.CreateRagConversationRequest;
 import com.researchassistant.rag.dto.request.SubmitRagQueryRequest;
+import com.researchassistant.rag.dto.request.UpdateRagConversationRequest;
 import com.researchassistant.rag.dto.response.GroundedAnswerResponse;
 import com.researchassistant.rag.dto.response.RagConversationDetailResponse;
 import com.researchassistant.rag.dto.response.RagConversationResponse;
@@ -16,6 +17,8 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -71,6 +74,35 @@ public class RagController {
     ) {
         User user = authenticatedUserResolver.requireActiveUser(authentication);
         return conversationService.detail(conversationId, user);
+    }
+
+    @PatchMapping("/rag/conversations/{conversationId}")
+    public RagConversationResponse updateConversation(
+            Authentication authentication,
+            @PathVariable UUID conversationId,
+            @Valid @RequestBody UpdateRagConversationRequest request
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return conversationService.update(conversationId, user, request);
+    }
+
+    @PostMapping("/rag/conversations/{conversationId}/archive")
+    public RagConversationResponse archiveConversation(
+            Authentication authentication,
+            @PathVariable UUID conversationId
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return conversationService.archive(conversationId, user);
+    }
+
+    @DeleteMapping("/rag/conversations/{conversationId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteConversation(
+            Authentication authentication,
+            @PathVariable UUID conversationId
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        conversationService.delete(conversationId, user);
     }
 
     @PostMapping("/rag/conversations/{conversationId}/queries")

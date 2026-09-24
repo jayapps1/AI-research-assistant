@@ -10,6 +10,7 @@ import java.time.OffsetDateTime; import java.util.UUID;
 public class ReportExportJob {
     @Id @Column(nullable=false, updatable=false) private UUID id;
     @ManyToOne(fetch=FetchType.LAZY, optional=false) @JoinColumn(name="report_id", nullable=false) private ResearchReport report;
+    @ManyToOne(fetch=FetchType.LAZY) @JoinColumn(name="final_document_version_id") private ReportDocumentVersion finalDocumentVersion;
     @Enumerated(EnumType.STRING) @Column(nullable=false, length=40) private ReportExportFormat format;
     @Enumerated(EnumType.STRING) @Column(nullable=false, length=40) private ReportExportStatus status = ReportExportStatus.QUEUED;
     @Column(name="storage_key", length=1000) private String storageKey;

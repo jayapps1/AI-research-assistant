@@ -31,14 +31,22 @@ public record CreateResearchProjectRequest(
 
         com.researchassistant.analysis.entity.CitationStyle citationStyle,
 
-        Boolean citationStyleLocked
+        Boolean citationStyleLocked,
+
+        com.researchassistant.analysis.entity.CitationPresentation citationPresentation,
+
+        String bibliographySort,
+
+        Boolean includeDoi,
+
+        Boolean includeUrl
 ) {
     public CreateResearchProjectRequest(String title, String description) {
-        this(null, title, description, null, null, null, null, null, null, null);
+        this(null, title, description, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public CreateResearchProjectRequest(UUID workspaceId, String title, String description) {
-        this(workspaceId, title, description, null, null, null, null, null, null, null);
+        this(workspaceId, title, description, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public CreateResearchProjectRequest(
@@ -50,6 +58,6 @@ public record CreateResearchProjectRequest(
             String researchType,
             String keywords
     ) {
-        this(workspaceId, title, description, researchAim, studyArea, researchType, keywords, null, null, null);
+        this(workspaceId, title, description, researchAim, studyArea, researchType, keywords, null, null, null, null, null, null, null);
     }
 }

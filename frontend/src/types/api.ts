@@ -162,6 +162,10 @@ export interface ResearchProject {
   reportTemplateName?: string;
   citationStyle?: string;
   citationStyleLocked?: boolean;
+  citationPresentation?: string;
+  bibliographySort?: string;
+  includeDoi?: boolean;
+  includeUrl?: boolean;
   status?: string;
   role?: string;
   currentUserRole?: string;
@@ -218,6 +222,10 @@ export interface DocumentItem {
   url?: string | null;
   sourceType?: string | null;
   keywords?: string | null;
+  bibliographicMetadataStatus?: 'COMPLETE' | 'PARTIAL' | 'INCOMPLETE' | 'NEEDS_REVIEW' | 'VERIFIED' | string;
+  bibliographicMetadataSource?: string | null;
+  bibliographicMetadataConfidence?: number | null;
+  bibliographicMetadataExtractedAt?: string | null;
   version?: number;
   currentVersion?: DocumentVersionSummary | null;
   status?: string;
@@ -268,6 +276,9 @@ export interface Citation {
   quote?: string;
   snippet?: string;
   supportingExcerpt?: string;
+  formattedCitation?: string;
+  metadataComplete?: boolean;
+  metadataWarning?: string | null;
   relevance?: number;
   number?: number;
   versionNumber?: number;
@@ -742,22 +753,104 @@ export interface SectionCapabilitiesResponse {
 }
 
 export interface TableOfContentsSectionItem {
-  sectionId: UUID;
+  sectionId?: UUID;
   sectionNumber?: string;
-  title: string;
-  pageNumber: number;
+  title?: string;
+  heading?: string;
+  displayOrder?: number;
+  type?: string;
+  pageNumber?: number;
 }
 
 export interface TableOfContentsItem {
-  chapterId: UUID;
+  chapterId?: UUID;
   chapterNumber?: number;
   title: string;
-  pageNumber: number;
+  displayOrder?: number;
+  pageNumber?: number;
   sections: TableOfContentsSectionItem[];
 }
 
 export interface TableOfContentsResponse {
   reportId: UUID;
-  title: string;
-  items: TableOfContentsItem[];
+  title?: string;
+  reportTitle?: string;
+  items?: TableOfContentsItem[];
+  chapters?: TableOfContentsItem[];
+  formattedMarkdown?: string;
 }
+
+export type LiteratureMatrixInclusion = 'EXCLUDED' | 'CHAPTER_TWO' | 'APPENDIX';
+
+export interface SectionStructureResponse {
+  id: UUID;
+  chapterId: UUID;
+  parentSectionId?: UUID | null;
+  sectionNumber?: string | null;
+  title?: string;
+  heading?: string;
+  sectionType: string;
+  status: string;
+  displayOrder: number;
+  required: boolean;
+  systemDefined: boolean;
+  aiEnabled: boolean;
+  wordCount: number;
+  citationCount: number;
+  subsections: SectionStructureResponse[];
+}
+
+export interface ChapterStructureResponse {
+  id: UUID;
+  chapterNumber?: number | null;
+  title: string;
+  description?: string | null;
+  displayOrder: number;
+  required: boolean;
+  systemDefined: boolean;
+  sections: SectionStructureResponse[];
+}
+
+export interface ReportStructureResponse {
+  id: UUID;
+  projectId: UUID;
+  title: string;
+  status: string;
+  citationStyle: string;
+  includeUncitedReferences: boolean;
+  literatureMatrixInclusion: LiteratureMatrixInclusion;
+  chapters: ChapterStructureResponse[];
+}
+
+export interface ReorderItem {
+  id: UUID;
+  parentId?: UUID | null;
+  displayOrder: number;
+}
+
+export interface ReorderStructureRequest {
+  chapters?: ReorderItem[];
+  sections?: ReorderItem[];
+}
+
+export interface UpdateReportSettingsRequest {
+  citationStyle?: string;
+  includeUncitedReferences?: boolean;
+  literatureMatrixInclusion?: LiteratureMatrixInclusion;
+}
+
+export interface LiteratureMatrixResponse {
+  id: UUID;
+  projectId: UUID;
+  title: string;
+  matrixDataJson?: string | null;
+  markdownTable?: string | null;
+  updatedAt: string;
+}
+
+export interface SaveLiteratureMatrixRequest {
+  title?: string;
+  matrixDataJson?: string;
+  markdownTable?: string;
+}
+

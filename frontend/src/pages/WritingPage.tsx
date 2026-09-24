@@ -7,11 +7,12 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { projectApi, reportApi } from '../api/endpoints';
-import { Breadcrumbs, Button, Card, Field, Textarea, Badge } from '../components/ui';
+import { Breadcrumbs, Button, Card, Field, Badge } from '../components/ui';
 import { EmptyState, PageLoading } from '../components/states';
 import { useProjectId } from '../hooks/useProjectId';
 import { pageContent } from '../utils/collections';
 import { paths } from '../routes/paths';
+import { ReportRichEditor } from '../components/editor/ReportRichEditor';
 
 interface WritingSectionDef {
   key: string;
@@ -84,6 +85,7 @@ export function WritingPage() {
     (s: any) => s.type === currentSectionDef.type || s.heading === currentSectionDef.title
   );
   const initialContent = matchedSection?.content ?? (activeSectionKey === 'PROBLEM_STATEMENT' ? projectQuery.data?.description ?? '' : '');
+  const initialContentJson = matchedSection?.contentJson ?? '';
   const initialOrigin = matchedSection?.origin ?? 'USER';
 
   if (!projectId) {
@@ -176,8 +178,10 @@ export function WritingPage() {
           key={`${activeSectionKey}-${matchedSection?.id ?? 'new'}`}
           projectId={projectId}
           reportId={reportId}
+          citationStyle={projectQuery.data?.citationStyle ?? 'APA_7'}
           sectionDef={currentSectionDef}
           initialContent={initialContent}
+          initialContentJson={initialContentJson}
           initialOrigin={initialOrigin}
           initialSectionId={matchedSection?.id ?? null}
           initialChapterId={matchedSection?.chapterId ?? null}
@@ -192,8 +196,10 @@ export function WritingPage() {
 function ActiveSectionEditor({
   projectId,
   reportId,
+  citationStyle = 'APA_7',
   sectionDef,
   initialContent,
+  initialContentJson = '',
   initialOrigin,
   initialSectionId,
   initialChapterId,
@@ -202,8 +208,10 @@ function ActiveSectionEditor({
 }: {
   projectId: string;
   reportId?: string;
+  citationStyle?: string;
   sectionDef: WritingSectionDef;
   initialContent: string;
+  initialContentJson?: string;
   initialOrigin: string;
   initialSectionId: string | null;
   initialChapterId: string | null;
@@ -212,17 +220,18 @@ function ActiveSectionEditor({
 }) {
   const client = useQueryClient();
   const [content, setContent] = useState(initialContent);
+  const [contentJson, setContentJson] = useState(initialContentJson);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (payload?: { content?: string; contentJson?: string; plainText?: string }) => {
       let currentReportId = reportId;
       if (!currentReportId) {
         const created = await reportApi.createReport(projectId, {
           title: 'Research Report',
           type: 'RESEARCH_REPORT',
-          citationStyle: 'APA_7',
+          citationStyle: citationStyle || 'APA_7',
         });
         currentReportId = created.id as string;
       }
@@ -241,16 +250,22 @@ function ActiveSectionEditor({
         targetChapterId = ch.id as string;
       }
 
+      const textContent = payload?.content ?? content;
+      const jsonContent = payload?.contentJson ?? contentJson;
+      const plainText = payload?.plainText;
+
       if (initialSectionId) {
         await reportApi.updateSection(initialSectionId, {
-          content,
+          content: textContent,
+          contentJson: jsonContent,
+          plainText,
           origin: initialOrigin,
         });
       } else {
         await reportApi.createSection(targetChapterId, {
           heading: sectionDef.title,
           type: sectionDef.type,
-          content,
+          content: textContent,
           displayOrder: existingSectionsCount + 1,
           origin: initialOrigin,
         });
@@ -258,7 +273,7 @@ function ActiveSectionEditor({
 
       if (sectionDef.key === 'PROBLEM_STATEMENT') {
         await projectApi.update(projectId, {
-          description: content.slice(0, 4900),
+          description: textContent.slice(0, 4900),
         });
       }
 
@@ -269,11 +284,12 @@ function ActiveSectionEditor({
       client.invalidateQueries({ queryKey: ['report-sections-all', reportId] });
       client.invalidateQueries({ queryKey: ['project', projectId] });
       client.invalidateQueries({ queryKey: ['project-dashboard', projectId] });
+      setTimeout(() => setSaveMessage(null), 3000);
     },
   });
 
   return (
-    <Card>
+    <Card style={{ padding: '1.25rem' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div>
           <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: 0 }}>
@@ -283,19 +299,32 @@ function ActiveSectionEditor({
             {wordCount} words • Origin: {initialOrigin}
           </span>
         </div>
-        {saveMessage && <Badge tone="success">{saveMessage}</Badge>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {saveMessage && <Badge tone="success">{saveMessage}</Badge>}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onNavigateToAssistant}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', padding: '3px 8px' }}
+          >
+            <Sparkles size={13} /> Generate Draft
+          </Button>
+        </div>
       </div>
 
-      <Field label="Section Content">
-        <Textarea
-          rows={18}
-          placeholder={`Write or paste content for ${sectionDef.title}, or generate a draft using the Research Assistant...`}
-          value={content}
-          onChange={(e) => {
-            setContent(e.target.value);
-            setSaveMessage(null);
+      <Field label="Section Content (Rich-Text Word Editor)">
+        <ReportRichEditor
+          key={`${sectionDef.key}-${initialSectionId ?? 'new'}`}
+          content={content}
+          contentJson={contentJson}
+          projectId={projectId}
+          citationStyle={citationStyle}
+          minHeight="480px"
+          onSave={({ contentJson: cJson, plainText, markdown }) => {
+            setContent(markdown);
+            setContentJson(cJson);
+            saveMutation.mutate({ content: markdown, contentJson: cJson, plainText });
           }}
-          style={{ fontFamily: 'var(--font-sans)', lineHeight: 1.6, fontSize: '0.92rem' }}
         />
       </Field>
 
@@ -309,14 +338,6 @@ function ActiveSectionEditor({
         >
           <Save size={14} />
           {saveMutation.isPending ? 'Saving...' : 'Save Changes'}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={onNavigateToAssistant}
-          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-        >
-          <Sparkles size={14} /> Generate AI Draft
         </Button>
       </div>
     </Card>

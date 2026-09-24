@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import { ThemeProvider } from './app/ThemeProvider';
 import { AuthProvider } from './auth/AuthProvider';
+import { ActiveProjectProvider } from './features/projects/ActiveProjectProvider';
 import { WorkspaceProvider } from './features/workspaces/WorkspaceProvider';
 import './index.css';
 
@@ -28,7 +29,9 @@ createRoot(document.getElementById('root')!).render(
         <ThemeProvider>
           <AuthProvider>
             <WorkspaceProvider>
-              <App />
+              <ActiveProjectProvider>
+                <App />
+              </ActiveProjectProvider>
             </WorkspaceProvider>
           </AuthProvider>
         </ThemeProvider>
