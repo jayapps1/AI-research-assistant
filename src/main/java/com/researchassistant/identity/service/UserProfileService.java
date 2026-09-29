@@ -2,6 +2,9 @@ package com.researchassistant.identity.service;
 
 import com.researchassistant.common.exception.ResourceNotFoundException;
 import com.researchassistant.common.storage.ObjectStorageService;
+import com.researchassistant.common.storage.StorageObjectCategory;
+import com.researchassistant.common.storage.StorageObjectEntity;
+import com.researchassistant.common.storage.StorageObjectMetadataService;
 import com.researchassistant.common.storage.StorageObject;
 import com.researchassistant.common.storage.StoredObject;
 import com.researchassistant.identity.dto.ProfileImageDto;
@@ -28,19 +31,22 @@ public class UserProfileService {
     private final ProfileImageSecurityValidator validator;
     private final UserRepository userRepository;
     private final com.researchassistant.admin.SystemUserRoleRepository systemUserRoleRepository;
+    private final StorageObjectMetadataService storageObjectMetadataService;
 
     public UserProfileService(
             UserProfileImageRepository profileImageRepository,
             ObjectStorageService objectStorageService,
             ProfileImageSecurityValidator validator,
             UserRepository userRepository,
-            com.researchassistant.admin.SystemUserRoleRepository systemUserRoleRepository
+            com.researchassistant.admin.SystemUserRoleRepository systemUserRoleRepository,
+            StorageObjectMetadataService storageObjectMetadataService
     ) {
         this.profileImageRepository = profileImageRepository;
         this.objectStorageService = objectStorageService;
         this.validator = validator;
         this.userRepository = userRepository;
         this.systemUserRoleRepository = systemUserRoleRepository;
+        this.storageObjectMetadataService = storageObjectMetadataService;
     }
 
     public record ProfileImageData(
@@ -98,12 +104,42 @@ public class UserProfileService {
 
         // Generate controlled server-side storage key
         UUID imageId = UUID.randomUUID();
-        String storageKey = "users/" + user.getId() + "/profile/" + imageId;
+        String storedFilename = imageId + extension(validated.safeOriginalFilename());
+        String storageKey = "users/" + user.getId() + "/general/profile/" + storedFilename;
 
-        StoredObject stored = objectStorageService.store(
+        StorageObjectEntity pendingStorageObject = storageObjectMetadataService.createPending(
+                user.getId(),
+                null,
+                null,
+                StorageObjectCategory.PROFILE_IMAGE,
                 storageKey,
-                new ByteArrayInputStream(validated.bytes())
+                validated.safeOriginalFilename(),
+                storedFilename,
+                validated.normalizedContentType(),
+                validated.bytes().length,
+                null
         );
+
+        StoredObject stored;
+        StorageObjectEntity availableStorageObject;
+        try {
+            stored = objectStorageService.store(
+                    storageKey,
+                    new ByteArrayInputStream(validated.bytes()),
+                    validated.normalizedContentType()
+            );
+            availableStorageObject = storageObjectMetadataService.markAvailable(
+                    pendingStorageObject.getId(),
+                    stored
+            );
+        } catch (RuntimeException exception) {
+            storageObjectMetadataService.markFailed(
+                    pendingStorageObject.getId(),
+                    storageFailureCode(exception),
+                    exception.getMessage()
+            );
+            throw exception;
+        }
 
         // Mark any currently active image as REPLACED
         List<UserProfileImage> activeImages = profileImageRepository.findAllByUserIdAndStatus(
@@ -121,6 +157,7 @@ public class UserProfileService {
         newImage.setId(imageId);
         newImage.setUser(user);
         newImage.setStorageKey(stored.key());
+        newImage.setStorageObject(availableStorageObject);
         newImage.setOriginalFilename(validated.safeOriginalFilename());
         newImage.setContentType(validated.normalizedContentType());
         newImage.setSizeBytes(stored.sizeBytes());
@@ -155,6 +192,7 @@ public class UserProfileService {
             profileImageRepository.save(active);
             try {
                 objectStorageService.delete(active.getStorageKey());
+                storageObjectMetadataService.markDeleted(active.getStorageObject());
             } catch (Exception ignored) {
             }
         }
@@ -208,5 +246,24 @@ public class UserProfileService {
                 user.getCreatedAt(),
                 user.getUpdatedAt()
         );
+    }
+
+    private String extension(String filename) {
+        if (filename == null) {
+            return "";
+        }
+        int dot = filename.lastIndexOf('.');
+        if (dot < 0 || dot == filename.length() - 1) {
+            return "";
+        }
+        String value = filename.substring(dot).toLowerCase(java.util.Locale.ROOT);
+        return value.length() <= 10 && value.matches("\\.[a-z0-9]+") ? value : "";
+    }
+
+    private String storageFailureCode(RuntimeException exception) {
+        if (exception instanceof com.researchassistant.common.storage.StorageException storageException) {
+            return storageException.getErrorCode();
+        }
+        return exception.getClass().getSimpleName();
     }
 }

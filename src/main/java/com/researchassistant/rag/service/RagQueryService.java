@@ -204,6 +204,29 @@ public class RagQueryService {
             RagVerificationException.class,
             RagCapabilityUnavailableException.class
     })
+    public GroundedAnswerResponse submitProjectConversationTurn(
+            UUID projectId,
+            User user,
+            SubmitRagQueryRequest request,
+            String conversationTitle
+    ) {
+        var context = projectAuthorizationService.requireProjectViewer(projectId, user);
+        RagConversation conversation = new RagConversation();
+        conversation.setProject(context.project());
+        conversation.setCreatedBy(user);
+        conversation.setTitle(conversationTitle == null || conversationTitle.isBlank()
+                ? "Project conversation"
+                : conversationTitle.trim());
+        conversation.setStatus(RagConversationStatus.ACTIVE);
+        conversation = conversationRepository.save(conversation);
+        return submit(conversation.getId(), user, request);
+    }
+
+    @Transactional(noRollbackFor = {
+            com.researchassistant.ai.exception.AiGenerationException.class,
+            RagVerificationException.class,
+            RagCapabilityUnavailableException.class
+    })
     public GroundedAnswerResponse submitLiteratureReview(
             java.util.UUID conversationId,
             User user,

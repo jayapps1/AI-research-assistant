@@ -1,45 +1,30 @@
 package com.researchassistant.document.storage;
 
-import com.researchassistant.document.config.DocumentProperties;
+import com.researchassistant.common.storage.StorageHealthService;
 
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.stereotype.Component;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.util.Map;
 
 @Component
 public class DocumentStorageHealthIndicator implements HealthIndicator {
 
-    private final Path rootDirectory;
+    private final StorageHealthService storageHealthService;
 
-    public DocumentStorageHealthIndicator(DocumentProperties properties) {
-        this.rootDirectory = Path.of(properties.storage().localDirectory())
-                .toAbsolutePath()
-                .normalize();
+    public DocumentStorageHealthIndicator(StorageHealthService storageHealthService) {
+        this.storageHealthService = storageHealthService;
     }
 
     @Override
     public Health health() {
-        try {
-            Files.createDirectories(rootDirectory);
-            if (!Files.isDirectory(rootDirectory)
-                    || !Files.isReadable(rootDirectory)
-                    || !Files.isWritable(rootDirectory)) {
-                return Health.down()
-                        .withDetail("storage", "local-document-storage")
-                        .withDetail("reason", "Document storage root is not readable and writable.")
-                        .build();
-            }
-            return Health.up()
-                    .withDetail("storage", "local-document-storage")
-                    .withDetail("usableSpaceBytes", rootDirectory.toFile().getUsableSpace())
-                    .build();
-        } catch (RuntimeException | java.io.IOException exception) {
-            return Health.down(exception)
-                    .withDetail("storage", "local-document-storage")
-                    .build();
+        Map<String, Object> details = storageHealthService.health();
+        boolean available = Boolean.TRUE.equals(details.get("available"));
+        Health.Builder builder = available ? Health.up() : Health.down();
+        for (Map.Entry<String, Object> entry : details.entrySet()) {
+            builder.withDetail(entry.getKey(), entry.getValue());
         }
+        return builder.build();
     }
 }

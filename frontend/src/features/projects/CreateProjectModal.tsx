@@ -9,6 +9,7 @@ import { Button, Field, Input, LoadingButton, Modal, Select, Textarea } from '..
 import { ErrorState } from '../../components/states';
 import { useWorkspace } from '../workspaces/WorkspaceProvider';
 import { paths } from '../../routes/paths';
+import type { ResearchProject } from '../../types/api';
 
 const RESEARCH_TYPES = [
   { id: 'SOFTWARE_SYSTEM_PROJECT', label: 'Software / System Project' },
@@ -61,9 +62,10 @@ export interface CreateProjectModalProps {
   open: boolean;
   onClose: () => void;
   defaultWorkspaceId?: string;
+  onCreated?: (project: ResearchProject) => void | Promise<void>;
 }
 
-export function CreateProjectModal({ open, onClose, defaultWorkspaceId }: CreateProjectModalProps) {
+export function CreateProjectModal({ open, onClose, defaultWorkspaceId, onCreated }: CreateProjectModalProps) {
   const formId = useId();
   const formRef = useRef<HTMLFormElement>(null);
   const navigate = useNavigate();
@@ -140,7 +142,11 @@ export function CreateProjectModal({ open, onClose, defaultWorkspaceId }: Create
       queryClient.invalidateQueries({ queryKey: ['billing', variables.workspaceId, 'usage'] });
       onClose();
       form.reset();
-      navigate(paths.project(newProject.id));
+      if (onCreated) {
+        void onCreated(newProject);
+      } else {
+        navigate(paths.project(newProject.id));
+      }
     },
   });
 

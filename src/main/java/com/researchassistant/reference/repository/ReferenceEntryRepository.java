@@ -8,5 +8,6 @@ import java.util.UUID;
 
 public interface ReferenceEntryRepository extends JpaRepository<ReferenceEntry, UUID> {
     Optional<ReferenceEntry> findFirstByNormalizedDoiIgnoreCase(String normalizedDoi);
+    Optional<ReferenceEntry> findFirstByUrlIgnoreCase(String url);
     List<ReferenceEntry> findAllByTitleContainingIgnoreCase(String title);
 }

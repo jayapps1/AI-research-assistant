@@ -9,6 +9,10 @@ import type {
   AdminGrantAiCreditsRequest,
   AuthTokenResponse,
   Citation,
+  ConversationDetail,
+  ConversationSourceScope,
+  ConversationStatus,
+  ConversationSummary,
   CreateAiCreditPackRequest,
   CreateSubscriptionPlanRequest,
   DatasetImportPreview,
@@ -38,6 +42,7 @@ import type {
   ResearchProject,
   SaveLiteratureMatrixRequest,
   SectionCapabilitiesResponse,
+  SubmitConversationResponse,
   TableOfContentsResponse,
   UpdateReportSettingsRequest,
   TotpEnrollmentResponse,
@@ -250,6 +255,39 @@ export const ragApi = {
   ask: (conversationId: string, body: Record<string, unknown>) =>
     api.post<RagAnswer>(`/rag/conversations/${conversationId}/queries`, body).then((r) => r.data),
   evidence: (queryId: string) => api.get<Citation[]>(`/rag/queries/${queryId}/evidence`).then((r) => r.data),
+};
+
+export const conversationApi = {
+  list: (params?: { status?: ConversationStatus; q?: string; page?: number; size?: number }) =>
+    api.get<PageResponse<ConversationSummary>>('/conversations', { params }).then((r) => r.data),
+  listProject: (projectId: string, params?: { status?: ConversationStatus; q?: string; page?: number; size?: number }) =>
+    api.get<PageResponse<ConversationSummary>>(`/projects/${projectId}/conversations`, { params }).then((r) => r.data),
+  create: (body: { content: string; scopeType?: ConversationSourceScope; documentIds?: string[]; evidenceLimit?: number }) =>
+    api.post<SubmitConversationResponse>('/conversations', body).then((r) => r.data),
+  createProject: (projectId: string, body: { content: string; scopeType?: ConversationSourceScope; documentIds?: string[]; evidenceLimit?: number }) =>
+    api.post<SubmitConversationResponse>(`/projects/${projectId}/conversations`, body).then((r) => r.data),
+  get: (conversationId: string) =>
+    api.get<ConversationDetail>(`/conversations/${conversationId}`).then((r) => r.data),
+  getProject: (projectId: string, conversationId: string) =>
+    api.get<ConversationDetail>(`/projects/${projectId}/conversations/${conversationId}`).then((r) => r.data),
+  submitMessage: (conversationId: string, body: { content: string; scopeType?: ConversationSourceScope; documentIds?: string[]; evidenceLimit?: number }) =>
+    api.post<SubmitConversationResponse>(`/conversations/${conversationId}/messages`, body).then((r) => r.data),
+  submitProjectMessage: (projectId: string, conversationId: string, body: { content: string; scopeType?: ConversationSourceScope; documentIds?: string[]; evidenceLimit?: number }) =>
+    api.post<SubmitConversationResponse>(`/projects/${projectId}/conversations/${conversationId}/messages`, body).then((r) => r.data),
+  retryMessage: (conversationId: string, messageId: string) =>
+    api.post<SubmitConversationResponse>(`/conversations/${conversationId}/messages/${messageId}/retry`).then((r) => r.data),
+  retryProjectMessage: (projectId: string, conversationId: string, messageId: string) =>
+    api.post<SubmitConversationResponse>(`/projects/${projectId}/conversations/${conversationId}/messages/${messageId}/retry`).then((r) => r.data),
+  rename: (conversationId: string, body: { title: string }) =>
+    api.patch<ConversationSummary>(`/conversations/${conversationId}`, body).then((r) => r.data),
+  archive: (conversationId: string) =>
+    api.post<ConversationSummary>(`/conversations/${conversationId}/archive`).then((r) => r.data),
+  restore: (conversationId: string) =>
+    api.post<ConversationSummary>(`/conversations/${conversationId}/restore`).then((r) => r.data),
+  trash: (conversationId: string) =>
+    api.post<ConversationSummary>(`/conversations/${conversationId}/trash`).then((r) => r.data),
+  moveToProject: (conversationId: string, projectId: string) =>
+    api.post<ConversationSummary>(`/conversations/${conversationId}/project`, { projectId }).then((r) => r.data),
 };
 
 export const analysisApi = {

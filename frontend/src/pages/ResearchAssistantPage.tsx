@@ -4,9 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   BookOpen,
-  CheckCircle2,
   ChevronRight,
-  Copy,
   Download,
   Edit3,
   Layers,
@@ -27,6 +25,7 @@ import {
   ragApi,
   reportApi,
 } from '../api/endpoints';
+import { AssistantResponse, AssistantSources } from '../components/AssistantResponse';
 import {
   Breadcrumbs,
   Button,
@@ -584,7 +583,7 @@ export function ResearchAssistantPage() {
       const draftText = data.draftText ?? data.content ?? '';
       setGeneratedDraft(draftText);
       setDraftCitations(data.citations ?? []);
-      setIsEditingDraft(true);
+      setIsEditingDraft(false);
       setSaveStatus(`Draft saved automatically ${data.savedAt ? new Date(data.savedAt).toLocaleTimeString() : new Date().toLocaleTimeString()}`);
       creditsQuery.refetch();
       client.invalidateQueries({ queryKey: ['reports', projectId] });
@@ -992,39 +991,36 @@ export function ResearchAssistantPage() {
               ) : generatedDraft ? (
                 <div>
                   <div style={{ marginBottom: 14 }}>
-                    <Textarea
-                      rows={16}
-                      value={generatedDraft}
-                      onChange={(e) => setGeneratedDraft(e.target.value)}
-                      style={{ fontFamily: 'var(--font-sans)', lineHeight: 1.6, fontSize: '0.92rem' }}
-                    />
+                    {isEditingDraft ? (
+                      <Textarea
+                        rows={16}
+                        value={generatedDraft}
+                        onChange={(e) => setGeneratedDraft(e.target.value)}
+                        style={{ fontFamily: 'var(--font-sans)', lineHeight: 1.6, fontSize: '0.92rem' }}
+                        aria-label="Edit generated draft markdown"
+                      />
+                    ) : (
+                      <AssistantResponse content={generatedDraft} ariaLabel="Generated draft" />
+                    )}
                   </div>
 
-                  {/* Citations List */}
-                  {draftCitations.length > 0 && (
-                    <div style={{ marginBottom: 16 }}>
-                      <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <CheckCircle2 size={14} style={{ color: 'var(--success-text, #10b981)' }} />
-                        Verified Source Citations ({draftCitations.length})
-                      </h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 160, overflowY: 'auto' }}>
-                        {draftCitations.map((citation, index) => (
-                          <button
-                            key={citation.id ?? index}
-                            type="button"
-                            className="citation"
-                            onClick={() => setActiveCitation(citation)}
-                            style={{ textAlign: 'left', cursor: 'pointer' }}
-                          >
+                  <AssistantSources
+                    title="Verified Source Citations"
+                    sources={draftCitations}
+                    renderSource={(citation, index) => (
+                      <button
+                        type="button"
+                        className="citation"
+                        onClick={() => setActiveCitation(citation)}
+                        style={{ textAlign: 'left', cursor: 'pointer' }}
+                      >
                             <strong>[{citation.number ?? index + 1}] {citation.documentCode ?? citation.docCode ?? 'DOC'}</strong> · Version {citation.versionNumber ?? 1} · Page {citation.pageNumber ?? citation.page ?? 'n/a'}
-                            <p className="muted" style={{ margin: '2px 0 0', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {citation.supportingExcerpt ?? citation.snippet ?? citation.quote}
-                            </p>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                        <p className="muted" style={{ margin: '2px 0 0', fontSize: '0.78rem' }}>
+                          {citation.supportingExcerpt ?? citation.snippet ?? citation.quote}
+                        </p>
+                      </button>
+                    )}
+                  />
 
                   {/* Draft Actions */}
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', borderTop: '1px solid var(--border)', paddingTop: 14 }}>
@@ -1046,6 +1042,15 @@ export function ResearchAssistantPage() {
                       style={{ display: 'flex', alignItems: 'center', gap: 6 }}
                     >
                       <RefreshCw size={14} /> Regenerate
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setIsEditingDraft((value) => !value)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                      {isEditingDraft ? <BookOpen size={14} /> : <Edit3 size={14} />}
+                      {isEditingDraft ? 'Preview' : 'Edit'}
                     </Button>
                     <Button
                       type="button"
@@ -1228,34 +1233,26 @@ export function ResearchAssistantPage() {
 
               {askAnswer ? (
                 <div>
-                  <div style={{ padding: '14px', borderRadius: 8, background: 'var(--surface-hover)', border: '1px solid var(--border)', marginBottom: 16, lineHeight: 1.6 }}>
-                    <p style={{ margin: 0, fontSize: '0.92rem' }}>{askAnswer.answer}</p>
-                  </div>
+                  <AssistantResponse content={askAnswer.answer ?? ''} />
 
                   {/* Citations */}
-                  {(askAnswer.citations?.length ?? 0) > 0 && (
-                    <div style={{ marginBottom: 16 }}>
-                      <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 8 }}>
-                        Evidence & Citations ({askAnswer.citations?.length})
-                      </h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {askAnswer.citations?.map((citation, index) => (
-                          <button
-                            key={citation.id ?? index}
-                            type="button"
-                            className="citation"
-                            onClick={() => setActiveCitation(citation)}
-                            style={{ textAlign: 'left', cursor: 'pointer' }}
-                          >
-                            <strong>[{citation.number ?? index + 1}] {citation.documentCode ?? citation.docCode ?? 'DOC'}</strong> · Version {citation.versionNumber ?? 1} · Page {citation.pageNumber ?? citation.page ?? 'n/a'}
-                            <p className="muted" style={{ margin: '2px 0 0', fontSize: '0.78rem' }}>
-                              {citation.supportingExcerpt ?? citation.snippet ?? citation.quote}
-                            </p>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <AssistantSources
+                    title="Evidence & Citations"
+                    sources={askAnswer.citations}
+                    renderSource={(citation, index) => (
+                      <button
+                        type="button"
+                        className="citation"
+                        onClick={() => setActiveCitation(citation)}
+                        style={{ textAlign: 'left', cursor: 'pointer' }}
+                      >
+                        <strong>[{citation.number ?? index + 1}] {citation.documentCode ?? citation.docCode ?? 'DOC'}</strong> - Version {citation.versionNumber ?? 1} - Page {citation.pageNumber ?? citation.page ?? 'n/a'}
+                        <p className="muted" style={{ margin: '2px 0 0', fontSize: '0.78rem' }}>
+                          {citation.supportingExcerpt ?? citation.snippet ?? citation.quote}
+                        </p>
+                      </button>
+                    )}
+                  />
                 </div>
               ) : (
                 <EmptyState
@@ -1376,18 +1373,6 @@ export function ResearchAssistantPage() {
                       variant="secondary"
                       className="btn-compact"
                       onClick={() => {
-                        navigator.clipboard.writeText(analysisResult.answer ?? '');
-                        setSaveStatus('Copied to clipboard!');
-                        setTimeout(() => setSaveStatus(null), 3000);
-                      }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 4 }}
-                    >
-                      <Copy size={14} /> Copy
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="btn-compact"
-                      onClick={() => {
                         setGeneratedDraft(analysisResult.answer ?? '');
                         setDraftCitations(analysisResult.citations ?? []);
                         handleModeChange('generate');
@@ -1417,78 +1402,32 @@ export function ResearchAssistantPage() {
               )}
 
               {analysisResult?.answer ? (
-                <div style={{ overflowX: 'auto' }}>
-                  <div
-                    style={{
-                      padding: 16,
-                      borderRadius: 8,
-                      background: 'var(--surface-hover)',
-                      border: '1px solid var(--border)',
-                      fontSize: '0.9rem',
-                      lineHeight: 1.6,
-                      whiteSpace: 'pre-wrap',
-                      fontFamily: selectedAnalysis === 'LITERATURE_MATRIX' ? 'var(--font-mono, monospace)' : 'inherit',
-                    }}
-                  >
-                    {analysisResult.answer}
-                  </div>
+                <div>
+                  <AssistantResponse content={analysisResult.answer} />
 
                   {/* Evidence citations */}
-                  {(analysisResult.citations?.length ?? 0) > 0 && (
-                    <div style={{ marginTop: 16 }}>
-                      <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 8 }}>
-                        Referenced Sources ({analysisResult.citations?.length})
-                      </h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {analysisResult.citations?.map((cit, idx) => (
-                          <button
-                            key={cit.id ?? idx}
-                            type="button"
-                            className="citation"
-                            onClick={() => setActiveCitation(cit)}
-                            style={{ textAlign: 'left', cursor: 'pointer' }}
-                          >
-                            <strong>[{cit.number ?? idx + 1}] {cit.documentCode ?? cit.docCode ?? 'DOC'}</strong> · {cit.documentTitle || 'Source'} (Page {cit.pageNumber ?? cit.page ?? 'N/A'})
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <AssistantSources
+                    title="Referenced Sources"
+                    sources={analysisResult.citations}
+                    renderSource={(cit, idx) => (
+                      <button
+                        type="button"
+                        className="citation"
+                        onClick={() => setActiveCitation(cit)}
+                        style={{ textAlign: 'left', cursor: 'pointer' }}
+                      >
+                        <strong>[{cit.number ?? idx + 1}] {cit.documentCode ?? cit.docCode ?? 'DOC'}</strong> - {cit.documentTitle || 'Source'} (Page {cit.pageNumber ?? cit.page ?? 'N/A'})
+                      </button>
+                    )}
+                  />
                 </div>
               ) : selectedAnalysis === 'LITERATURE_MATRIX' && persistedMatrixQuery.data?.markdownTable ? (
-                <div style={{ overflowX: 'auto' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, padding: '8px 12px', background: 'rgba(59, 130, 246, 0.08)', borderRadius: 6, border: '1px solid rgba(59, 130, 246, 0.2)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Table size={16} className="text-primary" />
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Persisted Project Evidence Matrix (Extracted from Literature Review)</span>
-                    </div>
-                    <Button
-                      variant="secondary"
-                      className="btn-compact"
-                      onClick={() => {
-                        navigator.clipboard.writeText(persistedMatrixQuery.data?.markdownTable ?? '');
-                        setSaveStatus('Matrix copied to clipboard!');
-                        setTimeout(() => setSaveStatus(null), 3000);
-                      }}
-                      style={{ fontSize: '0.78rem' }}
-                    >
-                      <Copy size={13} style={{ marginRight: 4 }} /> Copy
-                    </Button>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '8px 12px', background: 'rgba(59, 130, 246, 0.08)', borderRadius: 6, border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                    <Table size={16} className="text-primary" />
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Persisted Project Evidence Matrix (Extracted from Literature Review)</span>
                   </div>
-                  <div
-                    style={{
-                      padding: 16,
-                      borderRadius: 8,
-                      background: 'var(--surface-hover)',
-                      border: '1px solid var(--border)',
-                      fontSize: '0.85rem',
-                      lineHeight: 1.6,
-                      whiteSpace: 'pre-wrap',
-                      fontFamily: 'var(--font-mono, monospace)',
-                    }}
-                  >
-                    {persistedMatrixQuery.data.markdownTable}
-                  </div>
+                  <AssistantResponse content={persistedMatrixQuery.data.markdownTable} ariaLabel="Persisted literature matrix" />
                 </div>
               ) : !analyzeMutation.isPending && (
                 <EmptyState

@@ -14,6 +14,14 @@ public interface DocumentStorageService {
 
     StoredDocumentObject store(String storageKey, InputStream inputStream);
 
+    default StoredDocumentObject store(
+            String storageKey,
+            InputStream inputStream,
+            String mediaType
+    ) {
+        return store(storageKey, inputStream);
+    }
+
     DocumentStorageObject open(String storageKey);
 
     boolean exists(String storageKey);

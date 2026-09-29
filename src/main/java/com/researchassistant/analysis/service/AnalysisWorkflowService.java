@@ -53,6 +53,8 @@ import java.util.*;
 
 @Service
 public class AnalysisWorkflowService {
+    private static final String MANUAL_CITATION_SNAPSHOT = "Manual citation inserted in report editor.";
+
     private final AnalysisRunRepository runRepository;
     private final AnalysisResultRepository resultRepository;
     private final ResearchFindingRepository findingRepository;
@@ -587,8 +589,15 @@ public class AnalysisWorkflowService {
         if (request.supervisorName() != null) report.setSupervisorName(optional(request.supervisorName()));
         if (request.degreeProgram() != null) report.setDegreeProgram(optional(request.degreeProgram()));
         if (request.submissionYear() != null) report.setSubmissionYear(request.submissionYear());
-        if (request.citationStyle() != null) report.setCitationStyle(request.citationStyle());
+        boolean refreshReferences = false;
+        if (request.citationStyle() != null && request.citationStyle() != report.getCitationStyle()) {
+            report.setCitationStyle(request.citationStyle());
+            refreshReferences = true;
+        }
         report.setRevisionNumber(report.getRevisionNumber() + 1);
+        if (refreshReferences) {
+            refreshReportReferencesInternal(report, user);
+        }
         cacheInvalidationService.evictProjectMetadata(report.getProject().getId());
         return ReportResponse.from(report);
     }
@@ -682,6 +691,81 @@ public class AnalysisWorkflowService {
     private int chOrderValue(List<ResearchReportChapter> chapters) {
         return chapters.stream().mapToInt(ResearchReportChapter::getDisplayOrder).max().orElse(0) + 1;
     }
+
+    private int nextChapterDisplayOrder(ResearchReport report) {
+        return chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId()).stream()
+                .mapToInt(ResearchReportChapter::getDisplayOrder)
+                .max()
+                .orElse(0) + 1;
+    }
+
+    private int nextChapterNumber(ResearchReport report) {
+        return chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId()).stream()
+                .filter(chapter -> isNumberedChapterType(chapter.getType()))
+                .map(ResearchReportChapter::getChapterNumber)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .max()
+                .orElse(0) + 1;
+    }
+
+    private int nextSectionDisplayOrder(UUID chapterId, UUID parentSectionId) {
+        return parentSectionId == null
+                ? (int) sectionRepository.countByChapterIdAndParentSectionIsNull(chapterId) + 1
+                : (int) sectionRepository.countByParentSectionId(parentSectionId) + 1;
+    }
+
+    private boolean isNumberedChapterType(ReportChapterType type) {
+        return type != ReportChapterType.PRELIMINARY
+                && type != ReportChapterType.REFERENCES
+                && type != ReportChapterType.APPENDICES;
+    }
+
+    private ChapterTitleParts parseChapterTitle(String rawTitle) {
+        String title = rawTitle == null ? "" : rawTitle.trim();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?i)^\\s*chapter\\s+(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\\s*[:\\-.]?\\s+(.+)$")
+                .matcher(title);
+        if (!matcher.matches()) {
+            return new ChapterTitleParts(title, null);
+        }
+        Integer chapterNumber = parseChapterNumberWord(matcher.group(1));
+        String cleanedTitle = matcher.group(2) == null ? title : matcher.group(2).trim();
+        return new ChapterTitleParts(cleanedTitle.isBlank() ? title : cleanedTitle, chapterNumber);
+    }
+
+    private Integer parseChapterNumberWord(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ignored) {
+            return switch (value.toLowerCase(Locale.ROOT)) {
+                case "one" -> 1;
+                case "two" -> 2;
+                case "three" -> 3;
+                case "four" -> 4;
+                case "five" -> 5;
+                case "six" -> 6;
+                case "seven" -> 7;
+                case "eight" -> 8;
+                case "nine" -> 9;
+                case "ten" -> 10;
+                case "eleven" -> 11;
+                case "twelve" -> 12;
+                case "thirteen" -> 13;
+                case "fourteen" -> 14;
+                case "fifteen" -> 15;
+                case "sixteen" -> 16;
+                case "seventeen" -> 17;
+                case "eighteen" -> 18;
+                case "nineteen" -> 19;
+                case "twenty" -> 20;
+                default -> null;
+            };
+        }
+    }
+
+    private record ChapterTitleParts(String title, Integer chapterNumber) {}
 
     private void ensureTemplateSections(ResearchReportChapter chapter, JsonNode sectionsNode, User user) {
         List<ResearchReportSection> existing = new ArrayList<>(sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapter.getId()));
@@ -1273,12 +1357,16 @@ public class AnalysisWorkflowService {
     @Transactional
     public ChapterResponse createChapter(UUID reportId, User user, CreateChapterRequest request) {
         ResearchReport report = loadReportForEdit(reportId, user);
+        ChapterTitleParts titleParts = parseChapterTitle(required(request.title(), "Chapter title is required."));
+        ReportChapterType type = request.type() == null ? ReportChapterType.CUSTOM : request.type();
         ResearchReportChapter chapter = new ResearchReportChapter();
         chapter.setReport(report);
-        chapter.setType(request.type());
-        chapter.setTitle(required(request.title(), "Chapter title is required."));
-        chapter.setChapterNumber(request.chapterNumber());
-        chapter.setDisplayOrder(request.displayOrder() == null ? 1 : request.displayOrder());
+        chapter.setType(type);
+        chapter.setTitle(titleParts.title());
+        chapter.setChapterNumber(isNumberedChapterType(type)
+                ? request.chapterNumber() != null ? request.chapterNumber() : titleParts.chapterNumber() != null ? titleParts.chapterNumber() : nextChapterNumber(report)
+                : null);
+        chapter.setDisplayOrder(request.displayOrder() == null ? nextChapterDisplayOrder(report) : request.displayOrder());
         chapter.setRequired(request.required() != null && request.required());
         chapter.setSystemDefined(request.systemDefined() != null && request.systemDefined());
         ResearchReportChapter saved = chapterRepository.save(chapter);
@@ -1290,12 +1378,23 @@ public class AnalysisWorkflowService {
     public ChapterResponse updateChapter(UUID chapterId, User user, UpdateChapterRequest request) {
         ResearchReportChapter chapter = chapterRepository.findById(chapterId).orElseThrow(() -> new ResourceNotFoundException("Report chapter not found."));
         ResearchReport report = loadReportForEdit(chapter.getReport().getId(), user);
-        if (request.type() != null) chapter.setType(request.type());
-        if (request.title() != null) chapter.setTitle(optional(request.title()));
+        if (request.type() != null && !chapter.isSystemDefined()) chapter.setType(request.type());
+        if (request.title() != null) {
+            ChapterTitleParts titleParts = parseChapterTitle(required(request.title(), "Chapter title is required."));
+            chapter.setTitle(titleParts.title());
+            if (request.chapterNumber() == null && titleParts.chapterNumber() != null && isNumberedChapterType(chapter.getType())) {
+                chapter.setChapterNumber(titleParts.chapterNumber());
+            }
+        }
         if (request.chapterNumber() != null) chapter.setChapterNumber(request.chapterNumber());
         if (request.displayOrder() != null) chapter.setDisplayOrder(request.displayOrder());
-        if (request.required() != null) chapter.setRequired(request.required());
-        if (request.systemDefined() != null) chapter.setSystemDefined(request.systemDefined());
+        if (request.required() != null) {
+            if (chapter.isSystemDefined() && !request.required()) {
+                throw new IllegalArgumentException("This chapter is required by the selected report template.");
+            }
+            chapter.setRequired(request.required());
+        }
+        if (request.systemDefined() != null && !chapter.isSystemDefined()) chapter.setSystemDefined(request.systemDefined());
         chapterRepository.save(chapter);
         recalculateSectionNumbers(report);
         return ChapterResponse.from(chapter);
@@ -1306,7 +1405,7 @@ public class AnalysisWorkflowService {
         ResearchReportChapter chapter = chapterRepository.findById(chapterId).orElseThrow(() -> new ResourceNotFoundException("Report chapter not found."));
         ResearchReport report = loadReportForEdit(chapter.getReport().getId(), user);
         if (chapter.isRequired()) {
-            throw new IllegalArgumentException("Cannot delete required template chapter: " + chapter.getTitle());
+            throw new IllegalArgumentException("This section is required by the selected report template.");
         }
         List<ResearchReportSection> sections = sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapterId);
         for (ResearchReportSection sec : sections) {
@@ -1332,19 +1431,24 @@ public class AnalysisWorkflowService {
         ResearchReport report = loadReportForEdit(chapter.getReport().getId(), user);
         ResearchReportSection section = new ResearchReportSection();
         section.setChapter(chapter);
+        UUID parentSectionId = request.parentSectionId();
         if (request.parentSectionId() != null) {
             ResearchReportSection parent = sectionRepository.findById(request.parentSectionId())
                     .orElseThrow(() -> new ResourceNotFoundException("Parent section not found."));
+            if (!parent.getChapter().getId().equals(chapterId)) {
+                throw new IllegalArgumentException("Parent section belongs to another chapter.");
+            }
             section.setParentSection(parent);
         }
-        section.setType(request.type());
+        ReportSectionType type = request.type() == null ? ReportSectionType.CUSTOM : request.type();
+        section.setType(type);
         section.setHeading(required(request.heading(), "Section heading is required."));
         applySectionContent(section, request.content(), request.contentJson(), request.plainText());
         if (request.status() != null) section.setStatus(request.status());
-        section.setDisplayOrder(request.displayOrder() == null ? 1 : request.displayOrder());
+        section.setDisplayOrder(request.displayOrder() == null ? nextSectionDisplayOrder(chapterId, parentSectionId) : request.displayOrder());
         section.setRequired(request.required() != null && request.required());
         section.setSystemDefined(request.systemDefined() != null && request.systemDefined());
-        section.setAiEnabled(request.aiEnabled() == null || request.aiEnabled());
+        section.setAiEnabled(type != ReportSectionType.REFERENCES && (request.aiEnabled() == null || request.aiEnabled()));
         section.setOrigin(defaultOrigin(request.origin()));
         section.setSourceArtifactType(optional(request.sourceArtifactType()));
         section.setSourceArtifactId(request.sourceArtifactId());
@@ -1355,6 +1459,9 @@ public class AnalysisWorkflowService {
             section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
         }
         ResearchReportSection saved = sectionRepository.save(section);
+        if (syncInlineCitationUsages(saved, user)) {
+            refreshReportReferencesInternal(report, user);
+        }
         recalculateSectionNumbers(report);
         return SectionResponse.from(saved);
     }
@@ -1366,20 +1473,37 @@ public class AnalysisWorkflowService {
         if (request.parentSectionId() != null) {
             ResearchReportSection parent = sectionRepository.findById(request.parentSectionId())
                     .orElseThrow(() -> new ResourceNotFoundException("Parent section not found."));
+            if (!parent.getChapter().getId().equals(section.getChapter().getId())) {
+                throw new IllegalArgumentException("Parent section belongs to another chapter.");
+            }
+            if (parent.getId().equals(section.getId())) {
+                throw new IllegalArgumentException("A section cannot be nested under itself.");
+            }
             section.setParentSection(parent);
         }
-        if (request.type() != null) section.setType(request.type());
+        if (request.type() != null && !section.isSystemDefined()) section.setType(request.type());
         if (request.heading() != null) section.setHeading(optional(request.heading()));
         applySectionContent(section, request.content(), request.contentJson(), request.plainText());
         if (request.status() != null) section.setStatus(request.status());
         if (request.displayOrder() != null) section.setDisplayOrder(request.displayOrder());
-        if (request.required() != null) section.setRequired(request.required());
-        if (request.systemDefined() != null) section.setSystemDefined(request.systemDefined());
-        if (request.aiEnabled() != null) section.setAiEnabled(request.aiEnabled());
+        if (request.required() != null) {
+            if (section.isSystemDefined() && !request.required()) {
+                throw new IllegalArgumentException("This section is required by the selected report template.");
+            }
+            section.setRequired(request.required());
+        }
+        if (request.systemDefined() != null && !section.isSystemDefined()) section.setSystemDefined(request.systemDefined());
+        if (request.aiEnabled() != null) section.setAiEnabled(section.getType() != ReportSectionType.REFERENCES && request.aiEnabled());
         if (request.origin() != null) section.setOrigin(request.origin());
         if (request.sourceOutOfDate() != null) section.setSourceOutOfDate(request.sourceOutOfDate());
         section.setUpdatedBy(user);
         section.setRevisionNumber(section.getRevisionNumber() + 1);
+        if (section.getType() == ReportSectionType.REFERENCES) {
+            section.setAiEnabled(false);
+        }
+        if (syncInlineCitationUsages(section, user)) {
+            refreshReportReferencesInternal(report, user);
+        }
         auditService.record(user.getId(), SecurityAuditEventType.REPORT_SECTION_UPDATED);
         recalculateSectionNumbers(report);
         return SectionResponse.from(section);
@@ -1390,7 +1514,7 @@ public class AnalysisWorkflowService {
         ResearchReportSection section = sectionRepository.findById(sectionId).orElseThrow(() -> new ResourceNotFoundException("Report section not found."));
         ResearchReport report = loadReportForEdit(section.getChapter().getReport().getId(), user);
         if (section.isRequired()) {
-            throw new IllegalArgumentException("Cannot delete required template section: " + section.getHeading());
+            throw new IllegalArgumentException("This section is required by the selected report template.");
         }
         deleteSectionHierarchy(section);
         recalculateSectionNumbers(report);
@@ -1403,6 +1527,104 @@ public class AnalysisWorkflowService {
         }
         citationRepository.deleteAllBySectionId(section.getId());
         sectionRepository.delete(section);
+    }
+
+    private boolean syncInlineCitationUsages(ResearchReportSection section, User user) {
+        List<UUID> referencedIds = extractInlineCitationReferenceIds(section.getContentJson());
+        List<ResearchReportCitation> existing = citationRepository.findAllBySectionIdOrderByCitationOrdinalAsc(section.getId());
+        List<ResearchReportCitation> manualExisting = existing.stream()
+                .filter(citation -> MANUAL_CITATION_SNAPSHOT.equals(citation.getSupportingTextSnapshot()))
+                .toList();
+
+        if (referencedIds.isEmpty()) {
+            if (!manualExisting.isEmpty()) {
+                citationRepository.deleteAll(manualExisting);
+                citationRepository.flush();
+                return true;
+            }
+            return false;
+        }
+
+        if (!manualExisting.isEmpty()) {
+            citationRepository.deleteAll(manualExisting);
+            citationRepository.flush();
+        }
+
+        UUID projectId = section.getChapter().getReport().getProject().getId();
+        List<ResearchReportCitation> citations = new ArrayList<>();
+        int ordinal = 1;
+        for (UUID referenceOrProjectReferenceId : referencedIds) {
+            ProjectReference projectReference = projectReferenceRepository.findById(referenceOrProjectReferenceId)
+                    .or(() -> projectReferenceRepository.findByProjectIdAndReferenceId(projectId, referenceOrProjectReferenceId))
+                    .orElse(null);
+            if (projectReference == null
+                    || projectReference.getStatus() != ProjectReferenceStatus.ACTIVE
+                    || !projectReference.isAvailableForCitation()
+                    || projectReference.getReference() == null) {
+                continue;
+            }
+            var sourceLink = referenceSourceLinkRepository.findAllByReferenceId(projectReference.getReference().getId()).stream()
+                    .filter(link -> link.getDocument() != null)
+                    .findFirst()
+                    .orElse(null);
+            if (sourceLink == null) {
+                continue;
+            }
+            var document = sourceLink.getDocument();
+            var version = sourceLink.getDocumentVersion() != null ? sourceLink.getDocumentVersion() : document.getCurrentVersion();
+            if (version == null) {
+                continue;
+            }
+            ResearchReportCitation citation = new ResearchReportCitation();
+            citation.setSection(section);
+            citation.setDocument(document);
+            citation.setDocumentVersion(version);
+            citation.setDocumentCode(document.getDocumentCode());
+            citation.setCitationOrdinal(ordinal++);
+            citation.setSupportingTextSnapshot(MANUAL_CITATION_SNAPSHOT);
+            citation.setReference(projectReference.getReference());
+            citation.setProjectReference(projectReference);
+            citations.add(citation);
+        }
+
+        if (!citations.isEmpty()) {
+            citationRepository.saveAll(citations);
+        }
+        return !manualExisting.isEmpty() || !citations.isEmpty();
+    }
+
+    private List<UUID> extractInlineCitationReferenceIds(String contentJson) {
+        if (contentJson == null || contentJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(contentJson);
+            List<UUID> ids = new ArrayList<>();
+            collectInlineCitationReferenceIds(root, ids);
+            return ids;
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private void collectInlineCitationReferenceIds(JsonNode node, List<UUID> ids) {
+        if (node == null || node.isNull()) return;
+        if ("citation".equals(node.path("type").asText())) {
+            String rawId = node.path("attrs").path("referenceId").asText(null);
+            if (rawId != null && !rawId.isBlank()) {
+                try {
+                    ids.add(UUID.fromString(rawId));
+                } catch (IllegalArgumentException ignored) {
+                    // Ignore malformed legacy citation node IDs.
+                }
+            }
+        }
+        JsonNode content = node.get("content");
+        if (content != null && content.isArray()) {
+            for (JsonNode child : content) {
+                collectInlineCitationReferenceIds(child, ids);
+            }
+        }
     }
 
     @Transactional
@@ -1682,6 +1904,8 @@ public class AnalysisWorkflowService {
         prompt.append("Do not repeat the outer section heading. Do not include preliminary pages, title page labels, table of contents, references, or bibliography content. ");
         if (section.getType() == ReportSectionType.LITERATURE_REVIEW) {
             prompt.append("Produce a professional academic literature review with thematic synthesis, methodological comparison, agreements, disagreements, limitations, and research gaps. ");
+            prompt.append("Do not output a source-level evidence assessment table or literature matrix in the final prose; use any matrix reasoning internally only. ");
+            prompt.append("Do not structure the response as Paper 1, Paper 2, or one source at a time; synthesize across sources into coherent academic prose. ");
         } else {
             prompt.append("Use a professional academic report style and cite every source-grounded claim. ");
         }
@@ -1722,6 +1946,11 @@ public class AnalysisWorkflowService {
             managedSection.setRevisionNumber(managedSection.getRevisionNumber() + 1);
             sectionRepository.save(managedSection);
             persistSectionCitations(managedSection, answer, user);
+            if (managedSection.getType() == ReportSectionType.LITERATURE_REVIEW) {
+                cleanLiteratureReviewAndExtractMatrix(managedSection.getChapter().getReport(), user);
+                managedSection = sectionRepository.findByIdForUpdate(sectionId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Report section not found."));
+            }
             auditService.record(user.getId(), SecurityAuditEventType.REPORT_SECTION_UPDATED);
             return new GeneratedDraftResponse(
                     managedSection.getContent(),
@@ -1812,12 +2041,13 @@ public class AnalysisWorkflowService {
                         literatureMatrixRepository.save(matrix);
                     }
 
-                    if (!prosePart.isBlank()) {
-                        section.setContent(prosePart);
-                        section.setContentJson(richTextService.markdownToDocumentJson(prosePart));
-                        section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
-                        sectionRepository.save(section);
-                    }
+                    section.setContent(prosePart.isBlank() ? null : prosePart);
+                    section.setContentJson(richTextService.markdownToDocumentJson(prosePart));
+                    section.setPlainText(richTextService.plainTextFromDocumentJson(section.getContentJson()));
+                    section.setStatus(section.getPlainText() == null || section.getPlainText().isBlank()
+                            ? ReportSectionStatus.NOT_STARTED
+                            : section.getStatus() == ReportSectionStatus.NOT_STARTED ? ReportSectionStatus.DRAFT : section.getStatus());
+                    sectionRepository.save(section);
                 }
             }
         }
@@ -1863,14 +2093,37 @@ public class AnalysisWorkflowService {
             sectionRepository.save(refSection);
         }
 
-        if (refSection.getContent() == null || refSection.getContent().isBlank() || refSection.getContent().contains("The supplied evidence presents") || refSection.getContent().contains("### Cross-study synthesis")) {
+        if (refSection.getContent() == null || refSection.getContent().isBlank() || looksLikeGeneratedReferenceProse(refSection.getContent())) {
             refreshReportReferencesInternal(report, user);
         }
     }
 
+    private boolean looksLikeGeneratedReferenceProse(String content) {
+        if (content == null) return false;
+        String normalized = content.toLowerCase(Locale.ROOT);
+        return normalized.contains("the supplied evidence presents")
+                || normalized.contains("cross-study synthesis")
+                || normalized.contains("digital agriculture as a broad")
+                || normalized.contains("interdisciplinary field")
+                || normalized.contains("methodological patterns")
+                || normalized.contains("research gaps");
+    }
+
     private void recalculateSectionNumbers(ResearchReport report) {
         List<ResearchReportChapter> chapters = chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId());
+        int nextChapterNumber = 1;
         for (ResearchReportChapter chapter : chapters) {
+            if (isNumberedChapterType(chapter.getType())) {
+                if (!Objects.equals(chapter.getChapterNumber(), nextChapterNumber)) {
+                    chapter.setChapterNumber(nextChapterNumber);
+                    chapterRepository.save(chapter);
+                }
+                nextChapterNumber++;
+            } else if (chapter.getChapterNumber() != null) {
+                chapter.setChapterNumber(null);
+                chapterRepository.save(chapter);
+            }
+
             if (chapter.getChapterNumber() == null) {
                 List<ResearchReportSection> allSections = sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapter.getId());
                 for (ResearchReportSection s : allSections) {
@@ -1886,25 +2139,19 @@ public class AnalysisWorkflowService {
             for (int i = 0; i < rootSections.size(); i++) {
                 ResearchReportSection root = rootSections.get(i);
                 String rootNum = chNum + "." + (i + 1);
-                root.setSectionNumber(rootNum);
-                sectionRepository.save(root);
-
-                List<ResearchReportSection> subSections = sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(root.getId());
-                for (int j = 0; j < subSections.size(); j++) {
-                    ResearchReportSection sub = subSections.get(j);
-                    String subNum = rootNum + "." + (j + 1);
-                    sub.setSectionNumber(subNum);
-                    sectionRepository.save(sub);
-
-                    List<ResearchReportSection> subSubs = sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(sub.getId());
-                    for (int k = 0; k < subSubs.size(); k++) {
-                        ResearchReportSection subSub = subSubs.get(k);
-                        String subSubNum = subNum + "." + (k + 1);
-                        subSub.setSectionNumber(subSubNum);
-                        sectionRepository.save(subSub);
-                    }
-                }
+                assignSectionNumber(root, rootNum);
             }
+        }
+    }
+
+    private void assignSectionNumber(ResearchReportSection section, String sectionNumber) {
+        if (!Objects.equals(section.getSectionNumber(), sectionNumber)) {
+            section.setSectionNumber(sectionNumber);
+            sectionRepository.save(section);
+        }
+        List<ResearchReportSection> children = sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(section.getId());
+        for (int i = 0; i < children.size(); i++) {
+            assignSectionNumber(children.get(i), sectionNumber + "." + (i + 1));
         }
     }
 
@@ -1955,7 +2202,7 @@ public class AnalysisWorkflowService {
 
         if (report.isIncludeUncitedReferences()) {
             for (ProjectReference pr : projectReferenceRepository.findAllByProjectId(report.getProject().getId())) {
-                if (pr.getReference() != null) {
+                if (pr.getStatus() == ProjectReferenceStatus.ACTIVE && pr.isAvailableForCitation() && pr.getReference() != null) {
                     referencesMap.putIfAbsent(pr.getReference().getId(), pr.getReference());
                 }
             }

@@ -4,6 +4,10 @@ import com.researchassistant.analysis.dto.AnalysisDtos.ReportValidationResponse;
 import com.researchassistant.analysis.entity.*;
 import com.researchassistant.analysis.exception.ReportValidationException;
 import com.researchassistant.analysis.repository.*;
+import com.researchassistant.common.storage.StorageObjectCategory;
+import com.researchassistant.common.storage.StorageObjectEntity;
+import com.researchassistant.common.storage.StorageObjectMetadataService;
+import com.researchassistant.common.storage.StoredObject;
 import com.researchassistant.common.exception.ResourceNotFoundException;
 import com.researchassistant.document.storage.*;
 import com.researchassistant.identity.entity.User;
@@ -61,6 +65,7 @@ public class ReportExportService {
     private final LiteratureMatrixRepository literatureMatrixRepository;
     private final ProjectReferenceRepository projectReferenceRepository;
     private final org.springframework.beans.factory.ObjectProvider<AnalysisWorkflowService> workflowServiceProvider;
+    private final StorageObjectMetadataService storageObjectMetadataService;
 
     public ReportExportService(ReportExportJobRepository exportJobRepository, ResearchReportRepository reportRepository,
             ResearchReportChapterRepository chapterRepository, ResearchReportSectionRepository sectionRepository,
@@ -69,7 +74,8 @@ public class ReportExportService {
             DocumentStorageService storageService, ProjectAuthorizationService authorizationService, SecurityAuditService auditService,
             QuotaService quotaService, ReportDocumentVersionRepository documentVersionRepository,
             LiteratureMatrixRepository literatureMatrixRepository, ProjectReferenceRepository projectReferenceRepository,
-            org.springframework.beans.factory.ObjectProvider<AnalysisWorkflowService> workflowServiceProvider) {
+            org.springframework.beans.factory.ObjectProvider<AnalysisWorkflowService> workflowServiceProvider,
+            StorageObjectMetadataService storageObjectMetadataService) {
         this.exportJobRepository = exportJobRepository;
         this.reportRepository = reportRepository;
         this.chapterRepository = chapterRepository;
@@ -85,6 +91,7 @@ public class ReportExportService {
         this.literatureMatrixRepository = literatureMatrixRepository;
         this.projectReferenceRepository = projectReferenceRepository;
         this.workflowServiceProvider = workflowServiceProvider;
+        this.storageObjectMetadataService = storageObjectMetadataService;
     }
 
     @Transactional
@@ -131,9 +138,43 @@ public class ReportExportService {
         auditService.record(user.getId(), SecurityAuditEventType.REPORT_EXPORT_REQUESTED);
         try {
             byte[] bytes = format == ReportExportFormat.DOCX ? renderDocx(report, isDraft) : renderPdf(report, isDraft);
-            String storageKey = "exports/" + report.getProject().getId() + "/" + job.getId() + "/" + job.getFilename();
-            StoredDocumentObject stored = storageService.store(storageKey, new ByteArrayInputStream(bytes));
+            String storageKey = "projects/" + report.getProject().getId() + "/exports/" + job.getId() + "/" + job.getFilename();
+            StorageObjectEntity pendingStorageObject = storageObjectMetadataService.createPending(
+                    user.getId(),
+                    report.getProject().getWorkspace().getId(),
+                    report.getProject().getId(),
+                    StorageObjectCategory.REPORT_EXPORT,
+                    storageKey,
+                    job.getFilename(),
+                    job.getFilename(),
+                    job.getMimeType(),
+                    bytes.length,
+                    null
+            );
+            StoredDocumentObject stored;
+            StorageObjectEntity availableStorageObject;
+            try {
+                stored = storageService.store(storageKey, new ByteArrayInputStream(bytes), job.getMimeType());
+                availableStorageObject = storageObjectMetadataService.markAvailable(
+                        pendingStorageObject.getId(),
+                        new StoredObject(
+                                stored.storageKey(),
+                                stored.fileSizeBytes(),
+                                stored.checksumSha256(),
+                                stored.providerFileId(),
+                                stored.providerParentId()
+                        )
+                );
+            } catch (RuntimeException storageException) {
+                storageObjectMetadataService.markFailed(
+                        pendingStorageObject.getId(),
+                        storageFailureCode(storageException),
+                        storageException.getMessage()
+                );
+                throw storageException;
+            }
             job.setStorageKey(stored.storageKey());
+            job.setStorageObject(availableStorageObject);
             job.setFileSizeBytes(stored.fileSizeBytes());
             job.setChecksumSha256(stored.checksumSha256());
             job.setStatus(ReportExportStatus.COMPLETED);
@@ -512,9 +553,51 @@ public class ReportExportService {
                 text = text.replaceAll("\\[?" + Pattern.quote(citation.getDocumentCode()) + "(?:\\s*,\\s*p\\.?\\s*\\d+)?]?", Matcher.quoteReplacement(display));
             }
         }
+        text = replaceInlineCitationTokens(text, section, style, referenceNumbers);
         text = text.replaceAll("\\[?E\\d+]?\\b", "");
         text = text.replaceAll("(?i)\\[?DOC-\\d{3,}(?:\\s*,\\s*p\\.?\\s*\\d+)?]?", "");
         return text.replaceAll("[ \\t]{2,}", " ").trim();
+    }
+
+    private String replaceInlineCitationTokens(String text, ResearchReportSection section, CitationStyle style, Map<UUID, Integer> referenceNumbers) {
+        if (text == null || text.isBlank() || !text.contains("[[citation:")) {
+            return text;
+        }
+        Pattern tokenPattern = Pattern.compile("\\[\\[citation:([a-fA-F0-9-]{36})(?::[^\\]]+)?]]");
+        Matcher matcher = tokenPattern.matcher(text);
+        StringBuffer out = new StringBuffer();
+        while (matcher.find()) {
+            UUID referenceOrProjectReferenceId;
+            try {
+                referenceOrProjectReferenceId = UUID.fromString(matcher.group(1));
+            } catch (IllegalArgumentException ignored) {
+                matcher.appendReplacement(out, "");
+                continue;
+            }
+            UUID projectId = section.getChapter().getReport().getProject().getId();
+            ProjectReference projectReference = projectReferenceRepository.findById(referenceOrProjectReferenceId)
+                    .or(() -> projectReferenceRepository.findByProjectIdAndReferenceId(projectId, referenceOrProjectReferenceId))
+                    .orElse(null);
+            String replacement = "";
+            if (projectReference != null && projectReference.getReference() != null) {
+                replacement = displayCitation(projectReference.getReference(), style, referenceNumbers);
+            }
+            matcher.appendReplacement(out, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(out);
+        return out.toString();
+    }
+
+    private String displayCitation(ReferenceEntry reference, CitationStyle style, Map<UUID, Integer> referenceNumbers) {
+        Integer number = referenceNumbers.get(reference.getId());
+        CitationContext context = style == CitationStyle.IEEE || style == CitationStyle.VANCOUVER || style == CitationStyle.NUMERIC_APA
+                ? CitationContext.NUMERIC
+                : CitationContext.IN_TEXT_PARENTHETICAL;
+        var formatted = citationFormattingService.format(reference, style, context, number);
+        if (!formatted.metadataComplete() && context != CitationContext.NUMERIC) {
+            return "";
+        }
+        return formatted.text();
     }
 
     private String displayCitation(ResearchReportCitation citation, CitationStyle style, Map<UUID, Integer> referenceNumbers) {
@@ -592,6 +675,13 @@ public class ReportExportService {
         return (isDraft ? "draft-" : "") + "research-report-" + report.getProject().getId() + "-" + DateTimeFormatter.ofPattern("yyyyMMddHHmmss").format(java.time.LocalDateTime.now()) + "." + format.name().toLowerCase();
     }
     private String defaultStyleJson() { return "{\"fontFamily\":\"Times New Roman\",\"bodyFontSize\":12,\"lineSpacing\":1.5,\"pageSize\":\"A4\"}"; }
+
+    private String storageFailureCode(RuntimeException exception) {
+        if (exception instanceof com.researchassistant.common.storage.StorageException storageException) {
+            return storageException.getErrorCode();
+        }
+        return exception.getClass().getSimpleName();
+    }
 
     private static final class PdfCursor implements Closeable {
         private final PDDocument document;

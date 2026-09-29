@@ -2,6 +2,7 @@ package com.researchassistant.admin;
 
 import com.researchassistant.audit.AuditEvent;
 import com.researchassistant.audit.AuditEventRepository;
+import com.researchassistant.common.storage.StorageHealthService;
 import com.researchassistant.document.entity.Document;
 import com.researchassistant.document.entity.DocumentProcessingJob;
 import com.researchassistant.document.repository.DocumentProcessingJobRepository;
@@ -45,6 +46,7 @@ public class AdminController {
     private final com.researchassistant.analysis.repository.ResearchReportTemplateRepository reportTemplateRepository;
     private final com.researchassistant.ai.usage.AiRequestRepository aiRequestRepository;
     private final EntityManager entityManager;
+    private final StorageHealthService storageHealthService;
 
     public AdminController(AuthenticatedUserResolver userResolver, SystemAdminAuthorizationService adminAuthorizationService,
                            AdminDashboardService dashboardService, UserRepository userRepository, WorkspaceRepository workspaceRepository,
@@ -53,7 +55,8 @@ public class AdminController {
                            DocumentProcessingJobRepository processingJobRepository,
                            com.researchassistant.analysis.repository.ResearchReportTemplateRepository reportTemplateRepository,
                            com.researchassistant.ai.usage.AiRequestRepository aiRequestRepository,
-                           EntityManager entityManager) {
+                           EntityManager entityManager,
+                           StorageHealthService storageHealthService) {
         this.userResolver = userResolver;
         this.adminAuthorizationService = adminAuthorizationService;
         this.dashboardService = dashboardService;
@@ -67,6 +70,7 @@ public class AdminController {
         this.reportTemplateRepository = reportTemplateRepository;
         this.aiRequestRepository = aiRequestRepository;
         this.entityManager = entityManager;
+        this.storageHealthService = storageHealthService;
     }
 
     @GetMapping("/dashboard")
@@ -255,9 +259,10 @@ public class AdminController {
     public Map<String, Object> storage(Authentication authentication) {
         requireAdmin(authentication);
         Map<String, Object> map = new java.util.LinkedHashMap<>();
-        map.put("mode", "LOCAL DEVELOPMENT");
+        map.putAll(storageHealthService.health());
         map.put("documentCount", count("documents"));
         map.put("versionCount", count("document_versions"));
+        map.put("storageObjectCount", count("storage_objects"));
         map.put("storedBytes", sum("document_versions", "file_size_bytes"));
         map.put("workspaceUsage", entityManager.createNativeQuery("""
                 select p.workspace_id, coalesce(sum(v.file_size_bytes), 0)
@@ -290,7 +295,7 @@ public class AdminController {
         Map<String, Object> map = new java.util.LinkedHashMap<>();
         map.put("application", "UP");
         map.put("database", databaseHealth());
-        map.put("storage", "LOCAL DEVELOPMENT");
+        map.put("storage", storageHealthService.health());
         map.put("backgroundJobs", Map.of(
                 "queued", countWhere("document_processing_jobs", "status = 'QUEUED'"),
                 "running", countWhere("document_processing_jobs", "status = 'RUNNING'"),

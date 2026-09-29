@@ -1,6 +1,7 @@
 import { Slot } from '@radix-ui/react-slot';
 import { clsx } from 'clsx';
 import {
+  forwardRef,
   useEffect,
   useRef,
   type ButtonHTMLAttributes,
@@ -63,9 +64,9 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return <select className="select" {...props} />;
 }
 
-export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea className="textarea" {...props} />;
-}
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea(props, ref) {
+  return <textarea ref={ref} className="textarea" {...props} />;
+});
 
 export function Badge({ children, tone, className, style }: { children: ReactNode; tone?: 'success' | 'warning' | 'danger' | 'info'; className?: string; style?: import('react').CSSProperties }) {
   return <span className={clsx('badge', tone, className)} style={style}>{children}</span>;

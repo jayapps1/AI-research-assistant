@@ -1,6 +1,10 @@
 package com.researchassistant.document.service;
 
 import com.researchassistant.cache.CacheInvalidationService;
+import com.researchassistant.common.storage.StorageObjectCategory;
+import com.researchassistant.common.storage.StorageObjectEntity;
+import com.researchassistant.common.storage.StorageObjectMetadataService;
+import com.researchassistant.common.storage.StoredObject;
 import com.researchassistant.document.config.DocumentProperties;
 import com.researchassistant.document.dto.DocumentProcessingJobResponse;
 import com.researchassistant.document.dto.DocumentResponse;
@@ -110,6 +114,7 @@ public class DocumentService {
     private final ResearchReportCitationRepository reportCitationRepository;
     private final ReferenceSourceLinkRepository referenceSourceLinkRepository;
     private final BibliographicMetadataExtractionService metadataExtractionService;
+    private final StorageObjectMetadataService storageObjectMetadataService;
 
     public DocumentService(
             DocumentRepository documentRepository,
@@ -133,7 +138,8 @@ public class DocumentService {
             DiscussionEvidenceRepository discussionEvidenceRepository,
             ResearchReportCitationRepository reportCitationRepository,
             ReferenceSourceLinkRepository referenceSourceLinkRepository,
-            BibliographicMetadataExtractionService metadataExtractionService
+            BibliographicMetadataExtractionService metadataExtractionService,
+            StorageObjectMetadataService storageObjectMetadataService
     ) {
         this.documentRepository = documentRepository;
         this.versionRepository = versionRepository;
@@ -157,6 +163,7 @@ public class DocumentService {
         this.reportCitationRepository = reportCitationRepository;
         this.referenceSourceLinkRepository = referenceSourceLinkRepository;
         this.metadataExtractionService = metadataExtractionService;
+        this.storageObjectMetadataService = storageObjectMetadataService;
     }
 
     public DocumentResponse uploadDocument(
@@ -457,6 +464,9 @@ public class DocumentService {
         Document document = context.document();
         document.setStatus(DocumentStatus.ARCHIVED);
         document.setArchivedAt(OffsetDateTime.now());
+        for (DocumentVersion version : versionRepository.findAllByDocumentIdOrderByVersionNumberDesc(documentId)) {
+            storageObjectMetadataService.markTrashed(version.getStorageObject());
+        }
 
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_TRASHED);
         cacheInvalidationService.evictDocumentMetadata(
@@ -481,6 +491,9 @@ public class DocumentService {
 
         document.setStatus(statusFromCurrentVersion(document.getCurrentVersion()));
         document.setArchivedAt(null);
+        for (DocumentVersion version : versionRepository.findAllByDocumentIdOrderByVersionNumberDesc(documentId)) {
+            storageObjectMetadataService.markAvailable(version.getStorageObject());
+        }
 
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_RESTORED);
         cacheInvalidationService.evictDocumentMetadata(
@@ -506,8 +519,12 @@ public class DocumentService {
         List<DocumentVersion> versions =
                 versionRepository.findAllByDocumentIdOrderByVersionNumberDesc(documentId);
         List<String> storageKeys = new ArrayList<>();
+        List<StorageObjectEntity> storageObjects = new ArrayList<>();
         for (DocumentVersion version : versions) {
             storageKeys.add(version.getStorageKey());
+            if (version.getStorageObject() != null) {
+                storageObjects.add(version.getStorageObject());
+            }
             chunkEmbeddingRepository.deleteByChunkDocumentVersionId(version.getId());
             chunkRepository.deleteByDocumentVersionId(version.getId());
             pageRepository.deleteByDocumentVersionId(version.getId());
@@ -521,6 +538,9 @@ public class DocumentService {
 
         for (String storageKey : storageKeys) {
             storageService.delete(storageKey);
+        }
+        for (StorageObjectEntity storageObject : storageObjects) {
+            storageObjectMetadataService.markDeleted(storageObject);
         }
 
         auditService.record(user.getId(), SecurityAuditEventType.DOCUMENT_PERMANENTLY_DELETED);
@@ -683,31 +703,66 @@ public class DocumentService {
             User user,
             MultipartFile file
     ) {
-        String storageKey = storageKey(
-                document.getProject().getWorkspace().getId(),
-                document.getProject().getId(),
-                document.getId(),
-                versionNumber
-        );
-
         try {
             byte[] bytes = file.getBytes();
-            validateSignature(bytes, normalizedMime(file.getContentType()), safeOriginalFilename(file.getOriginalFilename()));
-            FileScanStatus scanStatus = fileSecurityScanner.scan(bytes, normalizedMime(file.getContentType()), file.getOriginalFilename());
+            String originalFilename = safeOriginalFilename(file.getOriginalFilename());
+            String mimeType = normalizedMime(file.getContentType());
+            String storedFilename = storedFilename(originalFilename);
+            String storageKey = storageKey(
+                    document.getProject().getId(),
+                    document.getId(),
+                    versionNumber,
+                    storedFilename
+            );
+            validateSignature(bytes, mimeType, originalFilename);
+            FileScanStatus scanStatus = fileSecurityScanner.scan(bytes, mimeType, file.getOriginalFilename());
             if (scanStatus == FileScanStatus.INFECTED) {
                 throw new DocumentUploadException("Uploaded file failed security scanning.");
             }
-            StoredDocumentObject stored =
-                    storageService.store(storageKey, new java.io.ByteArrayInputStream(bytes));
+
+            StorageObjectEntity pendingStorageObject = storageObjectMetadataService.createPending(
+                    user.getId(),
+                    document.getProject().getWorkspace().getId(),
+                    document.getProject().getId(),
+                    StorageObjectCategory.RESEARCH_DOCUMENT,
+                    storageKey,
+                    originalFilename,
+                    storedFilename,
+                    mimeType,
+                    bytes.length,
+                    null
+            );
+
+            StoredDocumentObject stored;
+            StorageObjectEntity availableStorageObject;
+            try {
+                stored = storageService.store(storageKey, new java.io.ByteArrayInputStream(bytes), mimeType);
+                availableStorageObject = storageObjectMetadataService.markAvailable(
+                        pendingStorageObject.getId(),
+                        new StoredObject(
+                                stored.storageKey(),
+                                stored.fileSizeBytes(),
+                                stored.checksumSha256(),
+                                stored.providerFileId(),
+                                stored.providerParentId()
+                        )
+                );
+            } catch (RuntimeException exception) {
+                storageObjectMetadataService.markFailed(
+                        pendingStorageObject.getId(),
+                        storageFailureCode(exception),
+                        exception.getMessage()
+                );
+                throw exception;
+            }
 
             DocumentVersion version = new DocumentVersion();
             version.setDocument(document);
             version.setVersionNumber(versionNumber);
-            version.setOriginalFilename(safeOriginalFilename(
-                    file.getOriginalFilename()
-            ));
+            version.setOriginalFilename(originalFilename);
             version.setStorageKey(stored.storageKey());
-            version.setMimeType(normalizedMime(file.getContentType()));
+            version.setStorageObject(availableStorageObject);
+            version.setMimeType(mimeType);
             version.setFileSizeBytes(stored.fileSizeBytes());
             version.setChecksumSha256(stored.checksumSha256());
             version.setScanStatus(scanStatus);
@@ -717,6 +772,8 @@ public class DocumentService {
             version.setUploadedAt(OffsetDateTime.now());
 
             return versionRepository.save(version);
+        } catch (RuntimeException exception) {
+            throw exception;
         } catch (IOException exception) {
             throw new DocumentStorageException(
                     "Unable to read uploaded document.",
@@ -795,19 +852,37 @@ public class DocumentService {
     }
 
     private String storageKey(
-            UUID workspaceId,
             UUID projectId,
             UUID documentId,
-            int versionNumber
+            int versionNumber,
+            String storedFilename
     ) {
-        return "workspace/%s/project/%s/document/%s/version/%d/%s"
+        return "projects/%s/documents/%s/versions/%d/%s"
                 .formatted(
-                        workspaceId,
                         projectId,
                         documentId,
                         versionNumber,
-                        UUID.randomUUID()
+                        storedFilename
                 );
+    }
+
+    private String storedFilename(String originalFilename) {
+        String extension = "";
+        int dot = originalFilename.lastIndexOf('.');
+        if (dot >= 0 && dot < originalFilename.length() - 1) {
+            String candidate = originalFilename.substring(dot).toLowerCase(Locale.ROOT);
+            if (candidate.length() <= 20 && candidate.matches("\\.[a-z0-9]+")) {
+                extension = candidate;
+            }
+        }
+        return UUID.randomUUID() + extension;
+    }
+
+    private String storageFailureCode(RuntimeException exception) {
+        if (exception instanceof com.researchassistant.common.storage.StorageException storageException) {
+            return storageException.getErrorCode();
+        }
+        return exception.getClass().getSimpleName();
     }
 
     private String resolveTitle(String suppliedTitle, String filename) {

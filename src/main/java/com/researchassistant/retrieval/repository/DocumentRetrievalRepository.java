@@ -124,8 +124,22 @@ public class DocumentRetrievalRepository {
                 join research_projects rp on rp.id = d.project_id
                 where d.project_id = :projectId
                   and d.id in (:documentIds)
-                  and d.status <> 'ARCHIVED'
+                  and d.status = 'READY'
                   and dv.id in (:versionIds)
+                  and dv.status = 'READY'
+                  and not exists (
+                      select 1
+                      from reference_source_links rsl
+                      join project_references pr
+                        on pr.reference_id = rsl.reference_id
+                       and pr.project_id = d.project_id
+                      where rsl.document_id = d.id
+                        and pr.status = 'ACTIVE'
+                        and (
+                            pr.available_for_research_ai = false
+                            or pr.available_for_citation = false
+                        )
+                  )
                   and c.search_vector @@ websearch_to_tsquery('english', :query)
                 order by score desc, d.document_code asc, c.chunk_number asc
                 limit :limit
@@ -164,8 +178,22 @@ public class DocumentRetrievalRepository {
                 join research_projects rp on rp.id = d.project_id
                 where d.project_id = :projectId
                   and d.id in (:documentIds)
-                  and d.status <> 'ARCHIVED'
+                  and d.status = 'READY'
                   and dv.id in (:versionIds)
+                  and dv.status = 'READY'
+                  and not exists (
+                      select 1
+                      from reference_source_links rsl
+                      join project_references pr
+                        on pr.reference_id = rsl.reference_id
+                       and pr.project_id = d.project_id
+                      where rsl.document_id = d.id
+                        and pr.status = 'ACTIVE'
+                        and (
+                            pr.available_for_research_ai = false
+                            or pr.available_for_citation = false
+                        )
+                  )
                   and length(trim(c.text_content)) > 0
                 order by c.chunk_number asc, d.document_code asc
                 limit :limit
@@ -279,8 +307,22 @@ public class DocumentRetrievalRepository {
                 ) distance
                 where d.project_id = :projectId
                   and d.id in (:documentIds)
-                  and d.status <> 'ARCHIVED'
+                  and d.status = 'READY'
                   and dv.id in (:versionIds)
+                  and dv.status = 'READY'
+                  and not exists (
+                      select 1
+                      from reference_source_links rsl
+                      join project_references pr
+                        on pr.reference_id = rsl.reference_id
+                       and pr.project_id = d.project_id
+                      where rsl.document_id = d.id
+                        and pr.status = 'ACTIVE'
+                        and (
+                            pr.available_for_research_ai = false
+                            or pr.available_for_citation = false
+                        )
+                  )
                   and e.provider = :provider
                   and e.model = :model
                   and e.dimensions = :dimensions

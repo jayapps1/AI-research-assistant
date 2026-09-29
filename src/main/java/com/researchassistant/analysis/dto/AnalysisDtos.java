@@ -73,12 +73,12 @@ public final class AnalysisDtos {
     public record UpdateReportRequest(String title, String institutionName, String departmentName, String authorName,
                                       String supervisorName, String degreeProgram, Integer submissionYear,
                                       CitationStyle citationStyle) {}
-    public record CreateChapterRequest(@NotNull ReportChapterType type, @NotBlank String title,
+    public record CreateChapterRequest(ReportChapterType type, @NotBlank String title,
                                        Integer chapterNumber, @Positive Integer displayOrder,
                                        Boolean required, Boolean systemDefined) {}
     public record UpdateChapterRequest(ReportChapterType type, String title, Integer chapterNumber,
                                        Integer displayOrder, Boolean required, Boolean systemDefined) {}
-    public record CreateSectionRequest(@NotNull ReportSectionType type, @NotBlank String heading, String content,
+    public record CreateSectionRequest(ReportSectionType type, @NotBlank String heading, String content,
                                        String contentJson, String plainText, ReportSectionStatus status,
                                        @Positive Integer displayOrder, ContentOrigin origin,
                                        String sourceArtifactType, UUID sourceArtifactId,

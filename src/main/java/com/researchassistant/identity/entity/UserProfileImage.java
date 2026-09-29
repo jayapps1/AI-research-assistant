@@ -1,5 +1,7 @@
 package com.researchassistant.identity.entity;
 
+import com.researchassistant.common.storage.StorageObjectEntity;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -41,6 +43,10 @@ public class UserProfileImage {
 
     @Column(name = "storage_key", nullable = false, length = 500)
     private String storageKey;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "storage_object_id")
+    private StorageObjectEntity storageObject;
 
     @Column(name = "original_filename", length = 255)
     private String originalFilename;

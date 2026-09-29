@@ -1,6 +1,10 @@
 package com.researchassistant.ai.orchestration;
 
 public enum AiTaskType {
+    GENERAL_CONVERSATION,
+    WEB_RESEARCH,
+    CLAIM_VERIFICATION,
+    REPORT_RESEARCH_ASSISTANCE,
     GROUNDED_QA,
     RESEARCH_PROBLEM_DRAFT,
     OBJECTIVE_DRAFT,

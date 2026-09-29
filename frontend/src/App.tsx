@@ -18,6 +18,7 @@ const TasksPage = lazy(() => import('./pages/CollaborationPages').then((m) => ({
 const CommentsReviewsPage = lazy(() => import('./pages/CollaborationPages').then((m) => ({ default: m.CommentsReviewsPage })));
 const ActivityPage = lazy(() => import('./pages/CollaborationPages').then((m) => ({ default: m.ActivityPage })));
 const SourcesPage = lazy(() => import('./pages/SourcesPage').then((m) => ({ default: m.SourcesPage })));
+const ConversationWorkspacePage = lazy(() => import('./pages/ConversationWorkspacePage').then((m) => ({ default: m.ConversationWorkspacePage })));
 const ResearchAssistantPage = lazy(() => import('./pages/ResearchAssistantPage').then((m) => ({ default: m.ResearchAssistantPage })));
 const WritingPage = lazy(() => import('./pages/WritingPage').then((m) => ({ default: m.WritingPage })));
 const ResearchPage = lazy(() => import('./pages/ResearchPage').then((m) => ({ default: m.ResearchPage })));
@@ -87,10 +88,14 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<AppShell />}>
               <Route path="app" element={<HomeDashboard />} />
+              <Route path="app/search" element={<ConversationWorkspacePage />} />
+              <Route path="app/conversations/:conversationId" element={<ConversationWorkspacePage />} />
               <Route path="app/workspaces" element={<WorkspacePage />} />
               <Route path="app/workspaces/:workspaceId/projects" element={<ProjectsPage />} />
               <Route path="app/projects" element={<ProjectsPage />} />
               <Route path="app/projects/:projectId" element={<ProjectDashboard />} />
+              <Route path="app/projects/:projectId/conversations" element={<ConversationWorkspacePage />} />
+              <Route path="app/projects/:projectId/conversations/:conversationId" element={<ConversationWorkspacePage />} />
               <Route path="app/projects/:projectId/members" element={<MembersPage />} />
               <Route path="app/projects/:projectId/tasks" element={<TasksPage />} />
               <Route path="app/projects/:projectId/collaboration" element={<CommentsReviewsPage />} />

@@ -11,6 +11,15 @@ import java.util.UUID;
 
 public interface ResearchReportCitationRepository extends JpaRepository<ResearchReportCitation, UUID> {
     List<ResearchReportCitation> findAllBySectionIdOrderByCitationOrdinalAsc(UUID sectionId);
+
+    @Query("""
+            select citation
+            from ResearchReportCitation citation
+            join citation.section section
+            join section.chapter chapter
+            where chapter.report.id = :reportId
+            order by chapter.displayOrder asc, section.displayOrder asc, citation.citationOrdinal asc, citation.createdAt asc
+            """)
     List<ResearchReportCitation> findAllBySectionChapterReportIdOrderByCitationOrdinalAsc(UUID reportId);
     boolean existsByDocumentId(UUID documentId);
 

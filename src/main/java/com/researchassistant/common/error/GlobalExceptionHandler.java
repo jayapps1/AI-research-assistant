@@ -6,6 +6,8 @@ import com.researchassistant.common.exception.ResourceNotFoundException;
 import com.researchassistant.analysis.dto.AnalysisDtos.ValidationIssue;
 import com.researchassistant.analysis.exception.ReportValidationException;
 import com.researchassistant.collaboration.exception.ArtifactVersionConflictException;
+import com.researchassistant.conversation.exception.ConversationAccessDeniedException;
+import com.researchassistant.common.storage.StorageException;
 import com.researchassistant.document.exception.DocumentAccessDeniedException;
 import com.researchassistant.document.exception.DocumentStorageException;
 import com.researchassistant.document.exception.DocumentUploadException;
@@ -266,9 +268,50 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(StorageException.class)
+    public ResponseEntity<ApiErrorResponse> handleStorage(
+            StorageException exception,
+            HttpServletRequest request
+    ) {
+        String code = exception.getErrorCode() == null
+                ? "STORAGE_OPERATION_FAILED"
+                : exception.getErrorCode();
+        HttpStatus status = switch (code) {
+            case "STORAGE_OBJECT_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+            case "INVALID_STORAGE_KEY" -> HttpStatus.BAD_REQUEST;
+            case "GOOGLE_DRIVE_PERMISSION_DENIED" -> HttpStatus.FORBIDDEN;
+            case "GOOGLE_DRIVE_AUTHENTICATION_FAILED", "GOOGLE_DRIVE_NOT_CONFIGURED",
+                 "GOOGLE_DRIVE_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
+            case "GOOGLE_DRIVE_RATE_LIMITED", "GOOGLE_DRIVE_QUOTA_EXCEEDED" -> HttpStatus.TOO_MANY_REQUESTS;
+            case "GOOGLE_DRIVE_TIMEOUT" -> HttpStatus.GATEWAY_TIMEOUT;
+            default -> HttpStatus.INTERNAL_SERVER_ERROR;
+        };
+        logException(code, exception, request);
+        return buildResponse(
+                status,
+                code,
+                storageMessage(code),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
     @ExceptionHandler(RagAccessDeniedException.class)
     public ResponseEntity<ApiErrorResponse> handleRagAccessDenied(
             RagAccessDeniedException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.NOT_FOUND,
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(ConversationAccessDeniedException.class)
+    public ResponseEntity<ApiErrorResponse> handleConversationAccessDenied(
+            ConversationAccessDeniedException exception,
             HttpServletRequest request
     ) {
         return buildResponse(
@@ -606,6 +649,20 @@ public class GlobalExceptionHandler {
                 "API Error [code={}, correlationId={}, uri={}]: {}",
                 code, correlationId, request.getRequestURI(), t.getMessage(), t
         );
+    }
+
+    private String storageMessage(String code) {
+        return switch (code) {
+            case "STORAGE_OBJECT_NOT_FOUND" -> "Stored file was not found.";
+            case "INVALID_STORAGE_KEY" -> "Invalid storage key.";
+            case "GOOGLE_DRIVE_PERMISSION_DENIED" -> "Storage provider permission was denied.";
+            case "GOOGLE_DRIVE_AUTHENTICATION_FAILED" -> "Storage provider authentication failed.";
+            case "GOOGLE_DRIVE_NOT_CONFIGURED" -> "Storage provider is not configured.";
+            case "GOOGLE_DRIVE_RATE_LIMITED" -> "Storage provider is rate limited. Try again shortly.";
+            case "GOOGLE_DRIVE_QUOTA_EXCEEDED" -> "Storage provider quota is exhausted.";
+            case "GOOGLE_DRIVE_TIMEOUT" -> "Storage provider timed out. Try again.";
+            default -> "Storage operation failed.";
+        };
     }
 
 

@@ -27,6 +27,7 @@ import { useTheme } from '../app/ThemeProvider';
 import { useAuth } from '../auth/AuthProvider';
 import { Badge, Button } from '../components/ui';
 import { Avatar } from '../components/Avatar';
+import { ConversationSidebarSection } from '../features/conversations/ConversationSidebarSection';
 import { NotificationBell } from '../features/notifications/NotificationBell';
 import { useOptionalActiveProject } from '../features/projects/ActiveProjectProvider';
 import { WorkspaceSwitcher } from '../features/workspaces/WorkspaceSwitcher';
@@ -40,6 +41,7 @@ const workspaceNav = [
 ] as const;
 
 const researchNav = [
+  ['Conversations', paths.search, MessageSquare],
   ['Documents', paths.documents, FileText],
   ['Research', paths.research, BookOpen],
   ['AI Assistant', paths.ai, MessageSquare],
@@ -50,16 +52,13 @@ const researchNav = [
 
 const projectSections = [
   ['Overview', ''],
-  ['Sources', 'sources'],
+  ['Conversations', 'conversations'],
+  ['Documents', 'documents'],
   ['Research', 'research'],
   ['AI Assistant', 'assistant'],
-  ['Writing', 'writing'],
   ['Analysis', 'analysis'],
-  ['Report', 'report'],
-  ['Tasks', 'tasks'],
+  ['Reports', 'reports'],
   ['References', 'references'],
-  ['Advanced Workflow', 'research/advanced'],
-  ['Settings', 'settings'],
 ] as const;
 
 export function AppShell() {
@@ -72,6 +71,10 @@ export function AppShell() {
   const theme = useTheme();
   const workspace = useWorkspace();
   const activeProject = useOptionalActiveProject();
+  const isConversationRoute =
+    location.pathname === paths.search ||
+    /^\/app\/conversations(?:\/|$)/.test(location.pathname) ||
+    /^\/app\/projects\/[^/]+\/conversations(?:\/|$)/.test(location.pathname);
   const projectId =
     location.pathname.match(/\/projects\/([^/]+)/)?.[1] ??
     new URLSearchParams(location.search).get('projectId') ??
@@ -267,6 +270,8 @@ export function AppShell() {
       </header>
 
       <aside className={`sidebar ${open ? 'open' : ''}`} aria-label="Primary">
+        <ConversationSidebarSection onNavigate={() => setOpen(false)} />
+
         {/* WORKSPACE GROUP */}
         <div className="nav-group">
           <div className="nav-title">Workspace</div>
@@ -294,6 +299,7 @@ export function AppShell() {
           {researchNav.map(([label, to, Icon]) => {
             const scopedTo =
               label === 'Documents' ? modulePath(to, 'documents') :
+              label === 'Conversations' ? modulePath(to, 'conversations') :
               label === 'Research' ? modulePath(to, 'research') :
               label === 'AI Assistant' ? modulePath(to, 'assistant') :
               label === 'Analysis' ? modulePath(to, 'analysis') :
@@ -359,7 +365,7 @@ export function AppShell() {
         ) : null}
       </aside>
 
-      <main className="main">
+      <main className={`main ${isConversationRoute ? 'main-conversation' : ''}`}>
         {projectId ? <ProjectNav projectId={projectId} /> : null}
         <Outlet />
       </main>

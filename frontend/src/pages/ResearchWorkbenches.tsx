@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { analysisApi, datasetApi } from '../api/endpoints';
+import { AssistantResponse } from '../components/AssistantResponse';
 import { Badge, Breadcrumbs, Button, Card, Field, Input, Pagination, Select, Textarea } from '../components/ui';
 import { EmptyState, ErrorState } from '../components/states';
 import { useProjectId } from '../hooks/useProjectId';
@@ -661,7 +662,7 @@ function TraceabilityPanel({ projectId }: { projectId: string }) {
 }
 
 function DraftPanel({ draft }: { draft: Record<string, unknown> }) {
-  return <div className="panel"><Badge tone="info">AI draft</Badge><p>{displayValue(draft.draftText ?? draft.text)}</p><div className="toolbar"><Button type="button">Accept</Button><Button type="button" variant="secondary">Edit</Button><Button type="button" variant="danger">Reject</Button></div></div>;
+  return <div className="panel"><Badge tone="info">AI draft</Badge><AssistantResponse content={displayValue(draft.draftText ?? draft.text, '')} /><div className="toolbar"><Button type="button">Accept</Button><Button type="button" variant="secondary">Edit</Button><Button type="button" variant="danger">Reject</Button></div></div>;
 }
 
 function Tabs({ tabs, active, onChange }: { tabs: string[]; active: string; onChange: (tab: string) => void }) {

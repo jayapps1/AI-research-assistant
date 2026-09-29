@@ -4,6 +4,7 @@ import com.researchassistant.ai.config.AiProperties;
 import com.researchassistant.admin.SuperAdminSeedProperties;
 import com.researchassistant.cache.AppCacheProperties;
 import com.researchassistant.collaboration.service.CollaborationProperties;
+import com.researchassistant.common.storage.ObjectStorageProperties;
 import com.researchassistant.document.config.DocumentProperties;
 import com.researchassistant.document.embedding.EmbeddingProperties;
 import com.researchassistant.operations.backup.BackupProperties;
@@ -11,6 +12,7 @@ import com.researchassistant.rag.config.RagProperties;
 import com.researchassistant.retrieval.service.RetrievalProperties;
 
 import com.researchassistant.subscription.SubscriptionProperties;
+import com.researchassistant.websearch.WebSearchProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -20,6 +22,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 @EnableConfigurationProperties({
 		DocumentProperties.class,
+		ObjectStorageProperties.class,
 		AiProperties.class,
 		EmbeddingProperties.class,
 		AppCacheProperties.class,
@@ -27,6 +30,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 		CollaborationProperties.class,
 		RagProperties.class,
 		RetrievalProperties.class,
+		WebSearchProperties.class,
 		SuperAdminSeedProperties.class,
 		SubscriptionProperties.class
 })

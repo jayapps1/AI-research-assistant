@@ -257,6 +257,97 @@ export interface RagConversation {
   createdAt?: string;
 }
 
+export type ConversationSearchScope = 'GENERAL' | 'WEB' | 'PROJECT' | 'PROJECT_WEB';
+export type ConversationSourceScope = 'PROJECT_ALL_DOCUMENTS' | 'SELECTED_DOCUMENTS';
+export type ConversationType = 'GENERAL' | 'PROJECT';
+export type ConversationStatus = 'ACTIVE' | 'ARCHIVED' | 'TRASHED';
+export type ConversationMessageRole = 'USER' | 'ASSISTANT' | 'SYSTEM';
+export type ConversationRunStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+
+export interface ConversationSummary {
+  id: UUID;
+  userId: UUID;
+  workspaceId?: UUID | null;
+  workspaceName?: string | null;
+  projectId?: UUID | null;
+  projectTitle?: string | null;
+  type: ConversationType;
+  status: ConversationStatus;
+  title: string;
+  createdAt?: string;
+  updatedAt?: string;
+  lastMessageAt?: string;
+  archivedAt?: string | null;
+  deletedAt?: string | null;
+}
+
+export interface MessageCitation {
+  id?: UUID;
+  number: number;
+  sourceId?: UUID;
+  sourceType?: string;
+  title?: string;
+  url?: string | null;
+  documentId?: UUID | null;
+  documentCode?: string | null;
+  documentTitle?: string | null;
+  documentVersionId?: UUID | null;
+  versionNumber?: number | null;
+  projectReferenceId?: UUID | null;
+  pageNumber?: number | null;
+  chunkNumber?: number | null;
+  supportingExcerpt?: string | null;
+  formattedCitation?: string | null;
+}
+
+export interface ConversationMessage {
+  id: UUID;
+  role: ConversationMessageRole;
+  content: string;
+  structuredContent?: string | null;
+  sequenceNumber: number;
+  createdAt?: string;
+  updatedAt?: string | null;
+  editedAt?: string | null;
+  citations: MessageCitation[];
+}
+
+export interface ConversationRun {
+  id: UUID;
+  userMessageId?: UUID | null;
+  assistantMessageId?: UUID | null;
+  aiRequestId?: UUID | null;
+  ragQueryId?: UUID | null;
+  operationType: string;
+  searchScope: ConversationSearchScope;
+  status: ConversationRunStatus;
+  provider?: string | null;
+  model?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+  cachedInputTokens?: number | null;
+  providerCost?: number | null;
+  platformCredits?: number | null;
+  errorCode?: string | null;
+  failureMessage?: string | null;
+  startedAt?: string;
+  completedAt?: string | null;
+}
+
+export interface ConversationDetail {
+  conversation: ConversationSummary;
+  messages: ConversationMessage[];
+  latestRun?: ConversationRun | null;
+}
+
+export interface SubmitConversationResponse {
+  conversation: ConversationSummary;
+  userMessage: ConversationMessage;
+  assistantMessage?: ConversationMessage | null;
+  run: ConversationRun;
+}
+
 export interface RagAnswer {
   id?: UUID;
   queryId?: UUID;
@@ -853,4 +944,3 @@ export interface SaveLiteratureMatrixRequest {
   matrixDataJson?: string;
   markdownTable?: string;
 }
-

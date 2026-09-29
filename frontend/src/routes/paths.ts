@@ -25,6 +25,7 @@ export const paths = {
   documents: '/app/documents',
   sources: '/app/documents',
   research: '/app/research',
+  search: '/app/search',
   ai: '/app/ai',
   assistant: '/app/ai',
   writing: '/app/research',
@@ -45,6 +46,8 @@ export const paths = {
   // Parametric routes
   project: (projectId: string) => `/app/projects/${projectId}`,
   projectOverview: (projectId: string) => `/app/projects/${projectId}`,
+  projectConversations: (projectId: string) => `/app/projects/${projectId}/conversations`,
+  projectConversation: (projectId: string, conversationId: string) => `/app/projects/${projectId}/conversations/${conversationId}`,
   projectSources: (projectId: string) => `/app/projects/${projectId}/sources`,
   projectDocuments: (projectId: string) => `/app/projects/${projectId}/documents`,
   projectAssistant: (projectId: string) => `/app/projects/${projectId}/assistant`,
@@ -57,4 +60,5 @@ export const paths = {
   projectTasks: (projectId: string) => `/app/projects/${projectId}/tasks`,
   projectReferences: (projectId: string) => `/app/projects/${projectId}/references`,
   projectSettings: (projectId: string) => `/app/projects/${projectId}/settings`,
+  conversation: (conversationId: string) => `/app/conversations/${conversationId}`,
 };

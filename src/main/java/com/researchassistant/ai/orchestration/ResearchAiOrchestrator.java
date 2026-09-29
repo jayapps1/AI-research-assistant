@@ -103,7 +103,8 @@ public class ResearchAiOrchestrator {
 
     private boolean requiresExternalContent(AiTaskType taskType) {
         return switch (taskType) {
-            case GROUNDED_QA, LITERATURE_MATRIX_EXTRACTION, LITERATURE_REVIEW_DRAFT, DISCUSSION_DRAFT -> true;
+            case WEB_RESEARCH, CLAIM_VERIFICATION, REPORT_RESEARCH_ASSISTANCE,
+                    GROUNDED_QA, LITERATURE_MATRIX_EXTRACTION, LITERATURE_REVIEW_DRAFT, DISCUSSION_DRAFT -> true;
             default -> false;
         };
     }

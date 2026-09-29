@@ -32,7 +32,7 @@ public class CitationFormattingService {
         if (style == CitationStyle.NUMERIC_APA) {
             if (context == CitationContext.REFERENCE_LIST) {
                 if (incomplete) {
-                    text = "[" + (citationNumber == null ? "?" : citationNumber) + "] REFERENCE_METADATA_INCOMPLETE.";
+                    text = "[" + (citationNumber == null ? "?" : citationNumber) + "] Reference metadata incomplete.";
                 } else {
                     text = "[" + (citationNumber == null ? "?" : citationNumber) + "] " + authorYearReference(reference, authors, style);
                 }
@@ -42,7 +42,7 @@ public class CitationFormattingService {
         } else if (context == CitationContext.NUMERIC || style == CitationStyle.IEEE || style == CitationStyle.VANCOUVER) {
             text = context == CitationContext.REFERENCE_LIST ? numericReference(reference, authors, citationNumber, style) : "[" + (citationNumber == null ? "?" : citationNumber) + "]";
         } else if (context == CitationContext.REFERENCE_LIST) {
-            text = authorYearReference(reference, authors, style);
+            text = incomplete ? incompleteReferenceList(reference, authors, style) : authorYearReference(reference, authors, style);
         } else if (incomplete) {
             text = "REFERENCE_METADATA_INCOMPLETE";
         } else {
@@ -55,6 +55,13 @@ public class CitationFormattingService {
             }
         }
         return new FormattedCitation(text, warnings, warnings.isEmpty());
+    }
+
+    private String incompleteReferenceList(ReferenceEntry ref, List<ReferenceAuthor> authors, CitationStyle style) {
+        String citation = authorYearReference(ref, authors, style);
+        return citation == null || citation.isBlank()
+                ? "Reference metadata incomplete."
+                : citation + " [Reference metadata incomplete.]";
     }
 
     private String authorYearReference(ReferenceEntry ref, List<ReferenceAuthor> authors, CitationStyle style) {
@@ -74,7 +81,7 @@ public class CitationFormattingService {
 
     private String numericReference(ReferenceEntry ref, List<ReferenceAuthor> authors, Integer number, CitationStyle style) {
         if (ref.getMetadataStatus() == ReferenceMetadataStatus.INCOMPLETE || looksLikeFilenameTitle(ref.getTitle())) {
-            return "[" + (number == null ? "?" : number) + "] REFERENCE_METADATA_INCOMPLETE.";
+            return "[" + (number == null ? "?" : number) + "] Reference metadata incomplete.";
         }
         StringJoiner joiner = new StringJoiner(", ");
         for (ReferenceAuthor author : authors) joiner.add(displayName(author));

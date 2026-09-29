@@ -133,7 +133,7 @@ app:
     # 50 MiB per file (50 * 1024 * 1024 bytes). Keep Spring multipart max-file-size in sync.
     max-upload-size-bytes: ${DOCUMENT_MAX_UPLOAD_SIZE_BYTES:52428800}
     storage:
-      type: local
+      type: ${STORAGE_PROVIDER:LOCAL}
       local-directory: ${DOCUMENT_STORAGE_DIR:./data/documents}
     chunking:
       target-characters: ${DOCUMENT_CHUNK_TARGET_CHARACTERS:3000}
@@ -142,6 +142,23 @@ app:
     processing:
       auto-process-after-upload: ${DOCUMENT_AUTO_PROCESS_AFTER_UPLOAD:true}
       worker-delay-ms: ${DOCUMENT_WORKER_DELAY_MS:5000}
+  storage:
+    provider: ${STORAGE_PROVIDER:LOCAL}
+    local-directory: ${OBJECT_STORAGE_LOCAL_DIR:${DOCUMENT_STORAGE_DIR:./data/documents}}
+    legacy-profile-image-directory: ${PROFILE_IMAGE_STORAGE_DIR:./data/profiles}
+    google-drive:
+      root-folder-id: ${GOOGLE_DRIVE_ROOT_FOLDER_ID:}
+      client-email: ${GOOGLE_DRIVE_CLIENT_EMAIL:}
+      private-key: ${GOOGLE_DRIVE_PRIVATE_KEY:}
+      private-key-base64: ${GOOGLE_DRIVE_PRIVATE_KEY_BASE64:}
+      private-key-id: ${GOOGLE_DRIVE_PRIVATE_KEY_ID:}
+      token-uri: ${GOOGLE_DRIVE_TOKEN_URI:https://oauth2.googleapis.com/token}
+      api-base-url: ${GOOGLE_DRIVE_API_BASE_URL:https://www.googleapis.com/drive/v3}
+      upload-base-url: ${GOOGLE_DRIVE_UPLOAD_BASE_URL:https://www.googleapis.com/upload/drive/v3}
+      supports-all-drives: ${GOOGLE_DRIVE_SUPPORTS_ALL_DRIVES:false}
+      connect-timeout: ${GOOGLE_DRIVE_CONNECT_TIMEOUT:PT10S}
+      request-timeout: ${GOOGLE_DRIVE_REQUEST_TIMEOUT:PT60S}
+      max-retries: ${GOOGLE_DRIVE_MAX_RETRIES:3}
   collaboration:
     invitation-ttl: ${PROJECT_INVITATION_TTL:P7D}
   ai:
@@ -191,6 +208,16 @@ app:
       model: ${AI_GENERATION_MODEL:gpt-4o-mini}
     conversation:
       context-turns: ${RAG_CONVERSATION_CONTEXT_TURNS:6}
+  web-search:
+    enabled: ${WEB_SEARCH_ENABLED:false}
+    provider: ${WEB_SEARCH_PROVIDER:none}
+    api-key: ${BRAVE_SEARCH_API_KEY:${WEB_SEARCH_API_KEY:}}
+    base-url: ${WEB_SEARCH_BASE_URL:https://api.search.brave.com}
+    country: ${WEB_SEARCH_COUNTRY:US}
+    search-lang: ${WEB_SEARCH_LANG:en}
+    ui-lang: ${WEB_SEARCH_UI_LANG:en-US}
+    max-results: ${WEB_SEARCH_MAX_RESULTS:8}
+    timeout: ${WEB_SEARCH_TIMEOUT:PT15S}
   payment:
     paystack:
       enabled: ${PAYSTACK_ENABLED:true}

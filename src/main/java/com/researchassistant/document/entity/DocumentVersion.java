@@ -1,6 +1,7 @@
 package com.researchassistant.document.entity;
 
 import com.researchassistant.identity.entity.User;
+import com.researchassistant.common.storage.StorageObjectEntity;
 import com.researchassistant.document.security.FileScanStatus;
 
 import jakarta.persistence.Column;
@@ -67,6 +68,10 @@ public class DocumentVersion {
 
     @Column(name = "storage_key", nullable = false, length = 1000)
     private String storageKey;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "storage_object_id")
+    private StorageObjectEntity storageObject;
 
     @Column(name = "mime_type", nullable = false, length = 255)
     private String mimeType;

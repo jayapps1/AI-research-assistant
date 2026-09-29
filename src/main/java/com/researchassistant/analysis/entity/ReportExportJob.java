@@ -1,5 +1,6 @@
 package com.researchassistant.analysis.entity;
 
+import com.researchassistant.common.storage.StorageObjectEntity;
 import com.researchassistant.identity.entity.User;
 import jakarta.persistence.*;
 import lombok.Getter; import lombok.NoArgsConstructor; import lombok.Setter;
@@ -14,6 +15,7 @@ public class ReportExportJob {
     @Enumerated(EnumType.STRING) @Column(nullable=false, length=40) private ReportExportFormat format;
     @Enumerated(EnumType.STRING) @Column(nullable=false, length=40) private ReportExportStatus status = ReportExportStatus.QUEUED;
     @Column(name="storage_key", length=1000) private String storageKey;
+    @ManyToOne(fetch=FetchType.LAZY) @JoinColumn(name="storage_object_id") private StorageObjectEntity storageObject;
     @Column(nullable=false, length=500) private String filename;
     @Column(name="mime_type", nullable=false, length=255) private String mimeType;
     @Column(name="file_size_bytes") private Long fileSizeBytes;

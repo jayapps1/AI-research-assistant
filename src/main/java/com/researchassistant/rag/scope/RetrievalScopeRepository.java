@@ -61,6 +61,19 @@ public class RetrievalScopeRepository {
                       where c.document_version_id = dv.id
                         and length(trim(c.text_content)) > 0
                   )
+                  and not exists (
+                      select 1
+                      from reference_source_links rsl
+                      join project_references pr
+                        on pr.reference_id = rsl.reference_id
+                       and pr.project_id = d.project_id
+                      where rsl.document_id = d.id
+                        and pr.status = 'ACTIVE'
+                        and (
+                            pr.available_for_research_ai = false
+                            or pr.available_for_citation = false
+                        )
+                  )
                 """ + documentPredicate + """
                 order by d.document_code asc
                 """;

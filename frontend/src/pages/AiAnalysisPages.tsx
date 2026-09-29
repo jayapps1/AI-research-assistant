@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { analysisApi, billingApi, datasetApi, documentApi, ragApi } from '../api/endpoints';
+import { AssistantResponse, AssistantSources } from '../components/AssistantResponse';
 import { Breadcrumbs, Button, Card, Field, Textarea, Badge, Drawer, Select, Modal } from '../components/ui';
 import { EmptyState, ErrorState } from '../components/states';
 import { useProjectId } from '../hooks/useProjectId';
@@ -268,7 +269,17 @@ function AnswerDisplay({ answer, onCitationClick }: { answer: RagAnswer; onCitat
   const citations = answer.citations ?? answer.evidence ?? [];
   const insufficient = answer.status === 'INSUFFICIENT_EVIDENCE' || !answer.answer;
   if (insufficient) return <div className="alert info">The available project sources do not contain enough evidence to answer this question.</div>;
-  return <div className="grid"><Badge tone="success">{answer.status ?? 'COMPLETED'}</Badge><div className="panel"><p>{answer.answer}</p></div><h3>Evidence / citations</h3>{citations.map((citation, index) => <CitationCard key={citation.id ?? index} citation={citation} onClick={() => onCitationClick(citation)} />)}</div>;
+  return (
+    <div className="grid">
+      <Badge tone="success">{answer.status ?? 'COMPLETED'}</Badge>
+      <AssistantResponse content={answer.answer} />
+      <AssistantSources
+        title="Evidence / citations"
+        sources={citations}
+        renderSource={(citation) => <CitationCard citation={citation} onClick={() => onCitationClick(citation)} />}
+      />
+    </div>
+  );
 }
 
 function CitationCard({ citation, onClick }: { citation: Citation; onClick: () => void }) {

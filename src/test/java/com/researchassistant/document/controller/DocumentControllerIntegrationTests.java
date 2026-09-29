@@ -1,6 +1,8 @@
 package com.researchassistant.document.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.researchassistant.common.storage.StorageObjectRepository;
+import com.researchassistant.common.storage.StorageObjectStatus;
 import com.researchassistant.document.dto.DocumentResponse;
 import com.researchassistant.document.entity.DocumentProcessingJob;
 import com.researchassistant.document.entity.DocumentProcessingJobType;
@@ -54,7 +56,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.security.jwt.secret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
         "app.security.credentials.encryption-key=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
         "app.document.max-upload-size-bytes=64",
-        "app.document.storage.local-directory=./target/test-documents"
+        "app.document.storage.local-directory=./target/test-documents",
+        "app.storage.local-directory=./target/test-documents"
 })
 @AutoConfigureMockMvc
 @Transactional
@@ -85,6 +88,9 @@ class DocumentControllerIntegrationTests {
 
     @Autowired
     private WorkspaceMembershipRepository workspaceMembershipRepository;
+
+    @Autowired
+    private StorageObjectRepository storageObjectRepository;
 
     @Test
     void documentNumbersArePermanentAndProjectScoped()
@@ -167,7 +173,11 @@ class DocumentControllerIntegrationTests {
 
         assertThat(version.getOriginalFilename()).doesNotContain("\\", "/");
         assertThat(version.getStorageKey()).doesNotContain("unsafe.pdf");
-        assertThat(version.getStorageKey()).contains("workspace/");
+        assertThat(version.getStorageKey()).contains("projects/" + project.id() + "/documents/");
+        assertThat(version.getStorageObject()).isNotNull();
+        var storageObject = storageObjectRepository.findById(version.getStorageObject().getId()).orElseThrow();
+        assertThat(storageObject.getStatus()).isEqualTo(StorageObjectStatus.AVAILABLE);
+        assertThat(storageObject.getProviderFileId()).isEqualTo(version.getStorageKey());
         assertThat(version.getFileSizeBytes()).isEqualTo(5L);
         assertThat(version.getChecksumSha256()).isEqualTo(sha256("hello"));
         assertThat(version.getStatus())

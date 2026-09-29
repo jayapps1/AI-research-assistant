@@ -42,6 +42,8 @@ public class ReferenceEntry {
     @Column(name = "metadata_confidence") private Double metadataConfidence;
     @Column(name = "metadata_review_status", length = 40) private String metadataReviewStatus;
     @Column(name = "verified_at") private OffsetDateTime verifiedAt;
+    @Column(name = "accessed_at") private OffsetDateTime accessedAt;
+    @Column(name = "retrieved_at") private OffsetDateTime retrievedAt;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 30) private ContentOrigin origin = ContentOrigin.USER;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "created_by", nullable = false) private User createdBy;
     @Column(name = "created_at", nullable = false, updatable = false) private OffsetDateTime createdAt;

@@ -3,8 +3,6 @@ package com.researchassistant.document.storage;
 import com.researchassistant.document.config.DocumentProperties;
 import com.researchassistant.document.exception.DocumentStorageException;
 
-import org.springframework.stereotype.Service;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -22,7 +20,6 @@ import java.util.HexFormat;
  * blocks absolute paths and {@code ../} traversal. Raw upload
  * filenames are never used as path authority.</p>
  */
-@Service
 public class LocalDocumentStorageService implements DocumentStorageService {
 
     private final Path rootDirectory;

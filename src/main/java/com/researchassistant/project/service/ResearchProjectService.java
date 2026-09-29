@@ -543,6 +543,7 @@ public class ResearchProjectService {
     private Map<String, Long> projectDependencyCounts(UUID projectId) {
         Map<String, Long> counts = new LinkedHashMap<>();
         counts.put("documents", countRows("documents", projectId));
+        counts.put("conversations", countRows("conversations", projectId));
         counts.put("rag_conversations", countRows("rag_conversations", projectId));
         counts.put("research_objectives", countRows("research_objectives", projectId));
         counts.put("research_questions", countRows("research_questions", projectId));
