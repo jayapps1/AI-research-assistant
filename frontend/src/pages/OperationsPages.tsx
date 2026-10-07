@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   AlertTriangle,
   BookOpen,
@@ -222,6 +222,15 @@ export function ReportPage() {
 
   // Edit Title Page Modal State
   const [showEditTitlePageModal, setShowEditTitlePageModal] = useState(false);
+  const [exportScopeMode, setExportScopeMode] = useState<'FULL' | 'SELECTED'>('FULL');
+  const [selectedExportNodeIds, setSelectedExportNodeIds] = useState<string[]>([]);
+  const [includeExportCoverPage, setIncludeExportCoverPage] = useState(false);
+  const [includeExportToc, setIncludeExportToc] = useState(false);
+  const [includeExportListOfFigures, setIncludeExportListOfFigures] = useState(false);
+  const [includeExportListOfTables, setIncludeExportListOfTables] = useState(false);
+  const [includeExportReferences, setIncludeExportReferences] = useState(true);
+  const [includeExportAppendices, setIncludeExportAppendices] = useState(false);
+  const [exportReferenceMode, setExportReferenceMode] = useState<'CITED_IN_SELECTION' | 'ALL_PROJECT_REFERENCES' | 'NONE'>('CITED_IN_SELECTION');
   const [titlePageForm, setTitlePageForm] = useState<UpdateTitlePageDetailsRequest>({
     title: '',
     authorName: '',
@@ -339,6 +348,25 @@ export function ReportPage() {
     queryKey: ['report-final-document', reportId],
     queryFn: () => reportApi.finalDocument(reportId),
     enabled: Boolean(reportId) && (activeTab === 'final-doc' || activeTab === 'preview'),
+  });
+
+  const exportSelectionPayload = useMemo(() => ({
+    selectionMode: exportScopeMode,
+    selectedNodeIds: exportScopeMode === 'SELECTED' ? selectedExportNodeIds : [],
+    includeCoverPage: exportScopeMode === 'FULL' ? true : includeExportCoverPage,
+    includeFrontMatter: exportScopeMode === 'FULL',
+    includeToc: exportScopeMode === 'FULL' ? true : includeExportToc,
+    includeListOfFigures: exportScopeMode === 'FULL' ? true : includeExportListOfFigures,
+    includeListOfTables: exportScopeMode === 'FULL' ? true : includeExportListOfTables,
+    includeReferences: exportScopeMode === 'FULL' ? true : includeExportReferences,
+    includeAppendices: exportScopeMode === 'FULL' ? true : includeExportAppendices,
+    referenceMode: exportScopeMode === 'FULL' ? 'ALL_PROJECT_REFERENCES' : exportReferenceMode,
+  }), [exportScopeMode, selectedExportNodeIds, includeExportCoverPage, includeExportToc, includeExportListOfFigures, includeExportListOfTables, includeExportReferences, includeExportAppendices, exportReferenceMode]);
+
+  const previewQuery = useQuery({
+    queryKey: ['report-preview', reportId, exportSelectionPayload],
+    queryFn: () => reportApi.preview(reportId, { selection: exportSelectionPayload }),
+    enabled: Boolean(reportId) && activeTab === 'preview' && (exportScopeMode === 'FULL' || selectedExportNodeIds.length > 0),
   });
 
   // Validation query for preview panel
@@ -569,6 +597,7 @@ export function ReportPage() {
     mutationFn: () => reportApi.finalize(reportId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reports', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['report-final-document', reportId] });
       setSaveStatus('Report finalized successfully! Ready for verified export.');
       setTimeout(() => setSaveStatus(null), 4000);
     },
@@ -745,8 +774,8 @@ export function ReportPage() {
   });
 
   // Draft exports (Always allowed even with validation errors)
-  const createAndDownloadExport = async (format: 'DOCX' | 'PDF', draft: boolean) => {
-    const job = await reportApi.exports(reportId, { format, draft });
+  const createAndDownloadExport = async (format: 'DOCX' | 'PDF', draft: boolean, selection?: Record<string, unknown>) => {
+    const job = await reportApi.exports(reportId, { format, draft, selection });
     if (String(job.status) === 'COMPLETED' && job.id) {
       const result = await reportApi.downloadExport(String(job.id));
       reportApi.saveBlob(result.blob, result.filename);
@@ -755,14 +784,14 @@ export function ReportPage() {
   };
 
   const draftDocxExport = useMutation({
-    mutationFn: () => createAndDownloadExport('DOCX', true),
+    mutationFn: () => createAndDownloadExport('DOCX', true, exportSelectionPayload),
     onSuccess: () => {
       setSaveStatus('Draft DOCX generated and downloaded with authenticated request.');
       setTimeout(() => setSaveStatus(null), 3500);
     },
   });
   const draftPdfExport = useMutation({
-    mutationFn: () => createAndDownloadExport('PDF', true),
+    mutationFn: () => createAndDownloadExport('PDF', true, exportSelectionPayload),
     onSuccess: () => {
       setSaveStatus('Draft PDF generated and downloaded with authenticated request.');
       setTimeout(() => setSaveStatus(null), 3500);
@@ -815,6 +844,17 @@ export function ReportPage() {
   const isEmpiricalBlocked = sectionCap && !sectionCap.canGenerate;
   const reportData = selectedReport as any;
   const finalDoc = finalDocQuery.data as any;
+  const previewDoc = previewQuery.data as any;
+  const exportableChapters = ((structureQuery.data?.chapters ?? []) as any[]).filter((chapter) =>
+    !['PRELIMINARY', 'REFERENCES', 'APPENDICES'].includes(String(chapter.type))
+  );
+  const toggleExportNode = (nodeId: string) => {
+    setSelectedExportNodeIds((prev) =>
+      prev.includes(nodeId) ? prev.filter((id) => id !== nodeId) : [...prev, nodeId]
+    );
+  };
+  const selectAllExportNodes = () => setSelectedExportNodeIds(exportableChapters.map((chapter) => String(chapter.id)));
+  const clearExportNodes = () => setSelectedExportNodeIds([]);
   const valData = validationQuery.data as any;
   const selectedSectionContent = typeof selectedSection?.content === 'string' ? selectedSection.content : '';
   const hasSectionContent = selectedSectionContent.trim().length > 0;
@@ -887,10 +927,10 @@ export function ReportPage() {
             type="button"
             variant="primary"
             onClick={() => finalize.mutate()}
-            disabled={!reportId || finalize.isPending || isFinal}
+            disabled={!reportId || finalize.isPending}
           >
             <Check size={15} style={{ marginRight: 4 }} />
-            {isFinal ? `${documentLabel} Finalized` : `Finalize ${documentLabel}`}
+            {isFinal && (finalDocQuery.data as any)?.stale ? `Update & Finalize ${documentLabel}` : isFinal ? 'Finalize New Version' : `Finalize ${documentLabel}`}
           </Button>
         </div>
       </div>
@@ -2191,11 +2231,11 @@ export function ReportPage() {
                 </div>
 
                 {/* Body Content Preview */}
-                {finalDoc ? (
+                {previewDoc ? (
                   <ReportRichEditor
-                    key={`preview-${finalDoc.id}-${finalDoc.updatedAt}`}
-                    content={String(finalDoc.plainText || '')}
-                    contentJson={String(finalDoc.contentJson || '')}
+                    key={`preview-${exportScopeMode}-${selectedExportNodeIds.join('-')}-${previewDoc.sourceSectionCount || 0}`}
+                    content={String(previewDoc.plainText || '')}
+                    contentJson={String(previewDoc.contentJson || '')}
                     projectId={projectId}
                     citationStyle={currentCitationStyle}
                     readOnly
@@ -2217,12 +2257,8 @@ export function ReportPage() {
                       textAlign: 'center',
                     }}
                   >
-                    <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>No compiled preview snapshot yet</h2>
-                    <p className="muted">Prepare the final document to preview headings, content, citations, references, tables, and appendices as one read-only draft.</p>
-                    <Button type="button" variant="primary" onClick={() => prepareFinalDoc.mutate()} disabled={prepareFinalDoc.isPending}>
-                      <RefreshCw size={14} style={{ marginRight: 4 }} />
-                      {prepareFinalDoc.isPending ? 'Preparing...' : 'Prepare Preview Snapshot'}
-                    </Button>
+                    <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>Select content to preview</h2>
+                    <p className="muted">Selected preview compiles from the latest saved sections and does not alter the master report.</p>
                   </div>
                 )}
               </div>
@@ -2231,6 +2267,66 @@ export function ReportPage() {
 
           {/* Right Column: Validation Status & Downloads */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <Card style={{ padding: '1.25rem' }}>
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 600, margin: '0 0 0.75rem' }}>Document Scope</h2>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                <input type="radio" checked={exportScopeMode === 'FULL'} onChange={() => setExportScopeMode('FULL')} />
+                <span>Entire Project Report</span>
+              </label>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+                <input type="radio" checked={exportScopeMode === 'SELECTED'} onChange={() => setExportScopeMode('SELECTED')} />
+                <span>Selected Content</span>
+              </label>
+
+              {exportScopeMode === 'SELECTED' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Button type="button" variant="secondary" onClick={selectAllExportNodes} style={{ fontSize: '0.78rem', padding: '3px 8px' }}>Select All</Button>
+                    <Button type="button" variant="secondary" onClick={clearExportNodes} style={{ fontSize: '0.78rem', padding: '3px 8px' }}>Clear</Button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+                    {exportableChapters.map((chapter) => {
+                      const id = String(chapter.id);
+                      const label = chapter.chapterNumber ? `Chapter ${chapter.chapterNumber} - ${chapter.title}` : String(chapter.title);
+                      return (
+                        <label key={id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: '0.86rem' }}>
+                          <input type="checkbox" checked={selectedExportNodeIds.includes(id)} onChange={() => toggleExportNode(id)} />
+                          <span>{label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.84rem' }}>
+                      <input type="checkbox" checked={includeExportCoverPage} onChange={(e) => setIncludeExportCoverPage(e.target.checked)} /> Cover Page
+                    </label>
+                    <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.84rem' }}>
+                      <input type="checkbox" checked={includeExportToc} onChange={(e) => setIncludeExportToc(e.target.checked)} /> Table of Contents
+                    </label>
+                    <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.84rem' }}>
+                      <input type="checkbox" checked={includeExportListOfFigures} onChange={(e) => setIncludeExportListOfFigures(e.target.checked)} /> List of Figures
+                    </label>
+                    <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.84rem' }}>
+                      <input type="checkbox" checked={includeExportListOfTables} onChange={(e) => setIncludeExportListOfTables(e.target.checked)} /> List of Tables
+                    </label>
+                    <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.84rem' }}>
+                      <input type="checkbox" checked={includeExportAppendices} onChange={(e) => setIncludeExportAppendices(e.target.checked)} /> Appendices
+                    </label>
+                    <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.84rem' }}>
+                      <input type="checkbox" checked={includeExportReferences} onChange={(e) => setIncludeExportReferences(e.target.checked)} /> References
+                    </label>
+                    <Select value={exportReferenceMode} onChange={(e) => setExportReferenceMode(e.target.value as any)} disabled={!includeExportReferences}>
+                      <option value="CITED_IN_SELECTION">Cited in selection</option>
+                      <option value="ALL_PROJECT_REFERENCES">All project references</option>
+                      <option value="NONE">None</option>
+                    </Select>
+                  </div>
+                  <Button type="button" variant="primary" onClick={() => previewQuery.refetch()} disabled={selectedExportNodeIds.length === 0 || previewQuery.isFetching}>
+                    <Eye size={14} style={{ marginRight: 4 }} /> Preview Selected
+                  </Button>
+                </div>
+              )}
+            </Card>
             {/* Draft Export Card (ALWAYS Available!) */}
             <Card style={{ padding: '1.25rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '0.5rem' }}>
@@ -2245,19 +2341,19 @@ export function ReportPage() {
                   type="button"
                   variant="secondary"
                   onClick={() => draftDocxExport.mutate()}
-                  disabled={!reportId || draftDocxExport.isPending}
+                  disabled={!reportId || draftDocxExport.isPending || (exportScopeMode === 'SELECTED' && selectedExportNodeIds.length === 0)}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                 >
-                  <Download size={14} /> Download Draft DOCX
+                  <Download size={14} /> {exportScopeMode === 'SELECTED' ? 'Download Selected DOCX' : 'Download Draft DOCX'}
                 </Button>
                 <Button
                   type="button"
                   variant="secondary"
                   onClick={() => draftPdfExport.mutate()}
-                  disabled={!reportId || draftPdfExport.isPending}
+                  disabled={!reportId || draftPdfExport.isPending || (exportScopeMode === 'SELECTED' && selectedExportNodeIds.length === 0)}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                 >
-                  <Download size={14} /> Download Draft PDF
+                  <Download size={14} /> {exportScopeMode === 'SELECTED' ? 'Download Selected PDF' : 'Download Draft PDF'}
                 </Button>
               </div>
               <div style={{ marginTop: '0.75rem' }}>

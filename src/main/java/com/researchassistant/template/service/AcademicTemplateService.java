@@ -10,6 +10,11 @@ import com.researchassistant.analysis.repository.ResearchReportRepository;
 import com.researchassistant.analysis.repository.ResearchReportSectionRepository;
 import com.researchassistant.analysis.repository.ResearchReportTemplateRepository;
 import com.researchassistant.common.exception.ResourceNotFoundException;
+import com.researchassistant.common.storage.ObjectStorageService;
+import com.researchassistant.common.storage.StorageObjectCategory;
+import com.researchassistant.common.storage.StorageObjectEntity;
+import com.researchassistant.common.storage.StorageObjectMetadataService;
+import com.researchassistant.common.storage.StoredObject;
 import com.researchassistant.document.dto.DocumentResponse;
 import com.researchassistant.document.entity.AcademicFileRole;
 import com.researchassistant.document.entity.Document;
@@ -18,9 +23,12 @@ import com.researchassistant.document.service.DocumentService;
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.project.entity.ResearchProject;
 import com.researchassistant.project.repository.ResearchProjectRepository;
+import com.researchassistant.project.service.ProjectAuthorizationService;
 import com.researchassistant.template.dto.AcademicTemplateDtos.*;
+import com.researchassistant.template.exception.TemplateUploadException;
 import com.researchassistant.workspace.entity.Workspace;
 import com.researchassistant.workspace.repository.WorkspaceRepository;
+import com.researchassistant.workspace.service.WorkspaceAuthorizationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -46,7 +54,46 @@ public class AcademicTemplateService {
     private final ResearchReportChapterRepository chapterRepository;
     private final ResearchReportSectionRepository sectionRepository;
     private final ResearchReportTemplateRepository templateRepository;
+    private final WorkspaceAuthorizationService workspaceAuthorizationService;
+    private final ProjectAuthorizationService projectAuthorizationService;
+    private final StorageObjectMetadataService storageObjectMetadataService;
+    private final ObjectStorageService objectStorageService;
     private final ObjectMapper objectMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AcademicTemplateService(
+            AcademicDocumentGuidelineRepository guidelineRepository,
+            AcademicTemplateExtractionService extractionService,
+            DocumentService documentService,
+            DocumentRepository documentRepository,
+            WorkspaceRepository workspaceRepository,
+            ResearchProjectRepository projectRepository,
+            ResearchReportRepository reportRepository,
+            ResearchReportChapterRepository chapterRepository,
+            ResearchReportSectionRepository sectionRepository,
+            ResearchReportTemplateRepository templateRepository,
+            WorkspaceAuthorizationService workspaceAuthorizationService,
+            ProjectAuthorizationService projectAuthorizationService,
+            StorageObjectMetadataService storageObjectMetadataService,
+            ObjectStorageService objectStorageService,
+            ObjectMapper objectMapper
+    ) {
+        this.guidelineRepository = guidelineRepository;
+        this.extractionService = extractionService;
+        this.documentService = documentService;
+        this.documentRepository = documentRepository;
+        this.workspaceRepository = workspaceRepository;
+        this.projectRepository = projectRepository;
+        this.reportRepository = reportRepository;
+        this.chapterRepository = chapterRepository;
+        this.sectionRepository = sectionRepository;
+        this.templateRepository = templateRepository;
+        this.workspaceAuthorizationService = workspaceAuthorizationService;
+        this.projectAuthorizationService = projectAuthorizationService;
+        this.storageObjectMetadataService = storageObjectMetadataService;
+        this.objectStorageService = objectStorageService;
+        this.objectMapper = objectMapper;
+    }
 
     public AcademicTemplateService(
             AcademicDocumentGuidelineRepository guidelineRepository,
@@ -61,17 +108,9 @@ public class AcademicTemplateService {
             ResearchReportTemplateRepository templateRepository,
             ObjectMapper objectMapper
     ) {
-        this.guidelineRepository = guidelineRepository;
-        this.extractionService = extractionService;
-        this.documentService = documentService;
-        this.documentRepository = documentRepository;
-        this.workspaceRepository = workspaceRepository;
-        this.projectRepository = projectRepository;
-        this.reportRepository = reportRepository;
-        this.chapterRepository = chapterRepository;
-        this.sectionRepository = sectionRepository;
-        this.templateRepository = templateRepository;
-        this.objectMapper = objectMapper;
+        this(guidelineRepository, extractionService, documentService, documentRepository, workspaceRepository,
+                projectRepository, reportRepository, chapterRepository, sectionRepository, templateRepository,
+                null, null, null, null, objectMapper);
     }
 
     /**
@@ -84,14 +123,23 @@ public class AcademicTemplateService {
             MultipartFile file,
             User user
     ) {
-        Workspace workspace = workspaceRepository.findById(workspaceId)
-                .orElseThrow(() -> new ResourceNotFoundException("Workspace not found."));
+        validateTemplateFile(file);
+        Workspace workspace = workspaceAuthorizationService.requireActiveMembership(workspaceId, user).getWorkspace();
 
         ResearchProject project = null;
         if (projectId != null) {
-            project = projectRepository.findById(projectId)
-                    .orElseThrow(() -> new ResourceNotFoundException("Project not found."));
+            project = projectAuthorizationService.requireProjectEditor(projectId, user).project();
+            if (!project.getWorkspace().getId().equals(workspaceId)) {
+                throw new TemplateUploadException("TEMPLATE_ACCESS_DENIED", "Template upload workspace does not match the target project.");
+            }
         }
+
+        UUID guidelineId = UUID.randomUUID();
+        byte[] bytes = readBytes(file);
+        String originalName = safeFilename(file.getOriginalFilename() != null ? file.getOriginalFilename() : "guideline");
+        String mimeType = normalizeTemplateMime(file.getContentType(), originalName);
+        String storageKey = "workspaces/%s/template-guidelines/%s/%s".formatted(workspaceId, guidelineId, UUID.randomUUID() + extension(originalName));
+        StorageObjectEntity storageObject = storeStagedTemplate(user, workspaceId, projectId, storageKey, originalName, mimeType, bytes);
 
         // 1. Upload document with TEMPLATE_GUIDELINE role if projectId is present
         Document doc = null;
@@ -104,11 +152,13 @@ public class AcademicTemplateService {
 
         // 2. Extract structure
         ExtractedAcademicTemplate extracted;
-        try (InputStream is = file.getInputStream()) {
+        String status = "EXTRACTED";
+        try (InputStream is = new java.io.ByteArrayInputStream(bytes)) {
             extracted = extractionService.extractFromStream(is, file.getOriginalFilename(), file.getContentType());
         } catch (Exception e) {
-            log.error("Failed to analyze uploaded guideline {}: {}", file.getOriginalFilename(), e.getMessage());
+            log.warn("Template guideline uploaded but analysis failed for {}: {}", file.getOriginalFilename(), e.getMessage(), e);
             extracted = extractionService.extractFromText("", file.getOriginalFilename());
+            status = "TEMPLATE_PROCESSING_FAILED";
         }
 
         // 3. Determine version
@@ -120,13 +170,15 @@ public class AcademicTemplateService {
         }
 
         AcademicDocumentGuideline guideline = new AcademicDocumentGuideline();
+        guideline.setId(guidelineId);
         guideline.setWorkspace(workspace);
         guideline.setProject(project);
         guideline.setDocument(doc);
-        guideline.setOriginalFileName(file.getOriginalFilename() != null ? file.getOriginalFilename() : "guideline.pdf");
+        guideline.setStorageObject(storageObject);
+        guideline.setOriginalFileName(originalName);
         guideline.setSource("UPLOADED");
         guideline.setVersion(nextVersion);
-        guideline.setStatus("EXTRACTED");
+        guideline.setStatus(status);
         guideline.setInstitution(extracted.institution());
         guideline.setDepartment(extracted.department());
         guideline.setProgramme(extracted.programme());
@@ -155,6 +207,19 @@ public class AcademicTemplateService {
         return mapToResponse(guideline, template);
     }
 
+    @Transactional(readOnly = true)
+    public AcademicDocumentGuidelineResponse getGuideline(UUID guidelineId, User user) {
+        AcademicDocumentGuideline guideline = guidelineRepository.findById(guidelineId)
+                .orElseThrow(() -> new ResourceNotFoundException("Academic guideline not found."));
+        if (workspaceAuthorizationService != null) {
+            workspaceAuthorizationService.requireActiveMembership(guideline.getWorkspace().getId(), user);
+        }
+        ExtractedAcademicTemplate template = fromJson(
+                guideline.getApprovedStructureJson() != null ? guideline.getApprovedStructureJson() : guideline.getRawExtractionJson()
+        );
+        return mapToResponse(guideline, template);
+    }
+
     /**
      * User review & edit of extracted template before approval.
      */
@@ -166,6 +231,9 @@ public class AcademicTemplateService {
     ) {
         AcademicDocumentGuideline guideline = guidelineRepository.findById(guidelineId)
                 .orElseThrow(() -> new ResourceNotFoundException("Academic guideline not found."));
+        if (workspaceAuthorizationService != null) {
+            workspaceAuthorizationService.requireActiveMembership(guideline.getWorkspace().getId(), user);
+        }
 
         if (request.institution() != null) guideline.setInstitution(request.institution());
         if (request.department() != null) guideline.setDepartment(request.department());
@@ -200,14 +268,19 @@ public class AcademicTemplateService {
     ) {
         AcademicDocumentGuideline guideline = guidelineRepository.findById(guidelineId)
                 .orElseThrow(() -> new ResourceNotFoundException("Academic guideline not found."));
-
-        UUID projectId = targetProjectId != null ? targetProjectId : (guideline.getProject() != null ? guideline.getProject().getId() : null);
-        if (projectId == null) {
-            throw new IllegalArgumentException("Target project ID is required to apply template guideline.");
+        if (workspaceAuthorizationService != null) {
+            workspaceAuthorizationService.requireActiveMembership(guideline.getWorkspace().getId(), user);
         }
 
-        ResearchProject project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new ResourceNotFoundException("Project not found."));
+        UUID projectId = targetProjectId != null ? targetProjectId : request.targetProjectId() != null ? request.targetProjectId() : (guideline.getProject() != null ? guideline.getProject().getId() : null);
+        if (projectId == null) {
+            throw new TemplateUploadException("TEMPLATE_UPLOAD_EXPIRED", "Target project ID is required to apply template guideline.");
+        }
+
+        ResearchProject project = projectAuthorizationService.requireProjectEditor(projectId, user).project();
+        if (!project.getWorkspace().getId().equals(guideline.getWorkspace().getId())) {
+            throw new TemplateUploadException("TEMPLATE_ACCESS_DENIED", "Template guideline does not belong to the target workspace.");
+        }
 
         ExtractedAcademicTemplate template = fromJson(
                 guideline.getApprovedStructureJson() != null ? guideline.getApprovedStructureJson() : guideline.getRawExtractionJson()
@@ -217,6 +290,9 @@ public class AcademicTemplateService {
         guideline.setApprovedAt(OffsetDateTime.now());
         guideline.setApprovedByUser(user);
         guideline.setProject(project);
+        if (guideline.getStorageObject() != null) {
+            guideline.getStorageObject().setProjectId(project.getId());
+        }
 
         if (request.applyToProject()) {
             applyTemplateToProjectReport(project, template, request.preserveExistingContent(), user);
@@ -310,7 +386,8 @@ public class AcademicTemplateService {
             ResearchReportChapter chapter = new ResearchReportChapter();
             chapter.setReport(report);
             chapter.setType(chDto.type());
-            chapter.setTitle(chDto.title());
+            ChapterTitleParts titleParts = parseChapterTitle(chDto.title());
+            chapter.setTitle(titleParts.title());
             chapter.setChapterNumber(chDto.chapterNumber());
             chapter.setDisplayOrder(chapterOrder++);
             chapter.setRequired(chDto.required());
@@ -350,8 +427,23 @@ public class AcademicTemplateService {
         }
 
         projectRepository.save(project);
+        report.setRevisionNumber(report.getRevisionNumber() + 1);
         log.info("Applied approved academic guideline structure to project: {} (reportId={})", project.getTitle(), report.getId());
     }
+
+    private ChapterTitleParts parseChapterTitle(String rawTitle) {
+        String title = rawTitle == null ? "" : rawTitle.trim();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?i)^\\s*chapter\\s+(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|[ivxlcdm]+)(?:(?:\\s*[:\\-.\\u2013\\u2014]\\s*|\\s+)(.+))?$")
+                .matcher(title);
+        if (!matcher.matches()) {
+            return new ChapterTitleParts(title, null);
+        }
+        String cleanedTitle = (matcher.group(2) == null || matcher.group(2).isBlank()) ? title : matcher.group(2).trim();
+        return new ChapterTitleParts(cleanedTitle, null);
+    }
+
+    private record ChapterTitleParts(String title, Integer chapterNumber) {}
 
     private void persistSectionHierarchy(
             ResearchReportChapter chapter,
@@ -409,6 +501,25 @@ public class AcademicTemplateService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<AcademicDocumentGuidelineResponse> listGuidelines(UUID workspaceId, UUID projectId, User user) {
+        if (workspaceId == null && projectId == null) {
+            return List.of();
+        }
+        if (projectId != null) {
+            ResearchProject project = projectAuthorizationService.requireProjectViewer(projectId, user).project();
+            workspaceId = project.getWorkspace().getId();
+        }
+        workspaceAuthorizationService.requireActiveMembership(workspaceId, user);
+        List<AcademicDocumentGuideline> list = projectId != null
+                ? guidelineRepository.findAllByProjectIdOrderByUploadedAtDesc(projectId)
+                : guidelineRepository.findAllByWorkspaceIdOrderByUploadedAtDesc(workspaceId);
+
+        return list.stream()
+                .map(g -> mapToResponse(g, fromJson(g.getApprovedStructureJson() != null ? g.getApprovedStructureJson() : g.getRawExtractionJson())))
+                .toList();
+    }
+
     private AcademicDocumentGuidelineResponse mapToResponse(AcademicDocumentGuideline g, ExtractedAcademicTemplate tpl) {
         return new AcademicDocumentGuidelineResponse(
                 g.getId(),
@@ -437,6 +548,68 @@ public class AcademicTemplateService {
         } catch (JsonProcessingException e) {
             return "{}";
         }
+    }
+
+    private void validateTemplateFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new TemplateUploadException("TEMPLATE_FILE_REQUIRED", "Template guideline file is required.");
+        }
+        if (file.getSize() > 50L * 1024L * 1024L) {
+            throw new TemplateUploadException("TEMPLATE_FILE_TOO_LARGE", "Template guideline file must be 50 MB or smaller.");
+        }
+        normalizeTemplateMime(file.getContentType(), file.getOriginalFilename());
+    }
+
+    private byte[] readBytes(MultipartFile file) {
+        try {
+            return file.getBytes();
+        } catch (Exception e) {
+            throw new TemplateUploadException("TEMPLATE_UPLOAD_FAILED", "Template guideline could not be read.", e);
+        }
+    }
+
+    private StorageObjectEntity storeStagedTemplate(User user, UUID workspaceId, UUID projectId, String storageKey,
+            String originalFilename, String mimeType, byte[] bytes) {
+        StorageObjectEntity pending = storageObjectMetadataService.createPending(
+                user.getId(), workspaceId, projectId, StorageObjectCategory.TEMPLATE_GUIDELINE,
+                storageKey, originalFilename, originalFilename, mimeType, bytes.length, null);
+        try {
+            StoredObject stored = objectStorageService.store(storageKey, new java.io.ByteArrayInputStream(bytes), mimeType);
+            return storageObjectMetadataService.markAvailable(pending.getId(), stored);
+        } catch (RuntimeException e) {
+            storageObjectMetadataService.markFailed(pending.getId(), "TEMPLATE_STORAGE_FAILED", e.getMessage());
+            throw new TemplateUploadException("TEMPLATE_STORAGE_FAILED", "Template guideline could not be stored.", e);
+        }
+    }
+
+    private String normalizeTemplateMime(String mimeType, String filename) {
+        String normalized = mimeType == null ? "" : mimeType.trim().toLowerCase(Locale.ROOT);
+        String lowerName = filename == null ? "" : filename.toLowerCase(Locale.ROOT);
+        if ("application/pdf".equals(normalized) || lowerName.endsWith(".pdf")) {
+            return "application/pdf";
+        }
+        if ("application/vnd.openxmlformats-officedocument.wordprocessingml.document".equals(normalized) || lowerName.endsWith(".docx")) {
+            return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        }
+        throw new TemplateUploadException("TEMPLATE_FILE_TYPE_UNSUPPORTED", "Template guideline must be a PDF or DOCX file.");
+    }
+
+    private String extension(String filename) {
+        String name = filename == null ? "" : filename;
+        int dot = name.lastIndexOf('.');
+        if (dot >= 0 && dot < name.length() - 1) {
+            String ext = name.substring(dot).toLowerCase(Locale.ROOT);
+            if (ext.matches("\\.[a-z0-9]{1,10}")) {
+                return ext;
+            }
+        }
+        return "";
+    }
+
+    private String safeFilename(String filename) {
+        String name = filename == null ? "guideline" : filename.trim();
+        name = name.replaceAll("[\\\\/:*?\"<>|\\r\\n]+", "_");
+        return name.isBlank() ? "guideline" : name;
     }
 
     private ExtractedAcademicTemplate fromJson(String json) {

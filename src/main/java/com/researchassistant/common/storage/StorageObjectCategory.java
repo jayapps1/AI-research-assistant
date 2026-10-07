@@ -7,6 +7,7 @@ public enum StorageObjectCategory {
     IMAGE,
     CONVERSATION_ATTACHMENT,
     PROJECT_ATTACHMENT,
+    TEMPLATE_GUIDELINE,
     REPORT_EXPORT,
     PROFILE_IMAGE,
     OTHER

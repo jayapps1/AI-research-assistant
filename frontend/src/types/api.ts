@@ -1127,7 +1127,7 @@ export interface AcademicDocumentGuidelineResponse {
   documentId?: UUID | null;
   originalFileName: string;
   sourceType: string;
-  status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
+  status: 'EXTRACTED' | 'EDITED' | 'APPROVED' | 'TEMPLATE_PROCESSING_FAILED' | 'PENDING_REVIEW' | 'REJECTED';
   version: number;
   extractedTemplate: ExtractedAcademicTemplate;
   uploadedAt: string;
@@ -1269,5 +1269,4 @@ export interface ListOfTablesItem {
   pageNumber: number;
   metadataJson?: string | null;
 }
-
 

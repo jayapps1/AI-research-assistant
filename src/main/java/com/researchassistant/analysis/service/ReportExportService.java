@@ -1,6 +1,7 @@
 package com.researchassistant.analysis.service;
 
 import com.researchassistant.analysis.dto.AnalysisDtos.ReportValidationResponse;
+import com.researchassistant.analysis.controller.ReportExportController.DocumentExportSelection;
 import com.researchassistant.analysis.entity.*;
 import com.researchassistant.analysis.exception.ReportValidationException;
 import com.researchassistant.analysis.repository.*;
@@ -41,9 +42,12 @@ import java.io.*;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -135,11 +139,18 @@ public class ReportExportService {
 
     @Transactional
     public ReportExportJob createExport(UUID reportId, ReportExportFormat format, boolean isDraft, User user) {
+        return createExport(reportId, format, isDraft, null, user);
+    }
+
+    @Transactional
+    public ReportExportJob createExport(UUID reportId, ReportExportFormat format, boolean isDraft, DocumentExportSelection selection, User user) {
         ResearchReport report = reportRepository.findById(reportId).orElseThrow(() -> new ResourceNotFoundException("Report not found."));
         authorizationService.requireProjectEditor(report.getProject().getId(), user);
         if (format != ReportExportFormat.DOCX && format != ReportExportFormat.PDF) throw new IllegalArgumentException("Only DOCX and PDF exports are implemented.");
+        ReportDocumentCompiler.DocumentCompilationScope compilationScope = toCompilationScope(report, selection);
+        boolean selectedScope = compilationScope.mode() == ReportDocumentCompiler.CompilationMode.SELECTED;
 
-        if (!isDraft) {
+        if (!isDraft && !selectedScope) {
             AnalysisWorkflowService workflowService = workflowServiceProvider.getIfAvailable();
             if (workflowService != null) {
                 ReportValidationResponse validation = workflowService.validateReport(reportId, user);
@@ -156,7 +167,7 @@ public class ReportExportService {
         job.setReport(report);
         job.setFormat(format);
         job.setStatus(ReportExportStatus.RUNNING);
-        job.setFilename(filename(report, format, isDraft));
+        job.setFilename(filename(report, format, isDraft, compilationScope));
         job.setMimeType(format == ReportExportFormat.DOCX ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/pdf");
         job.setReportRevisionNumber(report.getRevisionNumber());
         job.setCitationStyle(report.getCitationStyle());
@@ -166,7 +177,7 @@ public class ReportExportService {
         job.setStartedAt(OffsetDateTime.now());
 
         ReportDocumentVersion finalVersion = null;
-        if (!isDraft) {
+        if (!isDraft && !selectedScope) {
             finalVersion = documentVersionRepository.findFirstByReportIdOrderByVersionNumberDesc(reportId)
                     .orElseThrow(() -> new IllegalStateException("Prepare a final document snapshot before final export."));
             if (finalVersion.getSourceReportRevisionNumber() != report.getRevisionNumber()) {
@@ -181,12 +192,12 @@ public class ReportExportService {
         exportJobRepository.save(job);
         auditService.record(user.getId(), SecurityAuditEventType.REPORT_EXPORT_REQUESTED);
         try {
-            ReportDocumentCompiler.CompiledAcademicDocument draftCompiled = isDraft && reportDocumentCompiler != null
-                    ? reportDocumentCompiler.compile(report)
+            ReportDocumentCompiler.CompiledAcademicDocument draftCompiled = (isDraft || selectedScope) && reportDocumentCompiler != null
+                    ? reportDocumentCompiler.compile(report, compilationScope)
                     : null;
             byte[] bytes = format == ReportExportFormat.DOCX
-                    ? (isDraft && draftCompiled != null ? renderDocx(draftCompiled, report, true) : renderDocx(finalVersion, report))
-                    : (isDraft && draftCompiled != null ? renderPdf(draftCompiled, report, true) : renderPdf(finalVersion, report));
+                    ? ((isDraft || selectedScope) && draftCompiled != null ? renderDocx(draftCompiled, report, true) : renderDocx(finalVersion, report))
+                    : ((isDraft || selectedScope) && draftCompiled != null ? renderPdf(draftCompiled, report, true) : renderPdf(finalVersion, report));
             String storageKey = "projects/" + report.getProject().getId() + "/exports/" + job.getId() + "/" + job.getFilename();
             StorageObjectEntity pendingStorageObject = storageObjectMetadataService.createPending(
                     user.getId(),
@@ -236,6 +247,13 @@ public class ReportExportService {
             auditService.record(user.getId(), SecurityAuditEventType.REPORT_EXPORT_FAILED);
         }
         return job;
+    }
+
+    @Transactional(readOnly = true)
+    public ReportDocumentCompiler.CompiledAcademicDocument preview(UUID reportId, DocumentExportSelection selection, User user) {
+        ResearchReport report = reportRepository.findById(reportId).orElseThrow(() -> new ResourceNotFoundException("Report not found."));
+        authorizationService.requireProjectViewer(report.getProject().getId(), user);
+        return reportDocumentCompiler.compile(report, toCompilationScope(report, selection));
     }
 
     @Transactional(readOnly = true)
@@ -968,7 +986,89 @@ public class ReportExportService {
     }
 
     private String filename(ResearchReport report, ReportExportFormat format, boolean isDraft) {
-        return (isDraft ? "draft-" : "") + "research-report-" + report.getProject().getId() + "-" + DateTimeFormatter.ofPattern("yyyyMMddHHmmss").format(java.time.LocalDateTime.now()) + "." + format.name().toLowerCase();
+        return filename(report, format, isDraft, ReportDocumentCompiler.DocumentCompilationScope.full());
+    }
+
+    private String filename(ResearchReport report, ReportExportFormat format, boolean isDraft, ReportDocumentCompiler.DocumentCompilationScope scope) {
+        String base = report.getProject().getTitle() == null || report.getProject().getTitle().isBlank()
+                ? report.getTitle()
+                : report.getProject().getTitle();
+        String suffix = "";
+        if (scope != null && scope.mode() == ReportDocumentCompiler.CompilationMode.SELECTED) {
+            suffix = selectedFilenameSuffix(report, scope.selectedNodeIds());
+        }
+        String draft = isDraft || (scope != null && scope.mode() == ReportDocumentCompiler.CompilationMode.SELECTED) ? "Draft_" : "";
+        return safeFilename(draft + base + (suffix.isBlank() ? "_Project_Report" : suffix)) + "." + format.name().toLowerCase(Locale.ROOT);
+    }
+
+    private String selectedFilenameSuffix(ResearchReport report, Set<UUID> selectedNodeIds) {
+        if (selectedNodeIds == null || selectedNodeIds.isEmpty()) {
+            return "_Selected_Content";
+        }
+        List<Integer> chapters = chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId()).stream()
+                .filter(chapter -> selectedNodeIds.contains(chapter.getId()))
+                .map(ResearchReportChapter::getChapterNumber)
+                .filter(java.util.Objects::nonNull)
+                .sorted()
+                .toList();
+        if (chapters.size() == 1) {
+            return "_Chapter_" + chapters.get(0);
+        }
+        if (chapters.size() > 1) {
+            return "_Chapters_" + chapters.get(0) + "-" + chapters.get(chapters.size() - 1);
+        }
+        return "_Selected_Content";
+    }
+
+    private String safeFilename(String value) {
+        String name = value == null ? "research-report" : value.trim();
+        name = name.replaceAll("[^A-Za-z0-9._-]+", "_").replaceAll("_+", "_");
+        name = name.replaceAll("^_+|_+$", "");
+        return name.isBlank() ? "research-report" : name;
+    }
+
+    private ReportDocumentCompiler.DocumentCompilationScope toCompilationScope(ResearchReport report, DocumentExportSelection selection) {
+        if (selection == null || selection.selectionMode() == null || !"SELECTED".equalsIgnoreCase(selection.selectionMode())) {
+            return ReportDocumentCompiler.DocumentCompilationScope.full();
+        }
+        Set<UUID> selectedIds = selection.selectedNodeIds() == null ? Set.of() : new LinkedHashSet<>(selection.selectedNodeIds());
+        validateSelectedNodeIds(report, selectedIds);
+        return ReportDocumentCompiler.DocumentCompilationScope.selected(
+                selectedIds,
+                Boolean.TRUE.equals(selection.includeCoverPage()),
+                Boolean.TRUE.equals(selection.includeFrontMatter()),
+                Boolean.TRUE.equals(selection.includeToc()),
+                Boolean.TRUE.equals(selection.includeListOfFigures()),
+                Boolean.TRUE.equals(selection.includeListOfTables()),
+                selection.includeReferences() == null || Boolean.TRUE.equals(selection.includeReferences()),
+                Boolean.TRUE.equals(selection.includeAppendices()),
+                parseReferenceScope(selection.referenceMode())
+        );
+    }
+
+    private ReportDocumentCompiler.ReferenceScope parseReferenceScope(String value) {
+        if (value == null || value.isBlank()) {
+            return ReportDocumentCompiler.ReferenceScope.CITED_IN_SELECTION;
+        }
+        return switch (value.trim().toUpperCase(Locale.ROOT)) {
+            case "ALL", "ALL_PROJECT_REFERENCES" -> ReportDocumentCompiler.ReferenceScope.ALL_PROJECT_REFERENCES;
+            case "NONE" -> ReportDocumentCompiler.ReferenceScope.NONE;
+            default -> ReportDocumentCompiler.ReferenceScope.CITED_IN_SELECTION;
+        };
+    }
+
+    private void validateSelectedNodeIds(ResearchReport report, Set<UUID> selectedIds) {
+        if (selectedIds == null || selectedIds.isEmpty()) {
+            throw new IllegalArgumentException("EXPORT_SELECTION_REQUIRED: select at least one chapter or section.");
+        }
+        Set<UUID> allowed = new LinkedHashSet<>();
+        chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId()).forEach(chapter -> allowed.add(chapter.getId()));
+        sectionRepository.findAllByChapterReportId(report.getId()).forEach(section -> allowed.add(section.getId()));
+        for (UUID id : selectedIds) {
+            if (!allowed.contains(id)) {
+                throw new IllegalArgumentException("EXPORT_SELECTION_INVALID: selected node does not belong to this report.");
+            }
+        }
     }
     private String defaultStyleJson() { return "{\"fontFamily\":\"Times New Roman\",\"bodyFontSize\":12,\"lineSpacing\":1.5,\"pageSize\":\"A4\"}"; }
 

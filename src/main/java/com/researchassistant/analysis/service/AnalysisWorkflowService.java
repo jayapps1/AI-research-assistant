@@ -711,8 +711,10 @@ public class AnalysisWorkflowService {
         int chOrder = 1;
         for (JsonNode chNode : chaptersNode) {
             ReportChapterType type = parseChapterType(chNode.has("type") ? chNode.get("type").asText() : "CUSTOM");
-            String title = chNode.has("title") ? chNode.get("title").asText() : "Chapter " + chOrder;
-            Integer chapterNumber = chNode.has("chapterNumber") && !chNode.get("chapterNumber").isNull() ? chNode.get("chapterNumber").asInt() : null;
+            String rawTitle = chNode.has("title") ? chNode.get("title").asText() : "Chapter " + chOrder;
+            ChapterTitleParts titleParts = parseChapterTitle(rawTitle);
+            String title = titleParts.title();
+            Integer chapterNumber = chNode.has("chapterNumber") && !chNode.get("chapterNumber").isNull() ? chNode.get("chapterNumber").asInt() : titleParts.chapterNumber();
             ResearchReportChapter chapter = findChapter(existingChapters, type, title)
                     .orElseGet(() -> {
                         ResearchReportChapter created = new ResearchReportChapter();
@@ -725,6 +727,9 @@ public class AnalysisWorkflowService {
                         existingChapters.add(saved);
                         return saved;
                     });
+            if (isNumberedChapterType(chapter.getType()) && !Objects.equals(chapter.getTitle(), title)) {
+                chapter.setTitle(title);
+            }
             if (chapter.getChapterNumber() == null && chapterNumber != null) chapter.setChapterNumber(chapterNumber);
             chapter.setRequired(chNode.has("required") ? chNode.get("required").asBoolean() : chapter.isRequired());
             chapter.setSystemDefined(chNode.has("systemDefined") ? chNode.get("systemDefined").asBoolean() : true);
@@ -1179,9 +1184,13 @@ public class AnalysisWorkflowService {
             } catch (Exception ignored) {
                 chapter.setType(ReportChapterType.CUSTOM);
             }
-            chapter.setTitle(chNode.has("title") ? chNode.get("title").asText() : "Chapter " + chOrder);
+            String rawTitle = chNode.has("title") ? chNode.get("title").asText() : "Chapter " + chOrder;
+            ChapterTitleParts titleParts = parseChapterTitle(rawTitle);
+            chapter.setTitle(titleParts.title());
             if (chNode.has("chapterNumber") && !chNode.get("chapterNumber").isNull()) {
                 chapter.setChapterNumber(chNode.get("chapterNumber").asInt());
+            } else if (titleParts.chapterNumber() != null) {
+                chapter.setChapterNumber(titleParts.chapterNumber());
             }
             chapter.setDisplayOrder(chOrder++);
             ResearchReportChapter savedChapter = chapterRepository.save(chapter);
@@ -1280,6 +1289,7 @@ public class AnalysisWorkflowService {
         md.append("# TABLE OF CONTENTS\n\n");
 
         boolean isCoursework = isCourseworkReport(report);
+        DocumentNumberingPolicy numbering = DocumentNumberingPolicy.fromReport(report);
         List<TableOfContentsItem> chapterItems = new ArrayList<>();
         for (ResearchReportChapter ch : chapters) {
             List<ResearchReportSection> sections = sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(ch.getId());
@@ -1292,11 +1302,10 @@ public class AnalysisWorkflowService {
 
             List<TableOfContentsSectionItem> sectionItems = new ArrayList<>();
             if (!isCoursework) {
-                String chapterPrefix = ch.getChapterNumber() != null ? "Chapter " + ch.getChapterNumber() + ": " : "";
-                md.append("### ").append(chapterPrefix).append(ch.getTitle()).append("\n");
+                md.append("### ").append(numbering.chapterHeading(ch.getChapterNumber(), ch.getTitle())).append("\n");
             }
             for (ResearchReportSection sec : rootSections) {
-                sectionItems.add(tocSectionItem(sec, sectionsByParent, md, 0, isCoursework));
+                sectionItems.add(tocSectionItem(sec, sectionsByParent, md, 0, isCoursework, numbering));
             }
             if (!isCoursework) {
                 md.append("\n");
@@ -1308,15 +1317,16 @@ public class AnalysisWorkflowService {
     }
 
     private TableOfContentsSectionItem tocSectionItem(ResearchReportSection section,
-            Map<UUID, List<ResearchReportSection>> sectionsByParent, StringBuilder md, int depth, boolean isCoursework) {
+            Map<UUID, List<ResearchReportSection>> sectionsByParent, StringBuilder md, int depth, boolean isCoursework,
+            DocumentNumberingPolicy numbering) {
         String indent = "  ".repeat(Math.max(0, depth));
         String prefix;
         if (section.getSectionNumber() == null || section.getSectionNumber().isBlank()) {
             prefix = "";
         } else if (isCoursework && !section.getSectionNumber().contains(".")) {
-            prefix = section.getSectionNumber() + ".";
+            prefix = numbering.sectionNumber(section.getSectionNumber()) + ".";
         } else {
-            prefix = section.getSectionNumber();
+            prefix = numbering.sectionNumber(section.getSectionNumber());
         }
         if (prefix.isBlank()) {
             md.append(indent).append(section.getHeading()).append("\n");
@@ -1325,7 +1335,7 @@ public class AnalysisWorkflowService {
         }
         List<TableOfContentsSectionItem> children = sectionsByParent.getOrDefault(section.getId(), List.of()).stream()
                 .sorted(Comparator.comparingInt(ResearchReportSection::getDisplayOrder))
-                .map(child -> tocSectionItem(child, sectionsByParent, md, depth + 1, isCoursework))
+                .map(child -> tocSectionItem(child, sectionsByParent, md, depth + 1, isCoursework, numbering))
                 .toList();
         return new TableOfContentsSectionItem(section.getHeading(), section.getSectionNumber(),
                 section.getDisplayOrder(), section.getType(), children);
@@ -1394,9 +1404,9 @@ public class AnalysisWorkflowService {
         authorizationService.requireProjectAdminAccess(report.getProject().getId(), user);
         ReportValidationResponse validation = validateReport(reportId, user);
         if (!validation.errors().isEmpty()) throw new ReportValidationException(validation);
+        report.setRevisionNumber(report.getRevisionNumber() + 1);
         prepareFinalDocument(reportId, user);
         report.setStatus(ResearchReportStatus.FINAL);
-        report.setRevisionNumber(report.getRevisionNumber() + 1);
         auditService.record(user.getId(), SecurityAuditEventType.REPORT_FINALIZED);
         return ReportResponse.from(report);
     }
@@ -2290,11 +2300,11 @@ public class AnalysisWorkflowService {
     private void createDefaultChapters(ResearchReport report, User user) {
         Object[][] chapters = {
                 {ReportChapterType.PRELIMINARY, "Abstract", null},
-                {ReportChapterType.INTRODUCTION, "Chapter One: Introduction", 1},
-                {ReportChapterType.LITERATURE_REVIEW, "Chapter Two: Literature Review", 2},
-                {ReportChapterType.METHODOLOGY, "Chapter Three: Methodology", 3},
-                {ReportChapterType.RESULTS, "Chapter Four: Results and Discussion", 4},
-                {ReportChapterType.CONCLUSION_RECOMMENDATIONS, "Chapter Five: Conclusion and Recommendations", 5},
+                {ReportChapterType.INTRODUCTION, "Introduction", 1},
+                {ReportChapterType.LITERATURE_REVIEW, "Literature Review", 2},
+                {ReportChapterType.METHODOLOGY, "Methodology", 3},
+                {ReportChapterType.RESULTS, "Results and Discussion", 4},
+                {ReportChapterType.CONCLUSION_RECOMMENDATIONS, "Conclusion and Recommendations", 5},
                 {ReportChapterType.REFERENCES, "References", null},
                 {ReportChapterType.APPENDICES, "Appendices", null}
         };

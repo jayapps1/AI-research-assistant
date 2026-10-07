@@ -113,7 +113,7 @@ public class AcademicTemplateDtos {
             UUID projectId,
             UUID documentId,
             String originalFileName,
-            String source,
+            String sourceType,
             int version,
             String status,
             String institution,
@@ -121,7 +121,7 @@ public class AcademicTemplateDtos {
             String programme,
             String documentType,
             String citationStyle,
-            ExtractedAcademicTemplate templateStructure,
+            ExtractedAcademicTemplate extractedTemplate,
             String uploadedAt,
             String approvedAt,
             String approvedBy
@@ -137,6 +137,7 @@ public class AcademicTemplateDtos {
     ) {}
 
     public record ApproveGuidelineRequest(
+            UUID targetProjectId,
             boolean applyToProject,
             boolean preserveExistingContent
     ) {}

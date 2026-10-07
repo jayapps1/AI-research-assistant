@@ -54,37 +54,56 @@ public class ReportDocumentCompiler {
     }
 
     public CompiledAcademicDocument compile(ResearchReport report) {
+        return compile(report, DocumentCompilationScope.full());
+    }
+
+    public CompiledAcademicDocument compile(ResearchReport report, DocumentCompilationScope scope) {
+        DocumentCompilationScope effectiveScope = scope == null ? DocumentCompilationScope.full() : scope;
         List<ResearchReportChapter> chapters = chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId());
         List<ResearchReportSection> allSections = sectionRepository.findAllByChapterReportId(report.getId()).stream()
                 .sorted(Comparator
                         .comparing((ResearchReportSection section) -> section.getChapter().getDisplayOrder())
                         .thenComparingInt(ResearchReportSection::getDisplayOrder))
                 .toList();
-        Map<UUID, Integer> referenceNumbers = citationNumberMap(report);
+        Set<UUID> includedSectionIds = includedSectionIds(report, chapters, effectiveScope);
+        List<ResearchReportSection> scopedSections = allSections.stream()
+                .filter(section -> includedSectionIds.contains(section.getId()))
+                .toList();
+        Map<UUID, Integer> referenceNumbers = citationNumberMap(report, includedSectionIds, effectiveScope.referenceScope());
         Map<String, Object> sectionRevisions = new LinkedHashMap<>();
         List<ReportRichTextService.DocumentPart> parts = new ArrayList<>();
 
-        parts.add(markdownPart("Title Page", 1, titlePageRenderer.renderMarkdown(titlePageRenderer.resolveData(report))));
+        if (effectiveScope.includeCoverPage()) {
+            parts.add(markdownPart("Title Page", 1, titlePageRenderer.renderMarkdown(titlePageRenderer.resolveData(report))));
+        }
 
-        appendUserFrontMatter(report, chapters, parts, sectionRevisions, referenceNumbers);
-        String tocMarkdown = renderTableOfContents(chapters, report);
-        int tocEntries = countTocEntries(chapters);
-        parts.add(markdownPart("Table of Contents", 1, tocMarkdown));
+        if (effectiveScope.includeFrontMatter()) {
+            appendUserFrontMatter(report, chapters, parts, sectionRevisions, referenceNumbers);
+        }
+        String tocMarkdown = renderTableOfContents(chapters, report, effectiveScope, includedSectionIds);
+        int tocEntries = countTocEntries(chapters, effectiveScope, includedSectionIds);
+        if (effectiveScope.includeToc()) {
+            parts.add(markdownPart("Table of Contents", 1, tocMarkdown));
+        }
 
-        List<DocumentStructureExtractors.FigureEntry> figures = structureExtractors.extractFigures(allSections);
-        List<DocumentStructureExtractors.TableEntry> tables = structureExtractors.extractTables(allSections);
-        parts.add(markdownPart("List of Figures", 1, structureExtractors.renderListOfFiguresMarkdown(figures)));
-        parts.add(markdownPart("List of Tables", 1, structureExtractors.renderListOfTablesMarkdown(tables)));
+        List<DocumentStructureExtractors.FigureEntry> figures = structureExtractors.extractFigures(scopedSections);
+        List<DocumentStructureExtractors.TableEntry> tables = structureExtractors.extractTables(scopedSections);
+        if (effectiveScope.includeListOfFigures()) {
+            parts.add(markdownPart("List of Figures", 1, structureExtractors.renderListOfFiguresMarkdown(figures)));
+        }
+        if (effectiveScope.includeListOfTables()) {
+            parts.add(markdownPart("List of Tables", 1, structureExtractors.renderListOfTablesMarkdown(tables)));
+        }
 
-        int compiledSections = appendBody(report, chapters, parts, sectionRevisions, referenceNumbers);
-        int referenceCount = appendReferences(report, parts);
-        compiledSections += appendAppendices(report, chapters, parts, sectionRevisions, referenceNumbers);
+        int compiledSections = appendBody(report, chapters, parts, sectionRevisions, referenceNumbers, effectiveScope, includedSectionIds);
+        int referenceCount = effectiveScope.includeReferences() ? appendReferences(report, parts, includedSectionIds, effectiveScope.referenceScope()) : 0;
+        if (effectiveScope.includeAppendices()) {
+            compiledSections += appendAppendices(report, chapters, parts, sectionRevisions, referenceNumbers, effectiveScope, includedSectionIds);
+        }
 
         String contentJson = richTextService.assembleDocumentJson(parts);
         String plainText = richTextService.plainTextFromDocumentJson(contentJson);
         String markdown = richTextService.documentJsonToMarkdown(contentJson);
-        int nonEmptySections = (int) allSections.stream().filter(this::hasContent).count();
-
         CompiledAcademicDocument compiled = new CompiledAcademicDocument(
                 report.getId(),
                 report.getProject().getId(),
@@ -93,8 +112,8 @@ public class ReportDocumentCompiler {
                 contentJson,
                 plainText,
                 markdown,
-                allSections.size(),
-                nonEmptySections,
+                scopedSections.size(),
+                (int) scopedSections.stream().filter(this::hasContent).count(),
                 compiledSections,
                 tocEntries,
                 figures.size(),
@@ -141,20 +160,24 @@ public class ReportDocumentCompiler {
 
     private int appendBody(ResearchReport report, List<ResearchReportChapter> chapters,
             List<ReportRichTextService.DocumentPart> parts, Map<String, Object> sectionRevisions,
-            Map<UUID, Integer> referenceNumbers) {
+            Map<UUID, Integer> referenceNumbers, DocumentCompilationScope scope, Set<UUID> includedSectionIds) {
         int count = 0;
         boolean coursework = isCourseworkReport(report);
+        DocumentNumberingPolicy numbering = DocumentNumberingPolicy.fromReport(report);
         for (ResearchReportChapter chapter : chapters) {
             if (chapter.getType() == ReportChapterType.PRELIMINARY
                     || chapter.getType() == ReportChapterType.REFERENCES
                     || chapter.getType() == ReportChapterType.APPENDICES) {
                 continue;
             }
+            if (!includeChapter(chapter, scope, includedSectionIds)) {
+                continue;
+            }
             if (!coursework) {
-                parts.add(new ReportRichTextService.DocumentPart(chapter.getTitle(), 1, null, null));
+                parts.add(new ReportRichTextService.DocumentPart(numbering.chapterHeading(chapter.getChapterNumber(), chapter.getTitle()), 1, null, null));
             }
             for (ResearchReportSection section : sectionRepository.findAllByChapterIdAndParentSectionIsNullOrderByDisplayOrderAsc(chapter.getId())) {
-                count += appendSectionTree(section, coursework ? 1 : 2, parts, sectionRevisions, report.getCitationStyle(), referenceNumbers);
+                count += appendSectionTree(section, coursework ? 1 : 2, parts, sectionRevisions, report.getCitationStyle(), referenceNumbers, scope, includedSectionIds, false);
             }
             if (chapter.getType() == ReportChapterType.LITERATURE_REVIEW && "CHAPTER_TWO".equalsIgnoreCase(report.getLiteratureMatrixInclusion())) {
                 literatureMatrixRepository.findFirstByProjectIdOrderByCreatedAtDesc(report.getProject().getId())
@@ -170,10 +193,13 @@ public class ReportDocumentCompiler {
 
     private int appendAppendices(ResearchReport report, List<ResearchReportChapter> chapters,
             List<ReportRichTextService.DocumentPart> parts, Map<String, Object> sectionRevisions,
-            Map<UUID, Integer> referenceNumbers) {
+            Map<UUID, Integer> referenceNumbers, DocumentCompilationScope scope, Set<UUID> includedSectionIds) {
         int count = 0;
         for (ResearchReportChapter chapter : chapters) {
             if (chapter.getType() != ReportChapterType.APPENDICES) {
+                continue;
+            }
+            if (!includeChapter(chapter, scope, includedSectionIds)) {
                 continue;
             }
             parts.add(new ReportRichTextService.DocumentPart(chapter.getTitle(), 1, null, null));
@@ -186,7 +212,7 @@ public class ReportDocumentCompiler {
                         });
             }
             for (ResearchReportSection section : sectionRepository.findAllByChapterIdAndParentSectionIsNullOrderByDisplayOrderAsc(chapter.getId())) {
-                count += appendSectionTree(section, 2, parts, sectionRevisions, report.getCitationStyle(), referenceNumbers);
+                count += appendSectionTree(section, 2, parts, sectionRevisions, report.getCitationStyle(), referenceNumbers, scope, includedSectionIds, false);
             }
         }
         return count;
@@ -194,11 +220,23 @@ public class ReportDocumentCompiler {
 
     private int appendSectionTree(ResearchReportSection section, int headingLevel,
             List<ReportRichTextService.DocumentPart> parts, Map<String, Object> sectionRevisions,
-            CitationStyle citationStyle, Map<UUID, Integer> referenceNumbers) {
-        appendSectionPart(section, Math.min(headingLevel, 4), parts, sectionRevisions, citationStyle, referenceNumbers);
-        int count = 1;
+            CitationStyle citationStyle, Map<UUID, Integer> referenceNumbers, DocumentCompilationScope scope,
+            Set<UUID> includedSectionIds, boolean ancestorOnly) {
+        boolean includeContent = includedSectionIds.contains(section.getId());
+        boolean hasIncludedDescendant = hasIncludedDescendant(section, includedSectionIds);
+        if (!includeContent && !hasIncludedDescendant) {
+            return 0;
+        }
+        if (includeContent) {
+            appendSectionPart(section, Math.min(headingLevel, 4), parts, sectionRevisions, citationStyle, referenceNumbers);
+        } else {
+            parts.add(new ReportRichTextService.DocumentPart(
+                    DocumentNumberingPolicy.fromReport(section.getChapter().getReport()).sectionHeading(section.getSectionNumber(), section.getHeading()),
+                    Math.min(headingLevel, 4), null, null));
+        }
+        int count = includeContent && !ancestorOnly ? 1 : 0;
         for (ResearchReportSection child : sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(section.getId())) {
-            count += appendSectionTree(child, headingLevel + 1, parts, sectionRevisions, citationStyle, referenceNumbers);
+            count += appendSectionTree(child, headingLevel + 1, parts, sectionRevisions, citationStyle, referenceNumbers, scope, includedSectionIds, ancestorOnly || !includeContent);
         }
         return count;
     }
@@ -207,9 +245,8 @@ public class ReportDocumentCompiler {
             List<ReportRichTextService.DocumentPart> parts, Map<String, Object> sectionRevisions,
             CitationStyle citationStyle, Map<UUID, Integer> referenceNumbers) {
         sectionRevisions.put(section.getId().toString(), section.getRevisionNumber());
-        String heading = section.getSectionNumber() != null && !section.getSectionNumber().isBlank()
-                ? section.getSectionNumber() + " " + section.getHeading()
-                : section.getHeading();
+        String heading = DocumentNumberingPolicy.fromReport(section.getChapter().getReport())
+                .sectionHeading(section.getSectionNumber(), section.getHeading());
         String contentJson = contentJsonForSection(section, citationStyle, referenceNumbers);
         String plainText = richTextService.plainTextFromDocumentJson(contentJson);
         parts.add(new ReportRichTextService.DocumentPart(heading, level, contentJson, plainText));
@@ -226,8 +263,9 @@ public class ReportDocumentCompiler {
         return richTextService.markdownToDocumentJson(renderedMarkdown);
     }
 
-    private int appendReferences(ResearchReport report, List<ReportRichTextService.DocumentPart> parts) {
-        Map<UUID, ReferenceEntry> references = citedReferences(report);
+    private int appendReferences(ResearchReport report, List<ReportRichTextService.DocumentPart> parts,
+            Set<UUID> includedSectionIds, ReferenceScope referenceScope) {
+        Map<UUID, ReferenceEntry> references = citedReferences(report, includedSectionIds, referenceScope);
         StringBuilder markdown = new StringBuilder();
         int number = 1;
         for (ReferenceEntry reference : references.values()) {
@@ -243,39 +281,47 @@ public class ReportDocumentCompiler {
         return references.size();
     }
 
-    private String renderTableOfContents(List<ResearchReportChapter> chapters, ResearchReport report) {
+    private String renderTableOfContents(List<ResearchReportChapter> chapters, ResearchReport report,
+            DocumentCompilationScope scope, Set<UUID> includedSectionIds) {
         StringBuilder md = new StringBuilder();
         boolean coursework = isCourseworkReport(report);
+        DocumentNumberingPolicy numbering = DocumentNumberingPolicy.fromReport(report);
         for (ResearchReportChapter chapter : chapters) {
             if (chapter.getType() == ReportChapterType.PRELIMINARY
                     || chapter.getType() == ReportChapterType.REFERENCES
                     || chapter.getType() == ReportChapterType.APPENDICES) {
                 continue;
             }
+            if (!includeChapter(chapter, scope, includedSectionIds)) {
+                continue;
+            }
             if (!coursework) {
-                String prefix = chapter.getChapterNumber() == null ? "" : "Chapter " + chapter.getChapterNumber() + ": ";
-                md.append("### ").append(prefix).append(chapter.getTitle()).append("\n");
+                md.append("### ").append(numbering.chapterHeading(chapter.getChapterNumber(), chapter.getTitle())).append("\n");
             }
             for (ResearchReportSection section : sectionRepository.findAllByChapterIdAndParentSectionIsNullOrderByDisplayOrderAsc(chapter.getId())) {
-                appendTocLine(md, section, 0);
+                appendTocLine(md, section, 0, includedSectionIds, numbering);
             }
             md.append("\n");
         }
         return md.toString().trim();
     }
 
-    private void appendTocLine(StringBuilder md, ResearchReportSection section, int depth) {
+    private void appendTocLine(StringBuilder md, ResearchReportSection section, int depth,
+            Set<UUID> includedSectionIds, DocumentNumberingPolicy numbering) {
+        if (!includedSectionIds.contains(section.getId()) && !hasIncludedDescendant(section, includedSectionIds)) {
+            return;
+        }
         md.append("  ".repeat(Math.max(0, depth)));
         if (section.getSectionNumber() != null && !section.getSectionNumber().isBlank()) {
-            md.append(section.getSectionNumber()).append(" ");
+            md.append(numbering.sectionNumber(section.getSectionNumber())).append(" ");
         }
         md.append(section.getHeading()).append("\n");
         for (ResearchReportSection child : sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(section.getId())) {
-            appendTocLine(md, child, depth + 1);
+            appendTocLine(md, child, depth + 1, includedSectionIds, numbering);
         }
     }
 
-    private int countTocEntries(List<ResearchReportChapter> chapters) {
+    private int countTocEntries(List<ResearchReportChapter> chapters, DocumentCompilationScope scope, Set<UUID> includedSectionIds) {
         int count = 0;
         for (ResearchReportChapter chapter : chapters) {
             if (chapter.getType() == ReportChapterType.PRELIMINARY
@@ -283,18 +329,24 @@ public class ReportDocumentCompiler {
                     || chapter.getType() == ReportChapterType.APPENDICES) {
                 continue;
             }
+            if (!includeChapter(chapter, scope, includedSectionIds)) {
+                continue;
+            }
             count++;
             for (ResearchReportSection section : sectionRepository.findAllByChapterIdAndParentSectionIsNullOrderByDisplayOrderAsc(chapter.getId())) {
-                count += countSectionTree(section);
+                count += countSectionTree(section, includedSectionIds);
             }
         }
         return count;
     }
 
-    private int countSectionTree(ResearchReportSection section) {
-        int count = 1;
+    private int countSectionTree(ResearchReportSection section, Set<UUID> includedSectionIds) {
+        if (!includedSectionIds.contains(section.getId()) && !hasIncludedDescendant(section, includedSectionIds)) {
+            return 0;
+        }
+        int count = includedSectionIds.contains(section.getId()) ? 1 : 0;
         for (ResearchReportSection child : sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(section.getId())) {
-            count += countSectionTree(child);
+            count += countSectionTree(child, includedSectionIds);
         }
         return count;
     }
@@ -383,8 +435,20 @@ public class ReportDocumentCompiler {
     }
 
     private Map<UUID, ReferenceEntry> citedReferences(ResearchReport report) {
+        return citedReferences(report, Set.of(), ReferenceScope.ALL_PROJECT_REFERENCES);
+    }
+
+    private Map<UUID, ReferenceEntry> citedReferences(ResearchReport report, Set<UUID> includedSectionIds, ReferenceScope referenceScope) {
+        if (referenceScope == ReferenceScope.NONE) {
+            return Map.of();
+        }
         Map<UUID, ReferenceEntry> references = new LinkedHashMap<>();
         for (ResearchReportCitation citation : citationRepository.findAllBySectionChapterReportIdOrderByCitationOrdinalAsc(report.getId())) {
+            if (referenceScope == ReferenceScope.CITED_IN_SELECTION
+                    && !includedSectionIds.isEmpty()
+                    && (citation.getSection() == null || !includedSectionIds.contains(citation.getSection().getId()))) {
+                continue;
+            }
             ReferenceEntry reference = citation.getReference();
             if (reference == null && citation.getProjectReference() != null) {
                 reference = citation.getProjectReference().getReference();
@@ -393,7 +457,7 @@ public class ReportDocumentCompiler {
                 references.putIfAbsent(reference.getId(), reference);
             }
         }
-        if (report.isIncludeUncitedReferences()) {
+        if (referenceScope == ReferenceScope.ALL_PROJECT_REFERENCES || report.isIncludeUncitedReferences()) {
             for (ProjectReference pr : projectReferenceRepository.findAllByProjectId(report.getProject().getId())) {
                 if (pr.getStatus() == ProjectReferenceStatus.ACTIVE && pr.isAvailableForCitation() && pr.getReference() != null) {
                     references.putIfAbsent(pr.getReference().getId(), pr.getReference());
@@ -404,12 +468,81 @@ public class ReportDocumentCompiler {
     }
 
     private Map<UUID, Integer> citationNumberMap(ResearchReport report) {
+        return citationNumberMap(report, Set.of(), ReferenceScope.ALL_PROJECT_REFERENCES);
+    }
+
+    private Map<UUID, Integer> citationNumberMap(ResearchReport report, Set<UUID> includedSectionIds, ReferenceScope referenceScope) {
         Map<UUID, Integer> numbers = new LinkedHashMap<>();
         int next = 1;
-        for (ReferenceEntry reference : citedReferences(report).values()) {
+        for (ReferenceEntry reference : citedReferences(report, includedSectionIds, referenceScope).values()) {
             numbers.putIfAbsent(reference.getId(), next++);
         }
         return numbers;
+    }
+
+    private Set<UUID> includedSectionIds(ResearchReport report, List<ResearchReportChapter> chapters, DocumentCompilationScope scope) {
+        if (scope.mode() == CompilationMode.FULL) {
+            return sectionRepository.findAllByChapterReportId(report.getId()).stream()
+                    .map(ResearchReportSection::getId)
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        }
+        Set<UUID> selected = scope.selectedNodeIds() == null ? Set.of() : new LinkedHashSet<>(scope.selectedNodeIds());
+        Set<UUID> included = new LinkedHashSet<>();
+        for (ResearchReportChapter chapter : chapters) {
+            if (selected.contains(chapter.getId())) {
+                for (ResearchReportSection section : sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapter.getId())) {
+                    included.add(section.getId());
+                }
+                continue;
+            }
+            for (ResearchReportSection root : sectionRepository.findAllByChapterIdAndParentSectionIsNullOrderByDisplayOrderAsc(chapter.getId())) {
+                collectSelectedSectionTree(root, selected, included);
+            }
+        }
+        return included;
+    }
+
+    private boolean collectSelectedSectionTree(ResearchReportSection section, Set<UUID> selected, Set<UUID> included) {
+        boolean include = selected.contains(section.getId());
+        for (ResearchReportSection child : sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(section.getId())) {
+            if (collectSelectedSectionTree(child, selected, included)) {
+                include = true;
+            }
+        }
+        if (include && selected.contains(section.getId())) {
+            collectDescendants(section, included);
+        } else if (include) {
+            included.add(section.getId());
+        }
+        return include;
+    }
+
+    private void collectDescendants(ResearchReportSection section, Set<UUID> included) {
+        included.add(section.getId());
+        for (ResearchReportSection child : sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(section.getId())) {
+            collectDescendants(child, included);
+        }
+    }
+
+    private boolean includeChapter(ResearchReportChapter chapter, DocumentCompilationScope scope, Set<UUID> includedSectionIds) {
+        if (scope.mode() == CompilationMode.FULL) {
+            return true;
+        }
+        Set<UUID> selected = scope.selectedNodeIds() == null ? Set.of() : new LinkedHashSet<>(scope.selectedNodeIds());
+        if (selected.contains(chapter.getId())) {
+            return true;
+        }
+        return sectionRepository.findAllByChapterIdOrderByDisplayOrderAsc(chapter.getId()).stream()
+                .anyMatch(section -> includedSectionIds.contains(section.getId()));
+    }
+
+    private boolean hasIncludedDescendant(ResearchReportSection section, Set<UUID> includedSectionIds) {
+        for (ResearchReportSection child : sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(section.getId())) {
+            if (includedSectionIds.contains(child.getId()) || hasIncludedDescendant(child, includedSectionIds)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String displayCitation(ResearchReportCitation citation, CitationStyle style, Map<UUID, Integer> referenceNumbers) {
@@ -466,4 +599,33 @@ public class ReportDocumentCompiler {
             String referencesSnapshotJson,
             String templateSnapshotJson
     ) {}
+
+    public enum CompilationMode { FULL, SELECTED }
+    public enum ReferenceScope { CITED_IN_SELECTION, ALL_PROJECT_REFERENCES, NONE }
+
+    public record DocumentCompilationScope(
+            CompilationMode mode,
+            Set<UUID> selectedNodeIds,
+            boolean includeCoverPage,
+            boolean includeFrontMatter,
+            boolean includeToc,
+            boolean includeListOfFigures,
+            boolean includeListOfTables,
+            boolean includeReferences,
+            boolean includeAppendices,
+            ReferenceScope referenceScope
+    ) {
+        public static DocumentCompilationScope full() {
+            return new DocumentCompilationScope(CompilationMode.FULL, Set.of(), true, true, true, true, true, true, true, ReferenceScope.ALL_PROJECT_REFERENCES);
+        }
+
+        public static DocumentCompilationScope selected(Set<UUID> selectedNodeIds, boolean includeCoverPage, boolean includeFrontMatter,
+                boolean includeToc, boolean includeListOfFigures, boolean includeListOfTables, boolean includeReferences,
+                boolean includeAppendices, ReferenceScope referenceScope) {
+            return new DocumentCompilationScope(CompilationMode.SELECTED,
+                    selectedNodeIds == null ? Set.of() : selectedNodeIds,
+                    includeCoverPage, includeFrontMatter, includeToc, includeListOfFigures, includeListOfTables,
+                    includeReferences, includeAppendices, referenceScope == null ? ReferenceScope.CITED_IN_SELECTION : referenceScope);
+        }
+    }
 }

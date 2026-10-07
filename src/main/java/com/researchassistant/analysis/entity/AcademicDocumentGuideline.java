@@ -3,6 +3,7 @@ package com.researchassistant.analysis.entity;
 import com.researchassistant.document.entity.Document;
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.project.entity.ResearchProject;
+import com.researchassistant.common.storage.StorageObjectEntity;
 import com.researchassistant.workspace.entity.Workspace;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -41,6 +42,10 @@ public class AcademicDocumentGuideline {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "document_id")
     private Document document;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "storage_object_id")
+    private StorageObjectEntity storageObject;
 
     @Column(name = "original_file_name", nullable = false)
     private String originalFileName;

@@ -19,6 +19,7 @@ import com.researchassistant.methodology.exception.MethodologyValidationExceptio
 import com.researchassistant.rag.exception.RagAccessDeniedException;
 import com.researchassistant.rag.exception.RagCapabilityUnavailableException;
 import com.researchassistant.rag.exception.RagVerificationException;
+import com.researchassistant.template.exception.TemplateUploadException;
 import com.researchassistant.workspace.exception.InvalidWorkspaceOperationException;
 import com.researchassistant.workspace.exception.WorkspaceAccessDeniedException;
 
@@ -247,6 +248,31 @@ public class GlobalExceptionHandler {
         return buildResponse(
                 HttpStatus.PAYLOAD_TOO_LARGE,
                 exception.getErrorCode() != null ? exception.getErrorCode() : HttpStatus.PAYLOAD_TOO_LARGE.name(),
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(TemplateUploadException.class)
+    public ResponseEntity<ApiErrorResponse> handleTemplateUpload(
+            TemplateUploadException exception,
+            HttpServletRequest request
+    ) {
+        HttpStatus status = switch (exception.getCode()) {
+            case "TEMPLATE_FILE_REQUIRED", "TEMPLATE_FILE_TYPE_UNSUPPORTED", "TEMPLATE_UPLOAD_EXPIRED" -> HttpStatus.BAD_REQUEST;
+            case "TEMPLATE_FILE_TOO_LARGE" -> HttpStatus.PAYLOAD_TOO_LARGE;
+            case "TEMPLATE_ACCESS_DENIED" -> HttpStatus.FORBIDDEN;
+            case "TEMPLATE_PARSE_FAILED", "TEMPLATE_ANALYSIS_FAILED", "TEMPLATE_PROCESSING_FAILED" -> HttpStatus.UNPROCESSABLE_ENTITY;
+            case "TEMPLATE_STORAGE_FAILED", "TEMPLATE_UPLOAD_FAILED" -> HttpStatus.SERVICE_UNAVAILABLE;
+            default -> HttpStatus.BAD_REQUEST;
+        };
+        if (status.is5xxServerError()) {
+            logException(exception.getCode(), exception, request);
+        }
+        return buildResponse(
+                status,
+                exception.getCode(),
                 exception.getMessage(),
                 request.getRequestURI(),
                 Map.of()

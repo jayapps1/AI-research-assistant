@@ -447,7 +447,8 @@ export const reportApi = {
       blob: r.data,
       filename: filenameFromContentDisposition(r.headers['content-disposition']) ?? `references.${format.toLowerCase()}`,
     })),
-  exports: (reportId: string, body: { format: string; draft?: boolean }) => api.post<Record<string, unknown>>(`/reports/${reportId}/exports`, body).then((r) => r.data),
+  preview: (reportId: string, body: Record<string, unknown>) => api.post<Record<string, unknown>>(`/reports/${reportId}/preview`, body).then((r) => r.data),
+  exports: (reportId: string, body: { format: string; draft?: boolean; selection?: Record<string, unknown> }) => api.post<Record<string, unknown>>(`/reports/${reportId}/exports`, body).then((r) => r.data),
   exportJob: (exportId: string) => api.get<Record<string, unknown>>(`/report-exports/${exportId}`).then((r) => r.data),
   exportDownloadUrl: (exportId: string) => `${api.defaults.baseURL}/report-exports/${exportId}/download`,
   downloadExport: (exportId: string) =>
@@ -578,21 +579,21 @@ export const academicTemplateApi = {
       formData.append('projectId', projectId);
     }
     return api.post<AcademicDocumentGuidelineResponse>(
-      `/workspaces/${workspaceId}/academic-templates/upload`,
+      `/workspaces/${workspaceId}/templates/guidelines`,
       formData,
       { headers: { 'Content-Type': 'multipart/form-data' } }
     ).then((r) => r.data);
   },
   getGuideline: (guidelineId: string) =>
-    api.get<AcademicDocumentGuidelineResponse>(`/academic-templates/${guidelineId}`).then((r) => r.data),
+    api.get<AcademicDocumentGuidelineResponse>(`/templates/guidelines/${guidelineId}`).then((r) => r.data),
   listGuidelines: (workspaceId: string, projectId?: string) =>
-    api.get<AcademicDocumentGuidelineResponse[]>(`/workspaces/${workspaceId}/academic-templates`, {
+    api.get<AcademicDocumentGuidelineResponse[]>(`/workspaces/${workspaceId}/templates/guidelines`, {
       params: projectId ? { projectId } : undefined,
     }).then((r) => r.data),
   updateGuideline: (guidelineId: string, data: ExtractedAcademicTemplate) =>
-    api.put<AcademicDocumentGuidelineResponse>(`/academic-templates/${guidelineId}`, data).then((r) => r.data),
+    api.put<AcademicDocumentGuidelineResponse>(`/templates/guidelines/${guidelineId}`, { templateStructure: data }).then((r) => r.data),
   approveAndApply: (guidelineId: string, payload: { targetProjectId?: string; applyToProject: boolean; preserveExistingContent: boolean }) =>
-    api.post<AcademicDocumentGuidelineResponse>(`/academic-templates/${guidelineId}/approve`, payload).then((r) => r.data),
+    api.post<AcademicDocumentGuidelineResponse>(`/templates/guidelines/${guidelineId}/approve`, payload).then((r) => r.data),
   getDynamicToc: (reportId: string) =>
     api.get<DynamicTocResponse>(`/reports/${reportId}/dynamic-toc`).then((r) => r.data),
   validateStructure: (reportId: string, guidelineId?: string) =>
@@ -669,4 +670,3 @@ export const projectEvidenceApi = {
   listOfTables: (projectId: string, reportId: string) =>
     api.get<ListOfTablesItem[]>(`/projects/${projectId}/reports/${reportId}/list-of-tables`).then((r) => r.data),
 };
-

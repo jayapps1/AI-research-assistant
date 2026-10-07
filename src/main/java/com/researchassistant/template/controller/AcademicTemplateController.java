@@ -57,6 +57,21 @@ public class AcademicTemplateController {
     }
 
     @PostMapping(
+            value = "/workspaces/{workspaceId}/academic-templates/upload",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    @ResponseStatus(HttpStatus.CREATED)
+    public AcademicDocumentGuidelineResponse uploadWorkspaceGuidelineLegacy(
+            Authentication authentication,
+            @PathVariable UUID workspaceId,
+            @RequestParam(required = false) UUID projectId,
+            @RequestPart("file") MultipartFile file
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return templateService.uploadAndAnalyzeGuideline(workspaceId, projectId, file, user);
+    }
+
+    @PostMapping(
             value = "/projects/{projectId}/templates/guidelines",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE
     )
@@ -73,9 +88,16 @@ public class AcademicTemplateController {
 
     @GetMapping("/templates/guidelines/{guidelineId}")
     public AcademicDocumentGuidelineResponse getGuideline(
+            Authentication authentication,
             @PathVariable UUID guidelineId
     ) {
-        return templateService.getGuideline(guidelineId);
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return templateService.getGuideline(guidelineId, user);
+    }
+
+    @GetMapping("/academic-templates/{guidelineId}")
+    public AcademicDocumentGuidelineResponse getGuidelineLegacy(Authentication authentication, @PathVariable UUID guidelineId) {
+        return getGuideline(authentication, guidelineId);
     }
 
     @PutMapping("/templates/guidelines/{guidelineId}")
@@ -86,6 +108,18 @@ public class AcademicTemplateController {
     ) {
         User user = authenticatedUserResolver.requireActiveUser(authentication);
         return templateService.updateGuideline(guidelineId, request, user);
+    }
+
+    @PutMapping("/academic-templates/{guidelineId}")
+    public AcademicDocumentGuidelineResponse updateGuidelineLegacy(
+            Authentication authentication,
+            @PathVariable UUID guidelineId,
+            @RequestBody ExtractedAcademicTemplate request
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return templateService.updateGuideline(guidelineId, new UpdateAcademicGuidelineRequest(
+                request.institution(), request.department(), request.programme(), request.documentType(), request.citationStyle(), request
+        ), user);
     }
 
     @PostMapping("/templates/guidelines/{guidelineId}/approve")
@@ -99,18 +133,42 @@ public class AcademicTemplateController {
         return templateService.approveAndApplyGuideline(guidelineId, projectId, request, user);
     }
 
+    @PostMapping("/academic-templates/{guidelineId}/approve")
+    public AcademicDocumentGuidelineResponse approveGuidelineLegacy(
+            Authentication authentication,
+            @PathVariable UUID guidelineId,
+            @RequestBody ApproveGuidelineRequest request
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return templateService.approveAndApplyGuideline(guidelineId, request.targetProjectId(), request, user);
+    }
+
     @GetMapping("/workspaces/{workspaceId}/templates/guidelines")
     public List<AcademicDocumentGuidelineResponse> listWorkspaceGuidelines(
+            Authentication authentication,
             @PathVariable UUID workspaceId
     ) {
-        return templateService.listGuidelines(workspaceId, null);
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return templateService.listGuidelines(workspaceId, null, user);
+    }
+
+    @GetMapping("/workspaces/{workspaceId}/academic-templates")
+    public List<AcademicDocumentGuidelineResponse> listWorkspaceGuidelinesLegacy(
+            Authentication authentication,
+            @PathVariable UUID workspaceId,
+            @RequestParam(required = false) UUID projectId
+    ) {
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return templateService.listGuidelines(workspaceId, projectId, user);
     }
 
     @GetMapping("/projects/{projectId}/templates/guidelines")
     public List<AcademicDocumentGuidelineResponse> listProjectGuidelines(
+            Authentication authentication,
             @PathVariable UUID projectId
     ) {
-        return templateService.listGuidelines(null, projectId);
+        User user = authenticatedUserResolver.requireActiveUser(authentication);
+        return templateService.listGuidelines(null, projectId, user);
     }
 
     @GetMapping("/projects/{projectId}/report/toc")
