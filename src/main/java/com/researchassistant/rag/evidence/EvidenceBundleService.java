@@ -9,6 +9,9 @@ import com.researchassistant.retrieval.dto.RetrievalSearchResponse;
 
 import org.springframework.stereotype.Service;
 
+import com.researchassistant.document.chunk.ChunkHygieneService;
+import com.researchassistant.document.entity.ChunkSemanticType;
+
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -25,15 +28,18 @@ public class EvidenceBundleService {
     private final RagProperties properties;
     private final AiProperties aiProperties;
     private final RagContextBudgetService contextBudgetService;
+    private final ChunkHygieneService chunkHygieneService;
 
     public EvidenceBundleService(
             RagProperties properties,
             AiProperties aiProperties,
-            RagContextBudgetService contextBudgetService
+            RagContextBudgetService contextBudgetService,
+            ChunkHygieneService chunkHygieneService
     ) {
         this.properties = properties;
         this.aiProperties = aiProperties;
         this.contextBudgetService = contextBudgetService;
+        this.chunkHygieneService = chunkHygieneService;
     }
 
     public EvidenceBundle build(
@@ -45,6 +51,7 @@ public class EvidenceBundleService {
             String rerankerName
     ) {
         boolean perSourceLiteraturePass = rerankerName != null && rerankerName.toLowerCase(java.util.Locale.ROOT).contains("persource");
+        boolean isBibliographyQuery = query != null && (query.toLowerCase(java.util.Locale.ROOT).contains("references") || query.toLowerCase(java.util.Locale.ROOT).contains("bibliography"));
         int configuredMax = properties.evidence().maxItems();
         int effectiveMax = perSourceLiteraturePass
                 ? Math.max(configuredMax, Math.min(Math.max(requestedLimit, configuredMax), 60))
@@ -71,7 +78,16 @@ public class EvidenceBundleService {
             if (!seenChunks.add(candidate.chunkId())) {
                 continue;
             }
-            String text = trim(candidate.text(), Math.min(
+
+            // Chunk Hygiene: classify chunk semantics and exclude non-substantive chunks (footers, headers, metadata, references)
+            ChunkSemanticType semanticType = chunkHygieneService.classify(candidate.text(), candidate.pageNumber(), candidate.chunkNumber());
+            if (!isBibliographyQuery && !chunkHygieneService.isSubstantiveEvidence(semanticType)) {
+                continue;
+            }
+
+            // Sanitize text by stripping running headers, "Available online...", DOIs, ISSNs, and copyright notices
+            String sanitizedRaw = chunkHygieneService.sanitizeEvidenceText(candidate.text());
+            String text = trim(sanitizedRaw, Math.min(
                     properties.evidence().maxItemCharacters(),
                     totalRemaining
             ));
@@ -87,6 +103,7 @@ public class EvidenceBundleService {
                 continue;
             }
             int ordinal = items.size() + 1;
+            String cleanDocTitle = cleanDocumentTitle(candidate.documentTitle());
             items.add(new EvidenceItem(
                     UUID.randomUUID(),
                     ordinal,
@@ -95,7 +112,7 @@ public class EvidenceBundleService {
                     candidate.projectId(),
                     candidate.documentId(),
                     candidate.documentCode(),
-                    candidate.documentTitle(),
+                    cleanDocTitle,
                     candidate.documentVersionId(),
                     candidate.versionNumber(),
                     candidate.pageNumber(),
@@ -180,5 +197,9 @@ public class EvidenceBundleService {
         }
         int maxChars = Math.max(0, tokenBudget * 4);
         return trim(text, Math.min(text.length(), maxChars));
+    }
+
+    public String cleanDocumentTitle(String docTitle) {
+        return com.researchassistant.document.util.DocumentTitleNormalizer.normalizeDisplayTitle(docTitle);
     }
 }

@@ -13,6 +13,7 @@ import { useProjectId } from '../hooks/useProjectId';
 import { pageContent } from '../utils/collections';
 import { paths } from '../routes/paths';
 import { ReportRichEditor } from '../components/editor/ReportRichEditor';
+import { AcademicGuidelineManager } from '../features/templates/AcademicGuidelineManager';
 
 interface WritingSectionDef {
   key: string;
@@ -37,6 +38,7 @@ const WRITING_SECTIONS: WritingSectionDef[] = [
 export function WritingPage() {
   const projectId = useProjectId();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [activeSectionKey, setActiveSectionKey] = useState<string>('PROBLEM_STATEMENT');
 
@@ -124,6 +126,18 @@ export function WritingPage() {
         </Button>
       </div>
 
+      <div style={{ marginBottom: 16 }}>
+        <AcademicGuidelineManager
+          workspaceId={projectQuery.data?.workspaceId || ''}
+          projectId={projectId}
+          reportId={reportId}
+          onStructureUpdated={() => {
+            queryClient.invalidateQueries({ queryKey: ['chapters', reportId] });
+            queryClient.invalidateQueries({ queryKey: ['report-sections-all', reportId] });
+          }}
+        />
+      </div>
+
       <div className="grid cols-2" style={{ gap: 24, alignItems: 'flex-start' }}>
         {/* Left Column: Section List */}
         <Card>
@@ -154,9 +168,25 @@ export function WritingPage() {
                     justifyContent: 'space-between',
                   }}
                 >
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '0.92rem' }}>{sec.title}</div>
+                  <div style={{ maxWidth: '65%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 600, fontSize: '0.92rem' }}>{sec.title}</span>
+                      {sectionData?.requirementLevel === 'REQUIRED' && (
+                        <Badge tone="danger" style={{ fontSize: '0.65rem' }}>REQUIRED</Badge>
+                      )}
+                      {sectionData?.requirementLevel === 'RECOMMENDED' && (
+                        <Badge tone="info" style={{ fontSize: '0.65rem' }}>RECOMMENDED</Badge>
+                      )}
+                      {sectionData?.requirementLevel === 'OPTIONAL' && (
+                        <Badge style={{ fontSize: '0.65rem' }}>OPTIONAL</Badge>
+                      )}
+                    </div>
                     <span className="muted" style={{ fontSize: '0.78rem' }}>{sec.desc}</span>
+                    {sectionData?.templateGuidance && (
+                      <div className="muted" style={{ fontSize: '0.75rem', fontStyle: 'italic', marginTop: 2 }}>
+                        Guideline: {sectionData.templateGuidance}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {hasContent ? (
@@ -318,12 +348,13 @@ function ActiveSectionEditor({
           content={content}
           contentJson={contentJson}
           projectId={projectId}
+          sectionId={initialSectionId ?? undefined}
           citationStyle={citationStyle}
           minHeight="480px"
           onSave={({ contentJson: cJson, plainText, markdown }) => {
             setContent(markdown);
             setContentJson(cJson);
-            saveMutation.mutate({ content: markdown, contentJson: cJson, plainText });
+            return saveMutation.mutateAsync({ content: markdown, contentJson: cJson, plainText }).then(() => undefined);
           }}
         />
       </Field>

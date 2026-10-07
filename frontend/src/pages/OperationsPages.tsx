@@ -22,19 +22,23 @@ import {
   Trash2,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
   Table,
   FilePlus,
   CornerDownRight,
   Edit2,
+  Image as ImageIcon,
 } from 'lucide-react';
-import { analysisApi, notificationApi, projectApi, reportApi } from '../api/endpoints';
+import { analysisApi, documentApi, notificationApi, projectApi, reportApi } from '../api/endpoints';
 import { AssistantResponse } from '../components/AssistantResponse';
 import { Breadcrumbs, Button, Card, Input, Badge, Select, Modal } from '../components/ui';
 import { EmptyState, ErrorState } from '../components/states';
 import { useProjectId } from '../hooks/useProjectId';
 import { displayValue, pageContent } from '../utils/collections';
 import { ReportRichEditor } from '../components/editor/ReportRichEditor';
-import type { LiteratureMatrixInclusion, ReorderStructureRequest } from '../types/api';
+import { ProjectEvidencePanel } from '../features/evidence/ProjectEvidencePanel';
+import { finalDocumentLabel, formatChapterTitle, workspaceTypeOf } from '../features/projects/workspaceMeta';
+import type { GenerateSectionRequest, LiteratureMatrixInclusion, ReorderStructureRequest, UpdateTitlePageDetailsRequest } from '../types/api';
 
 const CITATION_STYLES = [
   { id: 'APA_7', label: 'APA 7th Edition (Author, Year)' },
@@ -46,11 +50,139 @@ const CITATION_STYLES = [
   { id: 'VANCOUVER', label: 'Vancouver [1]' },
 ];
 
+export type DocumentNodeCategory =
+  | 'TITLE_PAGE'
+  | 'TABLE_OF_CONTENTS'
+  | 'LIST_OF_FIGURES'
+  | 'LIST_OF_TABLES'
+  | 'REFERENCES'
+  | 'DECLARATION'
+  | 'CERTIFICATION'
+  | 'DEDICATION'
+  | 'ACKNOWLEDGEMENTS'
+  | 'LITERATURE_REVIEW'
+  | 'BACKGROUND'
+  | 'PROBLEM_STATEMENT'
+  | 'AIM_AND_OBJECTIVES'
+  | 'RESEARCH_QUESTIONS'
+  | 'METHODOLOGY'
+  | 'SYSTEM_REQUIREMENTS'
+  | 'SYSTEM_DESIGN'
+  | 'IMPLEMENTATION'
+  | 'TESTING'
+  | 'FINDINGS'
+  | 'DISCUSSION'
+  | 'CONCLUSIONS'
+  | 'CUSTOM_CONTENT'
+  | 'CONTENT_SECTION';
+
+export function getDocumentNodeCategory(section?: any, chapter?: any): DocumentNodeCategory {
+  if (!section) return 'CONTENT_SECTION';
+  const purpose = String(section.semanticPurpose || '').toUpperCase();
+  const type = String(section.type || section.sectionType || '').toUpperCase();
+  const heading = String(section.heading || section.title || '').trim().toLowerCase();
+  const chTitle = String(chapter?.title || '').trim().toLowerCase();
+
+  if (purpose === 'TITLE_PAGE' || type === 'TITLE_PAGE' || heading === 'title page' || heading === 'title' || (chTitle.includes('preliminary') && heading.includes('title'))) {
+    return 'TITLE_PAGE';
+  }
+  if (purpose === 'TABLE_OF_CONTENTS' || type === 'TABLE_OF_CONTENTS' || heading === 'table of contents' || heading === 'contents' || heading === 'toc') {
+    return 'TABLE_OF_CONTENTS';
+  }
+  if (purpose === 'LIST_OF_FIGURES' || type === 'LIST_OF_FIGURES' || heading.includes('list of figures') || heading === 'figures') {
+    return 'LIST_OF_FIGURES';
+  }
+  if (purpose === 'LIST_OF_TABLES' || type === 'LIST_OF_TABLES' || heading.includes('list of tables') || heading === 'tables') {
+    return 'LIST_OF_TABLES';
+  }
+  if (purpose === 'REFERENCES' || type === 'REFERENCES' || heading === 'references' || heading === 'bibliography' || chTitle === 'references') {
+    return 'REFERENCES';
+  }
+  if (purpose === 'DECLARATION' || type === 'DECLARATION' || heading.includes('declaration')) {
+    return 'DECLARATION';
+  }
+  if (purpose === 'CERTIFICATION' || type === 'CERTIFICATION' || heading.includes('certification')) {
+    return 'CERTIFICATION';
+  }
+  if (purpose === 'DEDICATION' || type === 'DEDICATION' || heading.includes('dedication')) {
+    return 'DEDICATION';
+  }
+  if (purpose === 'ACKNOWLEDGEMENTS' || type === 'ACKNOWLEDGEMENTS' || heading.includes('acknowledgement') || heading.includes('acknowledgment')) {
+    return 'ACKNOWLEDGEMENTS';
+  }
+  if (purpose === 'LITERATURE_REVIEW' || type === 'LITERATURE_REVIEW' || heading.includes('literature review') || chTitle.includes('literature review')) {
+    return 'LITERATURE_REVIEW';
+  }
+  if (purpose === 'BACKGROUND' || type === 'BACKGROUND' || heading.includes('background')) {
+    return 'BACKGROUND';
+  }
+  if (purpose === 'PROBLEM_STATEMENT' || type === 'PROBLEM_STATEMENT' || heading.includes('problem statement')) {
+    return 'PROBLEM_STATEMENT';
+  }
+  if (purpose === 'AIM_AND_OBJECTIVES' || type === 'AIM_AND_OBJECTIVES' || heading.includes('objective') || heading.includes('aim')) {
+    return 'AIM_AND_OBJECTIVES';
+  }
+  if (purpose === 'RESEARCH_QUESTIONS' || type === 'RESEARCH_QUESTIONS' || heading.includes('research question')) {
+    return 'RESEARCH_QUESTIONS';
+  }
+  if (purpose === 'METHODOLOGY' || type === 'METHODOLOGY' || heading.includes('methodology') || chTitle.includes('methodology')) {
+    return 'METHODOLOGY';
+  }
+  if (purpose === 'SYSTEM_REQUIREMENTS' || type === 'SYSTEM_REQUIREMENTS' || heading.includes('requirement')) {
+    return 'SYSTEM_REQUIREMENTS';
+  }
+  if (purpose === 'SYSTEM_DESIGN' || type === 'SYSTEM_DESIGN' || heading.includes('system design') || heading.includes('architecture') || heading.includes('database design')) {
+    return 'SYSTEM_DESIGN';
+  }
+  if (purpose === 'IMPLEMENTATION' || type === 'IMPLEMENTATION' || heading.includes('implementation')) {
+    return 'IMPLEMENTATION';
+  }
+  if (purpose === 'TESTING' || type === 'TESTING' || heading.includes('testing') || heading.includes('test results') || heading.includes('verification and validation')) {
+    return 'TESTING';
+  }
+  if (purpose === 'FINDINGS' || type === 'FINDINGS' || heading.includes('finding') || (heading.includes('result') && !heading.includes('test'))) {
+    return 'FINDINGS';
+  }
+  if (purpose === 'DISCUSSION' || type === 'DISCUSSION' || heading.includes('discussion')) {
+    return 'DISCUSSION';
+  }
+  if (purpose === 'CONCLUSIONS' || type === 'CONCLUSIONS' || heading.includes('conclusion')) {
+    return 'CONCLUSIONS';
+  }
+  if (purpose === 'CUSTOM' || type === 'CUSTOM') {
+    return 'CUSTOM_CONTENT';
+  }
+  return 'CONTENT_SECTION';
+}
+
+export function isDeterministicNode(category: DocumentNodeCategory): boolean {
+  return [
+    'TITLE_PAGE',
+    'TABLE_OF_CONTENTS',
+    'LIST_OF_FIGURES',
+    'LIST_OF_TABLES',
+    'REFERENCES',
+  ].includes(category);
+}
+
+export function isCorruptedDeterministicContent(content?: string, category?: DocumentNodeCategory): boolean {
+  if (!content) return false;
+  if (!category || !isDeterministicNode(category)) return false;
+  const lower = content.toLowerCase();
+  return (
+    lower.includes('overview and thematic context') ||
+    lower.includes('synthesis of grounded empirical literature') ||
+    lower.includes('scholarly discourse on') ||
+    lower.includes('grounded empirical literature') ||
+    lower.includes('theoretical foundations')
+  );
+}
+
 export function ReportPage() {
   const projectId = useProjectId();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<'sections' | 'final-doc' | 'preview'>('sections');
+  const [activeTab, setActiveTab] = useState<'sections' | 'final-doc' | 'preview' | 'evidence'>('sections');
   const [selectedReportId, setSelectedReportId] = useState('');
   const [selectedChapterId, setSelectedChapterId] = useState('');
   const [selectedSectionId, setSelectedSectionId] = useState('');
@@ -60,6 +192,13 @@ export function ReportPage() {
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [validationModalOpen, setValidationModalOpen] = useState(false);
   const [validationErrors, setValidationErrors] = useState<any[]>([]);
+  const [expandedChapters, setExpandedChapters] = useState<Record<string, boolean>>({});
+  const [draggedItem, setDraggedItem] = useState<{
+    type: 'chapter' | 'section';
+    index: number;
+    chapterId?: string;
+    parentId?: string | null;
+  } | null>(null);
 
   // Structure & Modal States
   const [showAddChapterModal, setShowAddChapterModal] = useState(false);
@@ -73,12 +212,58 @@ export function ReportPage() {
   const [showLitMatrixModal, setShowLitMatrixModal] = useState(false);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{ type: 'chapter' | 'section'; id: string; title: string; required: boolean } | null>(null);
 
+  // AI Draft Modal State
+  const [showAiDraftModal, setShowAiDraftModal] = useState(false);
+  const [aiDraftSourceScope, setAiDraftSourceScope] = useState<'ALL_PROJECT_DOCUMENTS' | 'SELECTED_DOCUMENTS' | 'NONE'>('ALL_PROJECT_DOCUMENTS');
+  const [aiDraftSelectedDocIds, setAiDraftSelectedDocIds] = useState<string[]>([]);
+  const [aiDraftInstructions, setAiDraftInstructions] = useState('');
+  const [aiDraftApplyMode, setAiDraftApplyMode] = useState<'PREVIEW' | 'APPEND' | 'REPLACE'>('REPLACE');
+  const [aiDraftConfirmReplace, setAiDraftConfirmReplace] = useState(false);
+
+  // Edit Title Page Modal State
+  const [showEditTitlePageModal, setShowEditTitlePageModal] = useState(false);
+  const [titlePageForm, setTitlePageForm] = useState<UpdateTitlePageDetailsRequest>({
+    title: '',
+    authorName: '',
+    studentId: '',
+    institutionName: '',
+    departmentName: '',
+    degreeProgram: '',
+    supervisorName: '',
+    academicYear: '',
+    submissionYear: new Date().getFullYear(),
+  });
+
   // Queries
   const projectQuery = useQuery({
     queryKey: ['project', projectId],
     queryFn: () => projectApi.get(projectId),
     enabled: Boolean(projectId),
   });
+
+  const projectDocumentsQuery = useQuery({
+    queryKey: ['project-documents', projectId],
+    queryFn: () => documentApi.list(projectId, 0, 50),
+    enabled: Boolean(projectId) && showAiDraftModal,
+  });
+
+  const openEditTitlePageModal = () => {
+    if (projectQuery.data) {
+      const p = projectQuery.data;
+      setTitlePageForm((prev) => ({
+        title: prev.title || p.title || '',
+        authorName: prev.authorName || '',
+        studentId: prev.studentId || '',
+        institutionName: prev.institutionName || p.institution || 'Takoradi Technical University',
+        departmentName: prev.departmentName || p.department || 'Computer Science Department',
+        degreeProgram: prev.degreeProgram || p.programme || '',
+        supervisorName: prev.supervisorName || p.supervisor || '',
+        academicYear: prev.academicYear || p.academicYear || '2024 / 2025',
+        submissionYear: prev.submissionYear || new Date().getFullYear(),
+      }));
+    }
+    setShowEditTitlePageModal(true);
+  };
 
   // Lazy Initialization on Mount: Guarantee report and template sections exist
   const ensureReport = useMutation({
@@ -174,7 +359,7 @@ export function ReportPage() {
     onSuccess: (updated) => {
       queryClient.setQueryData(['report-structure', reportId], updated);
       queryClient.invalidateQueries({ queryKey: ['report-chapters', reportId] });
-      queryClient.invalidateQueries({ queryKey: ['report-sections', chapterId] });
+      queryClient.invalidateQueries({ queryKey: ['report-sections'] });
       setSaveStatus('Report structure reordered.');
       setTimeout(() => setSaveStatus(null), 2500);
     },
@@ -238,7 +423,7 @@ export function ReportPage() {
       }),
     onSuccess: (newSec: any) => {
       queryClient.invalidateQueries({ queryKey: ['report-structure', reportId] });
-      queryClient.invalidateQueries({ queryKey: ['report-sections', chapterId] });
+      queryClient.invalidateQueries({ queryKey: ['report-sections'] });
       setShowAddSectionModal(null);
       setNewSectionTitle('');
       setNewSectionAiEnabled(true);
@@ -329,6 +514,32 @@ export function ReportPage() {
     const payload = copy.map((s, i) => ({ id: s.id, parentId: parentSecId || null, displayOrder: i + 1 }));
     reorderStructure.mutate({ sections: payload });
   };
+
+  const toggleChapter = (chapId: string) => {
+    setExpandedChapters((prev) => ({
+      ...prev,
+      [chapId]: prev[chapId] !== undefined ? !prev[chapId] : false,
+    }));
+  };
+
+  const reorderChaptersToIndex = (sourceIdx: number, targetIdx: number) => {
+    const list = structureQuery.data?.chapters;
+    if (!list || sourceIdx === targetIdx) return;
+    const copy = [...list];
+    const [removed] = copy.splice(sourceIdx, 1);
+    copy.splice(targetIdx, 0, removed);
+    const payload = copy.map((ch, i) => ({ id: ch.id, displayOrder: i + 1 }));
+    reorderStructure.mutate({ chapters: payload });
+  };
+
+  const reorderSectionsToIndex = (sectionsList: any[], sourceIdx: number, targetIdx: number, parentSecId?: string | null) => {
+    if (!sectionsList || sourceIdx === targetIdx) return;
+    const copy = [...sectionsList];
+    const [removed] = copy.splice(sourceIdx, 1);
+    copy.splice(targetIdx, 0, removed);
+    const payload = copy.map((s, i) => ({ id: s.id, parentId: parentSecId || null, displayOrder: i + 1 }));
+    reorderStructure.mutate({ sections: payload });
+  };
   const validation = useMutation({
     mutationFn: () => reportApi.validate(reportId),
     onSuccess: (data: any) => {
@@ -344,11 +555,12 @@ export function ReportPage() {
   });
 
   const assemble = useMutation({
-    mutationFn: () => reportApi.assemble(reportId),
+    mutationFn: () => reportApi.applyTemplateFormatting(reportId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['report-chapters', reportId] });
       queryClient.invalidateQueries({ queryKey: ['report-sections', chapterId] });
-      setSaveStatus('Report assembled from template.');
+      queryClient.invalidateQueries({ queryKey: ['report-structure', reportId] });
+      setSaveStatus('Template formatting applied without removing custom sections.');
       setTimeout(() => setSaveStatus(null), 3500);
     },
   });
@@ -377,8 +589,13 @@ export function ReportPage() {
       reportApi.updateSection(String(selectedSection?.id), data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['report-sections', chapterId] });
+      queryClient.invalidateQueries({ queryKey: ['report-structure', reportId] });
       setSaveStatus('Section revision saved.');
       setTimeout(() => setSaveStatus(null), 2500);
+    },
+    onError: (err: any) => {
+      setSaveStatus(err?.response?.data?.message || err?.message || 'Save failed.');
+      setTimeout(() => setSaveStatus(null), 4000);
     },
   });
 
@@ -398,7 +615,7 @@ export function ReportPage() {
     mutationFn: () => reportApi.prepareFinalDocument(reportId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['report-final-document', reportId] });
-      setSaveStatus('Final document prepared and snapshot compiled.');
+      setSaveStatus('Final document updated from latest saved sections. Previous versions remain available.');
       setTimeout(() => setSaveStatus(null), 3000);
     },
   });
@@ -409,17 +626,113 @@ export function ReportPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['report-final-document', reportId] });
     },
+    onError: (err: any) => {
+      setSaveStatus(err?.response?.data?.message || err?.message || 'Final document save failed.');
+      setTimeout(() => setSaveStatus(null), 4000);
+    },
   });
 
-  const generateSection = useMutation({
-    mutationFn: () => reportApi.generateSection(String(selectedSection?.id)),
+  const refreshTitlePageMutation = useMutation({
+    mutationFn: () => reportApi.refreshTitlePage(reportId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['report-sections', chapterId] });
-      setSaveStatus('AI draft generated for section.');
+      queryClient.invalidateQueries({ queryKey: ['report-structure', reportId] });
+      setSaveStatus('Title page refreshed from project metadata (0 AI credits consumed).');
       setTimeout(() => setSaveStatus(null), 3500);
     },
     onError: (err: any) => {
-      setSaveStatus(err?.response?.data?.message || err?.message || 'Section generation failed.');
+      setSaveStatus(err?.response?.data?.message || err?.message || 'Title page refresh failed.');
+      setTimeout(() => setSaveStatus(null), 4000);
+    },
+  });
+
+  const updateTitlePageDetailsMutation = useMutation({
+    mutationFn: (details: UpdateTitlePageDetailsRequest) => reportApi.updateTitlePageDetails(reportId, details),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['report-sections', chapterId] });
+      queryClient.invalidateQueries({ queryKey: ['report-structure', reportId] });
+      setShowEditTitlePageModal(false);
+      setSaveStatus('Title page details updated and formatted (0 AI credits consumed).');
+      setTimeout(() => setSaveStatus(null), 3500);
+    },
+    onError: (err: any) => {
+      setSaveStatus(err?.response?.data?.message || err?.message || 'Failed to update title page.');
+      setTimeout(() => setSaveStatus(null), 4000);
+    },
+  });
+
+  const refreshTocMutation = useMutation({
+    mutationFn: () => reportApi.refreshTableOfContents(reportId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['report-sections', chapterId] });
+      queryClient.invalidateQueries({ queryKey: ['report-structure', reportId] });
+      setSaveStatus('Table of Contents compiled from document hierarchy (0 AI credits consumed).');
+      setTimeout(() => setSaveStatus(null), 3500);
+    },
+    onError: (err: any) => {
+      setSaveStatus(err?.response?.data?.message || err?.message || 'TOC refresh failed.');
+      setTimeout(() => setSaveStatus(null), 4000);
+    },
+  });
+
+  const refreshFiguresMutation = useMutation({
+    mutationFn: () => reportApi.refreshListOfFigures(reportId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['report-sections', chapterId] });
+      queryClient.invalidateQueries({ queryKey: ['report-structure', reportId] });
+      setSaveStatus('List of Figures compiled from structured figures (0 AI credits consumed).');
+      setTimeout(() => setSaveStatus(null), 3500);
+    },
+    onError: (err: any) => {
+      setSaveStatus(err?.response?.data?.message || err?.message || 'List of Figures refresh failed.');
+      setTimeout(() => setSaveStatus(null), 4000);
+    },
+  });
+
+  const refreshTablesMutation = useMutation({
+    mutationFn: () => reportApi.refreshListOfTables(reportId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['report-sections', chapterId] });
+      queryClient.invalidateQueries({ queryKey: ['report-structure', reportId] });
+      setSaveStatus('List of Tables compiled from structured tables (0 AI credits consumed).');
+      setTimeout(() => setSaveStatus(null), 3500);
+    },
+    onError: (err: any) => {
+      setSaveStatus(err?.response?.data?.message || err?.message || 'List of Tables refresh failed.');
+      setTimeout(() => setSaveStatus(null), 4000);
+    },
+  });
+
+  const repairDeterministicMutation = useMutation({
+    mutationFn: () => reportApi.repairDeterministicNodes(reportId),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['report-sections', chapterId] });
+      queryClient.invalidateQueries({ queryKey: ['report-structure', reportId] });
+      setSaveStatus(`Repaired ${res.repairedSectionsCount} deterministic nodes from template/metadata (0 AI credits consumed).`);
+      setTimeout(() => setSaveStatus(null), 4000);
+    },
+    onError: (err: any) => {
+      setSaveStatus(err?.response?.data?.message || err?.message || 'Repair failed.');
+      setTimeout(() => setSaveStatus(null), 4000);
+    },
+  });
+
+  const generateSection = useMutation({
+    mutationFn: (req?: GenerateSectionRequest) => reportApi.generateSection(String(selectedSection?.id), req),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['report-sections', chapterId] });
+      queryClient.invalidateQueries({ queryKey: ['report-structure', reportId] });
+      setShowAiDraftModal(false);
+      setSaveStatus(data?.content ? 'AI draft generated for section.' : 'Section updated.');
+      setTimeout(() => setSaveStatus(null), 3500);
+    },
+    onError: (err: any) => {
+      const resp = err?.response?.data;
+      if (resp?.code === 'INSUFFICIENT_PROJECT_EVIDENCE' || resp?.status === 422) {
+        setSaveStatus(resp?.message || 'Generation blocked: Required empirical/project evidence is missing.');
+      } else {
+        setSaveStatus(resp?.message || err?.message || 'Section generation failed.');
+      }
       setTimeout(() => setSaveStatus(null), 5000);
     },
   });
@@ -432,24 +745,37 @@ export function ReportPage() {
   });
 
   // Draft exports (Always allowed even with validation errors)
+  const createAndDownloadExport = async (format: 'DOCX' | 'PDF', draft: boolean) => {
+    const job = await reportApi.exports(reportId, { format, draft });
+    if (String(job.status) === 'COMPLETED' && job.id) {
+      const result = await reportApi.downloadExport(String(job.id));
+      reportApi.saveBlob(result.blob, result.filename);
+    }
+    return job;
+  };
+
   const draftDocxExport = useMutation({
-    mutationFn: () => reportApi.exports(reportId, { format: 'DOCX', draft: true }),
+    mutationFn: () => createAndDownloadExport('DOCX', true),
     onSuccess: () => {
-      setSaveStatus('Draft DOCX generated (for academic review).');
+      setSaveStatus('Draft DOCX generated and downloaded with authenticated request.');
       setTimeout(() => setSaveStatus(null), 3500);
     },
   });
   const draftPdfExport = useMutation({
-    mutationFn: () => reportApi.exports(reportId, { format: 'PDF', draft: true }),
+    mutationFn: () => createAndDownloadExport('PDF', true),
     onSuccess: () => {
-      setSaveStatus('Draft PDF generated (for academic review).');
+      setSaveStatus('Draft PDF generated and downloaded with authenticated request.');
       setTimeout(() => setSaveStatus(null), 3500);
     },
   });
 
   // Final exports (Enforce validation)
   const finalDocxExport = useMutation({
-    mutationFn: () => reportApi.exports(reportId, { format: 'DOCX', draft: false }),
+    mutationFn: () => createAndDownloadExport('DOCX', false),
+    onSuccess: () => {
+      setSaveStatus('Final DOCX downloaded from saved final document snapshot. Export used 0 AI credits.');
+      setTimeout(() => setSaveStatus(null), 4500);
+    },
     onError: (err: any) => {
       const resp = err?.response?.data;
       if (resp?.code === 'REPORT_VALIDATION_FAILED' || resp?.status === 422) {
@@ -459,7 +785,11 @@ export function ReportPage() {
     },
   });
   const finalPdfExport = useMutation({
-    mutationFn: () => reportApi.exports(reportId, { format: 'PDF', draft: false }),
+    mutationFn: () => createAndDownloadExport('PDF', false),
+    onSuccess: () => {
+      setSaveStatus('Final PDF downloaded from saved final document snapshot. Export used 0 AI credits.');
+      setTimeout(() => setSaveStatus(null), 4500);
+    },
     onError: (err: any) => {
       const resp = err?.response?.data;
       if (resp?.code === 'REPORT_VALIDATION_FAILED' || resp?.status === 422) {
@@ -474,18 +804,33 @@ export function ReportPage() {
   if (!projectId) return <EmptyState title="Select a project" />;
 
   const currentCitationStyle = ((selectedReport as any)?.citationStyle || structureQuery.data?.citationStyle || projectQuery.data?.citationStyle || 'APA_7') as string;
+  const workspaceType = workspaceTypeOf(projectQuery.data as any);
+  const documentLabel = finalDocumentLabel(workspaceType);
+  const isCourseworkDocument = workspaceType === 'COURSEWORK';
+  const contentChapter = (structureQuery.data?.chapters ?? []).find((chapter: any) =>
+    !['PRELIMINARY', 'REFERENCES', 'APPENDICES'].includes(String(chapter.type))
+  ) ?? structureQuery.data?.chapters?.[0];
   const isFinal = (selectedReport as any)?.status === 'FINAL';
   const sectionCap = capabilitiesQuery.data?.sections?.find((s) => s.sectionId === selectedSection?.id);
   const isEmpiricalBlocked = sectionCap && !sectionCap.canGenerate;
   const reportData = selectedReport as any;
   const finalDoc = finalDocQuery.data as any;
   const valData = validationQuery.data as any;
-  const isReferencesSection = selectedSection?.type === 'REFERENCES' || (selectedSection as any)?.sectionType === 'REFERENCES' || String(selectedChapter?.title || '').toLowerCase() === 'references';
-  const isLiteratureReviewSection = selectedSection?.type === 'LITERATURE_REVIEW' || (selectedSection as any)?.sectionType === 'LITERATURE_REVIEW' || String(selectedChapter?.title || '').toLowerCase().includes('literature review');
+  const selectedSectionContent = typeof selectedSection?.content === 'string' ? selectedSection.content : '';
+  const hasSectionContent = selectedSectionContent.trim().length > 0;
+  const nodeCategory = getDocumentNodeCategory(selectedSection, selectedChapter);
+  const isNodeDeterministic = isDeterministicNode(nodeCategory);
+  const isCorruptedContent = isCorruptedDeterministicContent(selectedSectionContent, nodeCategory);
+  const isReferencesSection = nodeCategory === 'REFERENCES';
+  const isLiteratureReviewSection = nodeCategory === 'LITERATURE_REVIEW';
+  const isTitlePage = nodeCategory === 'TITLE_PAGE';
+  const isTableOfContents = nodeCategory === 'TABLE_OF_CONTENTS';
+  const isListOfFigures = nodeCategory === 'LIST_OF_FIGURES';
+  const isListOfTables = nodeCategory === 'LIST_OF_TABLES';
 
   return (
     <section className="page">
-      <Breadcrumbs items={['Projects', projectQuery.data?.title || projectId, 'Report']} />
+      <Breadcrumbs items={['Projects', projectQuery.data?.title || projectId, documentLabel]} />
 
       {/* Top Header */}
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
@@ -493,7 +838,7 @@ export function ReportPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: 0 }}>
               <FileText className="text-primary" size={26} />
-              Academic Report Writing & Publication Studio
+              {documentLabel}
             </h1>
             {isFinal ? (
               <Badge tone="success" style={{ fontSize: '0.8rem' }}>FINALIZED</Badge>
@@ -502,7 +847,7 @@ export function ReportPage() {
             )}
           </div>
           <p className="muted" style={{ maxWidth: '750px', marginTop: '0.25rem' }}>
-            Publication-grade Word-like editor with deterministic citations, lazy project migration, live A4 formatting, and validation governance.
+            Shared academic document engine with editable structure, deterministic citations, final snapshots, live A4 preview, and validation governance.
           </p>
         </div>
 
@@ -535,7 +880,7 @@ export function ReportPage() {
 
           <Button type="button" variant="secondary" onClick={() => assemble.mutate()} disabled={!reportId || assemble.isPending}>
             <RefreshCw size={14} style={{ marginRight: 4 }} />
-            Re-sync Template
+            Apply Template Formatting
           </Button>
 
           <Button
@@ -545,7 +890,7 @@ export function ReportPage() {
             disabled={!reportId || finalize.isPending || isFinal}
           >
             <Check size={15} style={{ marginRight: 4 }} />
-            {isFinal ? 'Report Finalized' : 'Finalize Report'}
+            {isFinal ? `${documentLabel} Finalized` : `Finalize ${documentLabel}`}
           </Button>
         </div>
       </div>
@@ -642,44 +987,95 @@ export function ReportPage() {
         >
           <Eye size={16} /> A4 Preview & Exports
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('evidence')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '0.92rem',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            border: 'none',
+            background: 'none',
+            cursor: 'pointer',
+            borderBottom: activeTab === 'evidence' ? '3px solid var(--primary)' : '3px solid transparent',
+            color: activeTab === 'evidence' ? 'var(--primary)' : 'var(--color-muted)',
+            marginBottom: '-5px',
+          }}
+        >
+          <ImageIcon size={16} /> Evidence & Figures
+        </button>
       </div>
 
       {/* TAB 1: STRUCTURE & SECTION EDITOR */}
       {activeTab === 'sections' && (
         <div className="report-builder" style={{ display: 'grid', gridTemplateColumns: '320px 1fr 280px', gap: '1.25rem', alignItems: 'flex-start' }}>
           {/* Left Column: Chapters & Sections Tree */}
-          <Card style={{ padding: '0.75rem', maxHeight: '740px', display: 'flex', flexDirection: 'column' }}>
+          <Card style={{ padding: '0.75rem', height: 'calc(100vh - 220px)', minHeight: '520px', maxHeight: 'calc(100vh - 220px)', display: 'flex', flexDirection: 'column', position: 'sticky', top: '1rem', overflow: 'hidden' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', paddingBottom: '0.4rem', borderBottom: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Layers size={16} className="text-primary" />
-                <h2 style={{ fontSize: '0.95rem', fontWeight: 600, margin: 0 }}>Report Hierarchy</h2>
+                <h2 style={{ fontSize: '0.95rem', fontWeight: 600, margin: 0 }}>{documentLabel} Structure</h2>
               </div>
               <Button
                 type="button"
                 variant="secondary"
                 onClick={() => {
-                  setNewChapterTitle('');
-                  setNewChapterNumber('');
-                  setShowAddChapterModal(true);
+                  if (isCourseworkDocument && contentChapter?.id) {
+                    setNewSectionTitle('');
+                    setNewSectionAiEnabled(true);
+                    setShowAddSectionModal({ chapterId: String(contentChapter.id) });
+                  } else {
+                    setNewChapterTitle('');
+                    setNewChapterNumber('');
+                    setShowAddChapterModal(true);
+                  }
                 }}
                 style={{ fontSize: '0.75rem', padding: '2px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                title="Add custom chapter"
+                title={isCourseworkDocument ? 'Add heading' : 'Add custom chapter'}
+                disabled={isCourseworkDocument && !contentChapter?.id}
               >
-                <Plus size={13} /> Chapter
+                <Plus size={13} /> {isCourseworkDocument ? 'Heading' : 'Chapter'}
               </Button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', overflowY: 'auto', flex: 1, paddingRight: '2px' }}>
+            <div className="report-chapter-tree" style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', overflowY: 'auto', flex: 1, minHeight: 0, paddingRight: '4px' }}>
               {(structureQuery.data?.chapters ?? []).map((chapter, cIdx, cArr) => {
                 const isChapterSelected = chapter.id === selectedChapterId;
+                const isExpanded = expandedChapters[String(chapter.id)] ?? true;
+                const isDraggingThis = draggedItem?.type === 'chapter' && draggedItem.index === cIdx;
                 return (
                   <div
                     key={String(chapter.id)}
+                    className="report-chapter-node"
+                    draggable={!reorderStructure.isPending}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'chapter', index: cIdx }));
+                      setDraggedItem({ type: 'chapter', index: cIdx });
+                    }}
+                    onDragEnd={() => setDraggedItem(null)}
+                    onDragOver={(e) => {
+                      if (draggedItem?.type === 'chapter') {
+                        e.preventDefault();
+                      }
+                    }}
+                    onDrop={(e) => {
+                      if (draggedItem?.type === 'chapter') {
+                        e.preventDefault();
+                        reorderChaptersToIndex(draggedItem.index, cIdx);
+                        setDraggedItem(null);
+                      }
+                    }}
                     style={{
                       border: isChapterSelected ? '1px solid var(--primary)' : '1px solid var(--border)',
                       borderRadius: '6px',
-                      background: isChapterSelected ? 'rgba(var(--primary-rgb, 59, 130, 246), 0.03)' : 'transparent',
+                      background: isChapterSelected ? 'rgba(var(--primary-rgb, 59, 130, 246), 0.03)' : 'var(--surface)',
                       overflow: 'hidden',
+                      opacity: isDraggingThis ? 0.5 : 1,
+                      flexShrink: 0,
                     }}
                   >
                     {/* Chapter Header */}
@@ -695,7 +1091,19 @@ export function ReportPage() {
                     >
                       <button
                         type="button"
-                        onClick={() => setSelectedChapterId(String(chapter.id))}
+                        onClick={() => toggleChapter(String(chapter.id))}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: 0.7, display: 'flex', alignItems: 'center' }}
+                        title={isExpanded ? 'Collapse' : 'Expand'}
+                      >
+                        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedChapterId(String(chapter.id));
+                          if (!isExpanded) toggleChapter(String(chapter.id));
+                        }}
                         style={{
                           flex: 1,
                           textAlign: 'left',
@@ -712,7 +1120,9 @@ export function ReportPage() {
                         }}
                         title={chapter.title}
                       >
-                        {chapter.chapterNumber ? `Ch ${chapter.chapterNumber}: ` : ''}{chapter.title}
+                        {isCourseworkDocument
+                          ? chapter.title
+                          : formatChapterTitle(chapter.chapterNumber, chapter.title)}
                       </button>
 
                       {/* Chapter Actions */}
@@ -754,7 +1164,7 @@ export function ReportPage() {
                             setShowAddSectionModal({ chapterId: String(chapter.id) });
                           }}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: 0.8, color: 'var(--primary)' }}
-                          title="Add Section to this Chapter"
+                          title={isCourseworkDocument ? 'Add Heading' : 'Add Section to this Chapter'}
                         >
                           <FilePlus size={13} />
                         </button>
@@ -770,14 +1180,42 @@ export function ReportPage() {
                     </div>
 
                     {/* Sections inside this Chapter */}
-                    {isChapterSelected && (
+                    {isExpanded && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', padding: '4px 6px' }}>
                         {(chapter.sections ?? []).map((sec, sIdx, sArr) => {
                           const isSecSelected = String(sec.id) === selectedSectionId;
+                          const isDraggingSec = draggedItem?.type === 'section' && draggedItem.chapterId === String(chapter.id) && draggedItem.parentId === null && draggedItem.index === sIdx;
+                          const secHeading = sec.heading || (sec as any).title || 'Untitled Section';
+                          const secNumberDisplay = isCourseworkDocument && sec.sectionNumber
+                            ? `${sec.sectionNumber}. `
+                            : sec.sectionNumber
+                              ? `${sec.sectionNumber} `
+                              : '';
                           return (
-                            <div key={String(sec.id)} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <div key={String(sec.id)} style={{ display: 'flex', flexDirection: 'column', gap: '2px', opacity: isDraggingSec ? 0.5 : 1, flexShrink: 0 }}>
                               {/* Section Row */}
                               <div
+                                draggable={!reorderStructure.isPending}
+                                onDragStart={(e) => {
+                                  e.stopPropagation();
+                                  e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'section', index: sIdx, chapterId: String(chapter.id), parentId: null }));
+                                  setDraggedItem({ type: 'section', index: sIdx, chapterId: String(chapter.id), parentId: null });
+                                }}
+                                onDragEnd={() => setDraggedItem(null)}
+                                onDragOver={(e) => {
+                                  if (draggedItem?.type === 'section' && draggedItem.chapterId === String(chapter.id) && draggedItem.parentId === null) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                  }
+                                }}
+                                onDrop={(e) => {
+                                  if (draggedItem?.type === 'section' && draggedItem.chapterId === String(chapter.id) && draggedItem.parentId === null) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    reorderSectionsToIndex(chapter.sections, draggedItem.index, sIdx, null);
+                                    setDraggedItem(null);
+                                  }
+                                }}
                                 style={{
                                   display: 'flex',
                                   alignItems: 'center',
@@ -788,89 +1226,84 @@ export function ReportPage() {
                                   border: isSecSelected ? '1px solid var(--primary)' : '1px solid transparent',
                                   fontSize: '0.8rem',
                                   gap: '4px',
+                                  cursor: 'grab',
+                                  flexShrink: 0,
                                 }}
                               >
-                                {(() => {
-                                  const secHeading = sec.heading || (sec as any).title || 'Untitled Section';
-                                  return (
-                                    <>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleSelectSection(String(chapter.id), String(sec.id))}
-                                        style={{
-                                          flex: 1,
-                                          textAlign: 'left',
-                                          background: 'none',
-                                          border: 'none',
-                                          cursor: 'pointer',
-                                          color: isSecSelected ? 'var(--primary)' : 'inherit',
-                                          fontWeight: isSecSelected ? 600 : 400,
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis',
-                                          whiteSpace: 'nowrap',
-                                          padding: 0,
-                                        }}
-                                        title={secHeading}
-                                      >
-                                        <span style={{ fontWeight: 600, marginRight: '4px' }}>{sec.sectionNumber || ''}</span>
-                                        {secHeading}
-                                      </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectSection(String(chapter.id), String(sec.id))}
+                                  style={{
+                                    flex: 1,
+                                    textAlign: 'left',
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    color: isSecSelected ? 'var(--primary)' : 'inherit',
+                                    fontWeight: isSecSelected ? 600 : 400,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                    padding: 0,
+                                  }}
+                                  title={secHeading}
+                                >
+                                  <span style={{ fontWeight: 600, marginRight: '4px' }}>{secNumberDisplay}</span>
+                                  {secHeading}
+                                </button>
 
-                                      {/* Section Action buttons */}
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                                        <button
-                                          type="button"
-                                          disabled={sIdx === 0 || reorderStructure.isPending}
-                                          onClick={() => moveSection(String(chapter.id), chapter.sections, sIdx, 'up')}
-                                          style={{ background: 'none', border: 'none', cursor: sIdx === 0 ? 'default' : 'pointer', padding: '1px', opacity: sIdx === 0 ? 0.3 : 0.7 }}
-                                          title="Move Section Up"
-                                        >
-                                          <ChevronUp size={12} />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          disabled={sIdx === sArr.length - 1 || reorderStructure.isPending}
-                                          onClick={() => moveSection(String(chapter.id), chapter.sections, sIdx, 'down')}
-                                          style={{ background: 'none', border: 'none', cursor: sIdx === sArr.length - 1 ? 'default' : 'pointer', padding: '1px', opacity: sIdx === sArr.length - 1 ? 0.3 : 0.7 }}
-                                          title="Move Section Down"
-                                        >
-                                          <ChevronDown size={12} />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setRenameTitle(secHeading);
-                                            setShowRenameModal({ type: 'section', id: String(sec.id), currentTitle: secHeading });
-                                          }}
-                                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: 0.7 }}
-                                          title="Rename Section"
-                                        >
-                                          <Edit2 size={11} />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setNewSectionTitle('');
-                                            setNewSectionAiEnabled(true);
-                                            setShowAddSectionModal({ chapterId: String(chapter.id), parentSectionId: String(sec.id), parentTitle: secHeading });
-                                          }}
-                                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: 0.7, color: 'var(--primary)' }}
-                                          title="Add Subsection"
-                                        >
-                                          <CornerDownRight size={12} />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => setDeleteConfirmModal({ type: 'section', id: String(sec.id), title: secHeading, required: sec.required })}
-                                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: sec.required ? 0.3 : 0.7, color: sec.required ? 'var(--color-muted)' : 'var(--color-danger, #ef4444)' }}
-                                          title={sec.required ? 'Required template section (cannot delete)' : 'Delete Section'}
-                                        >
-                                          <Trash2 size={11} />
-                                        </button>
-                                      </div>
-                                    </>
-                                  );
-                                })()}
+                                {/* Section Action buttons */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                  <button
+                                    type="button"
+                                    disabled={sIdx === 0 || reorderStructure.isPending}
+                                    onClick={() => moveSection(String(chapter.id), chapter.sections, sIdx, 'up')}
+                                    style={{ background: 'none', border: 'none', cursor: sIdx === 0 ? 'default' : 'pointer', padding: '1px', opacity: sIdx === 0 ? 0.3 : 0.7 }}
+                                    title="Move Section Up"
+                                  >
+                                    <ChevronUp size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={sIdx === sArr.length - 1 || reorderStructure.isPending}
+                                    onClick={() => moveSection(String(chapter.id), chapter.sections, sIdx, 'down')}
+                                    style={{ background: 'none', border: 'none', cursor: sIdx === sArr.length - 1 ? 'default' : 'pointer', padding: '1px', opacity: sIdx === sArr.length - 1 ? 0.3 : 0.7 }}
+                                    title="Move Section Down"
+                                  >
+                                    <ChevronDown size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setRenameTitle(secHeading);
+                                      setShowRenameModal({ type: 'section', id: String(sec.id), currentTitle: secHeading });
+                                    }}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: 0.7 }}
+                                    title="Rename Section"
+                                  >
+                                    <Edit2 size={11} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setNewSectionTitle('');
+                                      setNewSectionAiEnabled(true);
+                                      setShowAddSectionModal({ chapterId: String(chapter.id), parentSectionId: String(sec.id), parentTitle: secHeading });
+                                    }}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: 0.7, color: 'var(--primary)' }}
+                                    title={isCourseworkDocument ? 'Add Subheading' : 'Add Subsection'}
+                                  >
+                                    <CornerDownRight size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleteConfirmModal({ type: 'section', id: String(sec.id), title: secHeading, required: sec.required })}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: sec.required ? 0.3 : 0.7, color: sec.required ? 'var(--color-muted)' : 'var(--color-danger, #ef4444)' }}
+                                    title={sec.required ? 'Required template section (cannot delete)' : 'Delete Section'}
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                </div>
                               </div>
 
                               {/* Nested Subsections (Indented) */}
@@ -879,104 +1312,150 @@ export function ReportPage() {
                                   {sec.subsections.map((sub, subIdx, subArr) => {
                                     const isSubSelected = String(sub.id) === selectedSectionId;
                                     const subHeading = sub.heading || (sub as any).title || 'Untitled Subsection';
+                                    const isDraggingSub = draggedItem?.type === 'section' && draggedItem.chapterId === String(chapter.id) && draggedItem.parentId === String(sec.id) && draggedItem.index === subIdx;
                                     return (
-                                      <div key={String(sub.id)}>
+                                      <div key={String(sub.id)} style={{ opacity: isDraggingSub ? 0.5 : 1 }}>
                                         <div
+                                          draggable={!reorderStructure.isPending}
+                                          onDragStart={(e) => {
+                                            e.stopPropagation();
+                                            e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'section', index: subIdx, chapterId: String(chapter.id), parentId: String(sec.id) }));
+                                            setDraggedItem({ type: 'section', index: subIdx, chapterId: String(chapter.id), parentId: String(sec.id) });
+                                          }}
+                                          onDragEnd={() => setDraggedItem(null)}
+                                          onDragOver={(e) => {
+                                            if (draggedItem?.type === 'section' && draggedItem.chapterId === String(chapter.id) && draggedItem.parentId === String(sec.id)) {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                            }
+                                          }}
+                                          onDrop={(e) => {
+                                            if (draggedItem?.type === 'section' && draggedItem.chapterId === String(chapter.id) && draggedItem.parentId === String(sec.id)) {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                              reorderSectionsToIndex(sec.subsections, draggedItem.index, subIdx, String(sec.id));
+                                              setDraggedItem(null);
+                                            }
+                                          }}
                                           style={{
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          justifyContent: 'space-between',
-                                          padding: '3px 6px',
-                                          borderRadius: '3px',
-                                          background: isSubSelected ? 'var(--surface-hover)' : 'transparent',
-                                          border: isSubSelected ? '1px solid var(--primary)' : '1px solid transparent',
-                                          fontSize: '0.78rem',
-                                          gap: '4px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            padding: '3px 6px',
+                                            borderRadius: '3px',
+                                            background: isSubSelected ? 'var(--surface-hover)' : 'transparent',
+                                            border: isSubSelected ? '1px solid var(--primary)' : '1px solid transparent',
+                                            fontSize: '0.78rem',
+                                            gap: '4px',
+                                            cursor: 'grab',
                                           }}
                                         >
-                                        <button
-                                          type="button"
-                                          onClick={() => handleSelectSection(String(chapter.id), String(sub.id))}
-                                          style={{
-                                            flex: 1,
-                                            textAlign: 'left',
-                                            background: 'none',
-                                            border: 'none',
-                                            cursor: 'pointer',
-                                            color: isSubSelected ? 'var(--primary)' : 'inherit',
-                                            fontWeight: isSubSelected ? 600 : 400,
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis',
-                                            whiteSpace: 'nowrap',
-                                            padding: 0,
-                                          }}
-                                          title={subHeading}
-                                        >
-                                          <span style={{ fontWeight: 600, marginRight: '4px' }}>{sub.sectionNumber || ''}</span>
-                                          {subHeading}
-                                        </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSelectSection(String(chapter.id), String(sub.id))}
+                                            style={{
+                                              flex: 1,
+                                              textAlign: 'left',
+                                              background: 'none',
+                                              border: 'none',
+                                              cursor: 'pointer',
+                                              color: isSubSelected ? 'var(--primary)' : 'inherit',
+                                              fontWeight: isSubSelected ? 600 : 400,
+                                              overflow: 'hidden',
+                                              textOverflow: 'ellipsis',
+                                              whiteSpace: 'nowrap',
+                                              padding: 0,
+                                            }}
+                                            title={subHeading}
+                                          >
+                                            <span style={{ fontWeight: 600, marginRight: '4px' }}>{sub.sectionNumber ? `${sub.sectionNumber} ` : ''}</span>
+                                            {subHeading}
+                                          </button>
 
-                                        {/* Subsection Actions */}
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                                          <button
-                                            type="button"
-                                            disabled={subIdx === 0 || reorderStructure.isPending}
-                                            onClick={() => moveSection(String(chapter.id), sec.subsections, subIdx, 'up', String(sec.id))}
-                                            style={{ background: 'none', border: 'none', cursor: subIdx === 0 ? 'default' : 'pointer', padding: '1px', opacity: subIdx === 0 ? 0.3 : 0.7 }}
-                                            title="Move Subsection Up"
-                                          >
-                                            <ChevronUp size={11} />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            disabled={subIdx === subArr.length - 1 || reorderStructure.isPending}
-                                            onClick={() => moveSection(String(chapter.id), sec.subsections, subIdx, 'down', String(sec.id))}
-                                            style={{ background: 'none', border: 'none', cursor: subIdx === subArr.length - 1 ? 'default' : 'pointer', padding: '1px', opacity: subIdx === subArr.length - 1 ? 0.3 : 0.7 }}
-                                            title="Move Subsection Down"
-                                          >
-                                            <ChevronDown size={11} />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              setRenameTitle(subHeading);
-                                              setShowRenameModal({ type: 'section', id: String(sub.id), currentTitle: subHeading });
-                                            }}
-                                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: 0.7 }}
-                                            title="Rename Subsection"
-                                          >
-                                            <Edit2 size={10} />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              setNewSectionTitle('');
-                                              setNewSectionAiEnabled(true);
-                                              setShowAddSectionModal({ chapterId: String(chapter.id), parentSectionId: String(sub.id), parentTitle: subHeading });
-                                            }}
-                                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: 0.7, color: 'var(--primary)' }}
-                                            title="Add Nested Subheading"
-                                          >
-                                            <CornerDownRight size={11} />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => setDeleteConfirmModal({ type: 'section', id: String(sub.id), title: subHeading, required: sub.required })}
-                                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: sub.required ? 0.3 : 0.7, color: sub.required ? 'var(--color-muted)' : 'var(--color-danger, #ef4444)' }}
-                                            title={sub.required ? 'Required template section' : 'Delete Subsection'}
-                                          >
-                                            <Trash2 size={10} />
-                                          </button>
+                                          {/* Subsection Actions */}
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                            <button
+                                              type="button"
+                                              disabled={subIdx === 0 || reorderStructure.isPending}
+                                              onClick={() => moveSection(String(chapter.id), sec.subsections, subIdx, 'up', String(sec.id))}
+                                              style={{ background: 'none', border: 'none', cursor: subIdx === 0 ? 'default' : 'pointer', padding: '1px', opacity: subIdx === 0 ? 0.3 : 0.7 }}
+                                              title="Move Subsection Up"
+                                            >
+                                              <ChevronUp size={11} />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              disabled={subIdx === subArr.length - 1 || reorderStructure.isPending}
+                                              onClick={() => moveSection(String(chapter.id), sec.subsections, subIdx, 'down', String(sec.id))}
+                                              style={{ background: 'none', border: 'none', cursor: subIdx === subArr.length - 1 ? 'default' : 'pointer', padding: '1px', opacity: subIdx === subArr.length - 1 ? 0.3 : 0.7 }}
+                                              title="Move Subsection Down"
+                                            >
+                                              <ChevronDown size={11} />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setRenameTitle(subHeading);
+                                                setShowRenameModal({ type: 'section', id: String(sub.id), currentTitle: subHeading });
+                                              }}
+                                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: 0.7 }}
+                                              title="Rename Subsection"
+                                            >
+                                              <Edit2 size={10} />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setNewSectionTitle('');
+                                                setNewSectionAiEnabled(true);
+                                                setShowAddSectionModal({ chapterId: String(chapter.id), parentSectionId: String(sub.id), parentTitle: subHeading });
+                                              }}
+                                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: 0.7, color: 'var(--primary)' }}
+                                              title="Add Nested Subheading"
+                                            >
+                                              <CornerDownRight size={11} />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => setDeleteConfirmModal({ type: 'section', id: String(sub.id), title: subHeading, required: sub.required })}
+                                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px', opacity: sub.required ? 0.3 : 0.7, color: sub.required ? 'var(--color-muted)' : 'var(--color-danger, #ef4444)' }}
+                                              title={sub.required ? 'Required template section' : 'Delete Subsection'}
+                                            >
+                                              <Trash2 size={10} />
+                                            </button>
+                                          </div>
                                         </div>
-                                        </div>
+
                                         {(sub.subsections ?? []).length > 0 && (
                                           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '14px', borderLeft: '1px solid var(--border)', marginTop: '2px' }}>
                                             {sub.subsections.map((nested: any, nestedIdx: number, nestedArr: any[]) => {
                                               const isNestedSelected = String(nested.id) === selectedSectionId;
                                               const nestedHeading = nested.heading || nested.title || 'Untitled Subheading';
+                                              const isDraggingNested = draggedItem?.type === 'section' && draggedItem.chapterId === String(chapter.id) && draggedItem.parentId === String(sub.id) && draggedItem.index === nestedIdx;
                                               return (
                                                 <div
                                                   key={String(nested.id)}
+                                                  draggable={!reorderStructure.isPending}
+                                                  onDragStart={(e) => {
+                                                    e.stopPropagation();
+                                                    e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'section', index: nestedIdx, chapterId: String(chapter.id), parentId: String(sub.id) }));
+                                                    setDraggedItem({ type: 'section', index: nestedIdx, chapterId: String(chapter.id), parentId: String(sub.id) });
+                                                  }}
+                                                  onDragEnd={() => setDraggedItem(null)}
+                                                  onDragOver={(e) => {
+                                                    if (draggedItem?.type === 'section' && draggedItem.chapterId === String(chapter.id) && draggedItem.parentId === String(sub.id)) {
+                                                      e.preventDefault();
+                                                      e.stopPropagation();
+                                                    }
+                                                  }}
+                                                  onDrop={(e) => {
+                                                    if (draggedItem?.type === 'section' && draggedItem.chapterId === String(chapter.id) && draggedItem.parentId === String(sub.id)) {
+                                                      e.preventDefault();
+                                                      e.stopPropagation();
+                                                      reorderSectionsToIndex(sub.subsections, draggedItem.index, nestedIdx, String(sub.id));
+                                                      setDraggedItem(null);
+                                                    }
+                                                  }}
                                                   style={{
                                                     display: 'flex',
                                                     alignItems: 'center',
@@ -987,6 +1466,8 @@ export function ReportPage() {
                                                     border: isNestedSelected ? '1px solid var(--primary)' : '1px solid transparent',
                                                     fontSize: '0.76rem',
                                                     gap: '4px',
+                                                    opacity: isDraggingNested ? 0.5 : 1,
+                                                    cursor: 'grab',
                                                   }}
                                                 >
                                                   <button
@@ -1007,7 +1488,7 @@ export function ReportPage() {
                                                     }}
                                                     title={nestedHeading}
                                                   >
-                                                    <span style={{ fontWeight: 600, marginRight: '4px' }}>{nested.sectionNumber || ''}</span>
+                                                    <span style={{ fontWeight: 600, marginRight: '4px' }}>{nested.sectionNumber ? `${nested.sectionNumber} ` : ''}</span>
                                                     {nestedHeading}
                                                   </button>
                                                   <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
@@ -1077,7 +1558,7 @@ export function ReportPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                   <div>
                     <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: 0 }}>
-                      {selectedSection.sectionNumber ? `${selectedSection.sectionNumber} ` : ''}
+                      {selectedSection.sectionNumber ? (isCourseworkDocument && !String(selectedSection.sectionNumber).includes('.') ? `${selectedSection.sectionNumber}. ` : `${selectedSection.sectionNumber} `) : ''}
                       {displayValue(selectedSection.heading ?? selectedSection.type)}
                     </h2>
                     <span className="muted" style={{ fontSize: '0.8rem' }}>
@@ -1085,18 +1566,109 @@ export function ReportPage() {
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    {isReferencesSection ? (
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    {isTitlePage ? (
+                      <>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={openEditTitlePageModal}
+                          style={{ fontSize: '0.82rem', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5 }}
+                          title="Edit student and project metadata for Title Page"
+                        >
+                          <Edit2 size={13} />
+                          Edit Details
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          onClick={() => refreshTitlePageMutation.mutate()}
+                          disabled={refreshTitlePageMutation.isPending}
+                          style={{ fontSize: '0.82rem', padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 6 }}
+                          title="Refresh Title Page deterministically from project metadata (0 AI credits)"
+                        >
+                          <RotateCw size={14} className={refreshTitlePageMutation.isPending ? 'animate-spin' : ''} />
+                          {refreshTitlePageMutation.isPending ? 'Formatting...' : 'Refresh Title Page'}
+                        </Button>
+                      </>
+                    ) : isTableOfContents ? (
+                      <>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => {
+                            tocMutation.mutate();
+                            setShowTocModal(true);
+                          }}
+                          style={{ fontSize: '0.82rem', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5 }}
+                          title="View compiled Table of Contents hierarchy"
+                        >
+                          <ListOrdered size={14} />
+                          View Hierarchy
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          onClick={() => refreshTocMutation.mutate()}
+                          disabled={refreshTocMutation.isPending}
+                          style={{ fontSize: '0.82rem', padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 6 }}
+                          title="Recompile Table of Contents deterministically from document hierarchy (0 AI credits)"
+                        >
+                          <RotateCw size={14} className={refreshTocMutation.isPending ? 'animate-spin' : ''} />
+                          {refreshTocMutation.isPending ? 'Compiling TOC...' : 'Refresh TOC'}
+                        </Button>
+                      </>
+                    ) : isListOfFigures ? (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        onClick={() => refreshFiguresMutation.mutate()}
+                        disabled={refreshFiguresMutation.isPending}
+                        style={{ fontSize: '0.82rem', padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 6 }}
+                        title="Recompile List of Figures deterministically from embedded figures (0 AI credits)"
+                      >
+                        <RotateCw size={14} className={refreshFiguresMutation.isPending ? 'animate-spin' : ''} />
+                        {refreshFiguresMutation.isPending ? 'Compiling Figures...' : 'Refresh Figures'}
+                      </Button>
+                    ) : isListOfTables ? (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        onClick={() => refreshTablesMutation.mutate()}
+                        disabled={refreshTablesMutation.isPending}
+                        style={{ fontSize: '0.82rem', padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 6 }}
+                        title="Recompile List of Tables deterministically from embedded tables (0 AI credits)"
+                      >
+                        <RotateCw size={14} className={refreshTablesMutation.isPending ? 'animate-spin' : ''} />
+                        {refreshTablesMutation.isPending ? 'Compiling Tables...' : 'Refresh Tables'}
+                      </Button>
+                    ) : isReferencesSection ? (
                       <Button
                         type="button"
                         variant="primary"
                         onClick={() => refreshReferences.mutate()}
                         disabled={refreshReferences.isPending}
                         style={{ fontSize: '0.82rem', padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 6 }}
-                        title="Recompile references deterministically from citations and project references"
+                        title="Recompile references deterministically from citations and project references (0 AI credits)"
                       >
                         <RotateCw size={14} className={refreshReferences.isPending ? 'animate-spin' : ''} />
                         {refreshReferences.isPending ? 'Compiling References...' : 'Refresh References'}
+                      </Button>
+                    ) : (nodeCategory === 'DECLARATION' || nodeCategory === 'CERTIFICATION') ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => generateSection.mutate({
+                          targetNodeId: String(selectedSection.id),
+                          targetNodeTitle: selectedSection.heading ? String(selectedSection.heading) : selectedSection.type ? String(selectedSection.type) : undefined,
+                          applyMode: 'REPLACE',
+                        })}
+                        disabled={generateSection.isPending}
+                        style={{ fontSize: '0.82rem', padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 6 }}
+                        title="Reset standard declaration wording from institutional template (0 AI credits)"
+                      >
+                        <RotateCw size={14} className={generateSection.isPending ? 'animate-spin' : ''} />
+                        {generateSection.isPending ? 'Restoring...' : 'Reset from Template'}
                       </Button>
                     ) : (
                       <>
@@ -1114,9 +1686,15 @@ export function ReportPage() {
                         <Button
                           type="button"
                           variant="secondary"
-                          onClick={() => generateSection.mutate()}
+                          onClick={() => {
+                            setAiDraftConfirmReplace(false);
+                            setAiDraftInstructions('');
+                            setAiDraftApplyMode(hasSectionContent ? 'APPEND' : 'REPLACE');
+                            setShowAiDraftModal(true);
+                          }}
                           disabled={generateSection.isPending || Boolean(isEmpiricalBlocked)}
                           style={{ fontSize: '0.82rem', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4 }}
+                          title="Generate section draft tailored to section purpose and context"
                         >
                           <Sparkles size={14} className="text-primary" />
                           {generateSection.isPending ? 'Generating...' : 'AI Draft'}
@@ -1125,6 +1703,71 @@ export function ReportPage() {
                     )}
                   </div>
                 </div>
+
+                {/* Corrupted Legacy AI Content Repair Banner */}
+                {isCorruptedContent && (
+                  <div className="alert danger" style={{ fontSize: '0.84rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 14px', border: '1px solid #ef4444', borderRadius: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <AlertTriangle size={18} className="text-danger" style={{ flexShrink: 0 }} />
+                      <div>
+                        <strong>Legacy AI Content Detected:</strong> This deterministic section contains inappropriate literature-synthesis prose generated by a legacy routing bug. Restore it to clean deterministic template formatting now. (0 AI credits consumed, user edits preserved in history)
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      onClick={() => {
+                        if (isTitlePage) refreshTitlePageMutation.mutate();
+                        else if (isTableOfContents) refreshTocMutation.mutate();
+                        else if (isListOfFigures) refreshFiguresMutation.mutate();
+                        else if (isListOfTables) refreshTablesMutation.mutate();
+                        else if (isReferencesSection) refreshReferences.mutate();
+                        else repairDeterministicMutation.mutate();
+                      }}
+                      disabled={refreshTitlePageMutation.isPending || refreshTocMutation.isPending || refreshFiguresMutation.isPending || refreshTablesMutation.isPending || refreshReferences.isPending || repairDeterministicMutation.isPending}
+                      style={{ fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                    >
+                      Repair & Restore
+                    </Button>
+                  </div>
+                )}
+
+                {/* Deterministic Section Info Banners */}
+                {isTitlePage && !isCorruptedContent && (
+                  <div className="alert info" style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
+                    <FileText size={16} className="text-primary" style={{ flexShrink: 0 }} />
+                    <div>
+                      <strong>Deterministic Title Page:</strong> Formatted according to institutional template standards from your project metadata. (0 AI credits consumed)
+                    </div>
+                  </div>
+                )}
+
+                {isTableOfContents && !isCorruptedContent && (
+                  <div className="alert info" style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
+                    <ListOrdered size={16} className="text-primary" style={{ flexShrink: 0 }} />
+                    <div>
+                      <strong>Deterministic Table of Contents:</strong> Automatically structured from your document's chapter, section, and subsection hierarchy. (0 AI credits consumed)
+                    </div>
+                  </div>
+                )}
+
+                {isListOfFigures && !isCorruptedContent && (
+                  <div className="alert info" style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
+                    <Layers size={16} className="text-primary" style={{ flexShrink: 0 }} />
+                    <div>
+                      <strong>Deterministic List of Figures:</strong> Automatically extracted from embedded figures and captions across all chapters. (0 AI credits consumed)
+                    </div>
+                  </div>
+                )}
+
+                {isListOfTables && !isCorruptedContent && (
+                  <div className="alert info" style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
+                    <Table size={16} className="text-primary" style={{ flexShrink: 0 }} />
+                    <div>
+                      <strong>Deterministic List of Tables:</strong> Automatically extracted from embedded Markdown tables across all chapters. (0 AI credits consumed)
+                    </div>
+                  </div>
+                )}
 
                 {/* References Specific Banner */}
                 {isReferencesSection && (
@@ -1169,20 +1812,38 @@ export function ReportPage() {
                   content={String(selectedSection.content || '')}
                   contentJson={String(selectedSection.contentJson || '')}
                   projectId={projectId}
+                  sectionId={String(selectedSection.id)}
                   citationStyle={currentCitationStyle}
                   readOnly={isReferencesSection}
                   minHeight="540px"
                   onSave={({ contentJson, plainText, markdown }) => {
                     if (isReferencesSection) return;
-                    saveSection.mutate({
+                    return saveSection.mutateAsync({
                       content: markdown,
                       contentJson,
                       plainText,
-                    });
+                    }).then(() => undefined);
                   }}
                 />
 
-                {generateSection.data && <DraftPreview draft={generateSection.data} />}
+                {generateSection.data && (
+                  <DraftPreview
+                    draft={generateSection.data}
+                    onAccept={(text) => {
+                      saveSection.mutateAsync({ content: text }).then(() => {
+                        generateSection.reset();
+                      });
+                    }}
+                    onAppend={(text) => {
+                      const existing = String(selectedSection?.content || '');
+                      const separator = existing.trim() ? '\n\n' : '';
+                      saveSection.mutateAsync({ content: existing + separator + text }).then(() => {
+                        generateSection.reset();
+                      });
+                    }}
+                    onDismiss={() => generateSection.reset()}
+                  />
+                )}
               </div>
             ) : (
               <Card style={{ padding: '2rem', textAlign: 'center' }}>
@@ -1206,6 +1867,18 @@ export function ReportPage() {
                 </div>
                 <div>
                   <span className="muted">Origin:</span> <Badge>{displayValue(selectedSection.origin, 'USER')}</Badge>
+                </div>
+                <div>
+                  <span className="muted">Purpose:</span>{' '}
+                  <Badge tone={isNodeDeterministic ? 'success' : 'info'}>
+                    {displayValue(selectedSection.semanticPurpose || nodeCategory)}
+                  </Badge>
+                </div>
+                <div>
+                  <span className="muted">Policy:</span>{' '}
+                  <Badge tone={selectedSection.generationPolicy === 'DETERMINISTIC' || isNodeDeterministic ? 'success' : undefined}>
+                    {displayValue(selectedSection.generationPolicy || (isNodeDeterministic ? 'DETERMINISTIC' : 'CONTEXTUAL_AI'))}
+                  </Badge>
                 </div>
                 <div>
                   <span className="muted">Word Count:</span> {Number((selectedSection as any)?.wordCount || 0)}
@@ -1301,7 +1974,7 @@ export function ReportPage() {
               <FileText size={40} className="text-primary" style={{ margin: '0 auto 1rem' }} />
               <h2 style={{ fontSize: '1.2rem', fontWeight: 600 }}>No Final Document Snapshot Prepared Yet</h2>
               <p className="muted" style={{ maxWidth: '540px', margin: '0.5rem auto 1.5rem' }}>
-                Prepare a snapshot of the full document version compiling all chapters, sections, and references into a single cohesive document for full editing.
+                Compile the full document from saved chapters, sections, figures, tables, citations, references, and appendices into a single editable version.
               </p>
               <Button
                 type="button"
@@ -1310,7 +1983,7 @@ export function ReportPage() {
                 disabled={prepareFinalDoc.isPending}
               >
                 <RefreshCw size={15} style={{ marginRight: 6 }} />
-                {prepareFinalDoc.isPending ? 'Preparing Snapshot...' : 'Prepare Final Document Snapshot'}
+                {prepareFinalDoc.isPending ? 'Preparing...' : 'Prepare Final Document'}
               </Button>
             </Card>
           ) : (
@@ -1329,7 +2002,7 @@ export function ReportPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <AlertTriangle size={18} />
                     <span>
-                      <strong>Document Stale:</strong> Individual report sections have been updated since this snapshot was created.
+                      <strong>Final document is out of date:</strong> one or more report sections have changed. Your previous final version will be preserved.
                     </span>
                   </div>
                   <Button
@@ -1340,7 +2013,7 @@ export function ReportPage() {
                     style={{ fontSize: '0.82rem', padding: '3px 8px' }}
                   >
                     <RotateCw size={13} style={{ marginRight: 4 }} />
-                    {prepareFinalDoc.isPending ? 'Updating...' : 'Update Final Snapshot'}
+                    {prepareFinalDoc.isPending ? 'Updating...' : 'Update Final Document'}
                   </Button>
                 </div>
               )}
@@ -1348,7 +2021,7 @@ export function ReportPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: 0 }}>
-                    {String(finalDoc.title || 'Complete Report Document Version')}
+                    {String(finalDoc.title || `Complete ${documentLabel} Version`)}
                   </h2>
                   <span className="muted" style={{ fontSize: '0.82rem' }}>
                     Version {String(finalDoc.versionNumber || 1)} • Status: {String(finalDoc.status || '')} • Style: {String(finalDoc.citationStyle || '')}
@@ -1360,7 +2033,7 @@ export function ReportPage() {
                   onClick={() => prepareFinalDoc.mutate()}
                   disabled={prepareFinalDoc.isPending}
                 >
-                  <RefreshCw size={14} style={{ marginRight: 4 }} /> Re-compile From Sections
+                  <RefreshCw size={14} style={{ marginRight: 4 }} /> Update Final Document
                 </Button>
               </div>
 
@@ -1373,11 +2046,11 @@ export function ReportPage() {
                 citationStyle={currentCitationStyle}
                 minHeight="750px"
                 onSave={({ contentJson, plainText }) => {
-                  updateFinalDoc.mutate({
+                  return updateFinalDoc.mutateAsync({
                     contentJson,
                     plainText,
                     title: String(finalDoc.title || ''),
-                  });
+                  }).then(() => undefined);
                 }}
               />
             </div>
@@ -1393,7 +2066,7 @@ export function ReportPage() {
             <Card style={{ padding: '0', overflow: 'hidden' }}>
               <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <h2 style={{ fontSize: '1.1rem', fontWeight: 600, margin: 0 }}>A4 Paginated Report Preview</h2>
+                  <h2 style={{ fontSize: '1.1rem', fontWeight: 600, margin: 0 }}>A4 Paginated {documentLabel} Preview</h2>
                   <span className="muted" style={{ fontSize: '0.8rem' }}>Formatted with institutional margins, cover page, and auto-generated references.</span>
                 </div>
                 <Button type="button" variant="secondary" onClick={() => setActiveTab('final-doc')}>
@@ -1434,7 +2107,7 @@ export function ReportPage() {
                   }}
                 >
                   <h1 style={{ fontSize: '1.8rem', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2rem', maxWidth: '600px' }}>
-                    {String(reportData?.title || 'Academic Research Report')}
+                    {String(reportData?.title || documentLabel)}
                   </h1>
                   <p style={{ fontSize: '1.1rem', margin: '0.5rem 0' }}>By</p>
                   <p style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>{String(reportData?.authorName || projectQuery.data?.title || 'Researcher')}</p>
@@ -1446,7 +2119,7 @@ export function ReportPage() {
                   </div>
                 </div>
 
-                {/* Table of Contents Mock */}
+                {/* Dynamic Academic Table of Contents */}
                 <div
                   className="preview-page"
                   style={{
@@ -1460,22 +2133,60 @@ export function ReportPage() {
                     fontFamily: '"Times New Roman", Times, serif',
                   }}
                 >
-                  <h2 style={{ textAlign: 'center', fontWeight: 'bold', marginBottom: '1.5rem', textTransform: 'uppercase' }}>Table of Contents</h2>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {((structureQuery.data?.chapters ?? chapters.data ?? []) as any[]).map((ch, idx) => (
-                      <div key={String(ch.id)}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dotted #94a3b8', paddingBottom: '3px' }}>
-                          <span>{ch.chapterNumber ? `Chapter ${ch.chapterNumber}: ` : ''}{String(ch.title || '')}</span>
-                          <span>{idx * 4 + 1}</span>
-                        </div>
-                        {(ch.sections ?? []).map((sec: any, secIdx: number) => (
-                          <div key={String(sec.id)} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dotted #cbd5e1', paddingBottom: '3px', paddingLeft: '1.25rem', fontSize: '0.92rem' }}>
-                            <span>{sec.sectionNumber ? `${sec.sectionNumber} ` : ''}{sec.heading || sec.title}</span>
-                            <span>{idx * 4 + secIdx + 2}</span>
+                  <h2 style={{ textAlign: 'center', fontWeight: 'bold', marginBottom: '1.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '1.25rem' }}>
+                    Table of Contents
+                  </h2>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    {((structureQuery.data?.chapters ?? chapters.data ?? []) as any[]).map((ch) => {
+                      const isPreliminary = String(ch.type) === 'PRELIMINARY';
+                      const isReferences = String(ch.type) === 'REFERENCES';
+                      const isAppendices = String(ch.type) === 'APPENDICES';
+                      const chapterTitle = ch.chapterNumber && !isCourseworkDocument && !isPreliminary && !isReferences && !isAppendices
+                        ? `Chapter ${ch.chapterNumber}: ${ch.title}`
+                        : ch.title;
+                      return (
+                        <div key={String(ch.id)} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'baseline', fontWeight: 'bold', fontSize: '0.98rem' }}>
+                            <span style={{ textTransform: isCourseworkDocument ? 'none' : 'uppercase' }}>{chapterTitle}</span>
+                            <span style={{ flexGrow: 1, borderBottom: '1px dotted #64748b', margin: '0 8px 4px' }} />
+                            <span style={{ fontSize: '0.88rem', color: '#475569' }}>
+                              {ch.chapterNumber ? `Ch. ${ch.chapterNumber}` : ''}
+                            </span>
                           </div>
-                        ))}
-                      </div>
-                    ))}
+                          {(ch.sections ?? []).map((sec: any) => (
+                            <div key={String(sec.id)} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'baseline', paddingLeft: '1.25rem', fontSize: '0.92rem' }}>
+                                <span>{sec.sectionNumber ? `${sec.sectionNumber} ` : ''}{sec.heading || sec.title}</span>
+                                <span style={{ flexGrow: 1, borderBottom: '1px dotted #94a3b8', margin: '0 8px 4px' }} />
+                                <span style={{ fontSize: '0.82rem', color: '#64748b' }}>
+                                  {sec.sectionNumber ? `§ ${sec.sectionNumber}` : ''}
+                                </span>
+                              </div>
+                              {(sec.subsections ?? []).map((sub: any) => (
+                                <div key={String(sub.id)} style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                                  <div style={{ display: 'flex', alignItems: 'baseline', paddingLeft: '2.5rem', fontSize: '0.86rem', color: '#334155' }}>
+                                    <span>{sub.sectionNumber ? `${sub.sectionNumber} ` : ''}{sub.heading || sub.title}</span>
+                                    <span style={{ flexGrow: 1, borderBottom: '1px dotted #cbd5e1', margin: '0 8px 4px' }} />
+                                    <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                                      {sub.sectionNumber ? `§ ${sub.sectionNumber}` : ''}
+                                    </span>
+                                  </div>
+                                  {(sub.subsections ?? []).map((nested: any) => (
+                                    <div key={String(nested.id)} style={{ display: 'flex', alignItems: 'baseline', paddingLeft: '3.75rem', fontSize: '0.82rem', color: '#475569' }}>
+                                      <span>{nested.sectionNumber ? `${nested.sectionNumber} ` : ''}{nested.heading || nested.title}</span>
+                                      <span style={{ flexGrow: 1, borderBottom: '1px dotted #e2e8f0', margin: '0 8px 4px' }} />
+                                      <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                                        {nested.sectionNumber ? `§ ${nested.sectionNumber}` : ''}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -1507,7 +2218,7 @@ export function ReportPage() {
                     }}
                   >
                     <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>No compiled preview snapshot yet</h2>
-                    <p className="muted">Prepare the final document to preview all chapters, custom sections, citations, references, tables, and appendices as one read-only draft.</p>
+                    <p className="muted">Prepare the final document to preview headings, content, citations, references, tables, and appendices as one read-only draft.</p>
                     <Button type="button" variant="primary" onClick={() => prepareFinalDoc.mutate()} disabled={prepareFinalDoc.isPending}>
                       <RefreshCw size={14} style={{ marginRight: 4 }} />
                       {prepareFinalDoc.isPending ? 'Preparing...' : 'Prepare Preview Snapshot'}
@@ -1611,6 +2322,19 @@ export function ReportPage() {
               </div>
             </Card>
           </div>
+        </div>
+      )}
+
+      {/* TAB 4: EVIDENCE & FIGURES */}
+      {activeTab === 'evidence' && (
+        <div style={{ maxWidth: '1280px', margin: '0 auto', width: '100%' }}>
+          <ProjectEvidencePanel
+            projectId={projectId}
+            reportId={reportId}
+            onInsertToEditor={() => {
+              setActiveTab('sections');
+            }}
+          />
         </div>
       )}
 
@@ -1763,21 +2487,34 @@ export function ReportPage() {
                   const chTitle = ch.title || `Chapter ${chNumber}`;
                   return (
                     <div key={ch.chapterId || cIdx} style={{ marginBottom: '0.75rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', fontWeight: 700 }}>
                         <span style={{ textTransform: 'uppercase' }}>
                           CHAPTER {chNumber}: {chTitle}
                         </span>
                         <span style={{ flexGrow: 1, borderBottom: '1px dotted var(--text-muted, #888)', margin: '0 8px 4px' }} />
-                        <span>Page {cIdx * 5 + 1}</span>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Ch. {chNumber}</span>
                       </div>
                       {(ch.sections || []).map((sec: any, sIdx: number) => {
                         const secHeading = sec.heading || sec.title || `Section ${sIdx + 1}`;
                         const secNum = sec.sectionNumber || `${chNumber}.${sIdx + 1}`;
                         return (
-                          <div key={sec.sectionId || sIdx} style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: '1.5rem', color: 'var(--text-muted)' }}>
-                            <span>{secNum} {secHeading}</span>
-                            <span style={{ flexGrow: 1, borderBottom: '1px dotted var(--border)', margin: '0 8px 4px' }} />
-                            <span>Page {cIdx * 5 + sIdx + 1}</span>
+                          <div key={sec.sectionId || sIdx} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', paddingLeft: '1.25rem', color: 'var(--foreground)' }}>
+                              <span>{secNum} {secHeading}</span>
+                              <span style={{ flexGrow: 1, borderBottom: '1px dotted var(--border)', margin: '0 8px 4px' }} />
+                              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>§ {secNum}</span>
+                            </div>
+                            {(sec.subsections || sec.children || []).map((sub: any, subIdx: number) => {
+                              const subHeading = sub.heading || sub.title || `Subsection ${subIdx + 1}`;
+                              const subNum = sub.sectionNumber || `${secNum}.${subIdx + 1}`;
+                              return (
+                                <div key={sub.sectionId || subIdx} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', paddingLeft: '2.5rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                                  <span>{subNum} {subHeading}</span>
+                                  <span style={{ flexGrow: 1, borderBottom: '1px dotted var(--border)', margin: '0 8px 4px' }} />
+                                  <span style={{ fontSize: '0.75rem' }}>§ {subNum}</span>
+                                </div>
+                              );
+                            })}
                           </div>
                         );
                       })}
@@ -1905,19 +2642,21 @@ export function ReportPage() {
 
       {/* Add Section / Subsection Modal */}
       <Modal
-        title={showAddSectionModal?.parentSectionId ? `Add Subsection to "${showAddSectionModal.parentTitle || 'Section'}"` : 'Add Section to Chapter'}
+        title={showAddSectionModal?.parentSectionId
+          ? `Add Subheading to "${showAddSectionModal.parentTitle || 'Heading'}"`
+          : isCourseworkDocument ? 'Add Heading' : 'Add Section to Chapter'}
         open={Boolean(showAddSectionModal)}
         onClose={() => setShowAddSectionModal(null)}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: '380px' }}>
           <div>
             <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
-              {showAddSectionModal?.parentSectionId ? 'Subsection Heading' : 'Section Heading'}
+              {showAddSectionModal?.parentSectionId ? 'Subheading' : isCourseworkDocument ? 'Heading' : 'Section Heading'}
             </label>
             <Input
               value={newSectionTitle}
               onChange={(e) => setNewSectionTitle(e.target.value)}
-              placeholder={showAddSectionModal?.parentSectionId ? 'e.g. System Architecture Overview' : 'e.g. Theoretical Framework'}
+              placeholder={showAddSectionModal?.parentSectionId ? 'e.g. Concept of Digital Agriculture' : isCourseworkDocument ? 'e.g. Literature Review' : 'e.g. Theoretical Framework'}
               autoFocus
             />
           </div>
@@ -1946,7 +2685,7 @@ export function ReportPage() {
                 }
               }}
             >
-              {createSection.isPending ? 'Adding...' : 'Add Section'}
+              {createSection.isPending ? 'Adding...' : showAddSectionModal?.parentSectionId ? 'Add Subheading' : isCourseworkDocument ? 'Add Heading' : 'Add Section'}
             </Button>
           </div>
         </div>
@@ -2093,6 +2832,316 @@ export function ReportPage() {
             )}
             <Button type="button" variant="primary" onClick={() => setShowLitMatrixModal(false)}>
               Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* AI Section Draft Assistant Modal */}
+      <Modal
+        title="AI Section Draft Assistant"
+        open={showAiDraftModal}
+        onClose={() => setShowAiDraftModal(false)}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: '450px', maxWidth: '600px' }}>
+          {/* Target Section Information Card */}
+          <div style={{ padding: '0.75rem', background: 'var(--surface-hover)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-muted)' }}>TARGET DESTINATION</span>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <Badge tone="info">{displayValue(selectedSection?.semanticPurpose || nodeCategory)}</Badge>
+                <Badge>{displayValue(selectedSection?.generationPolicy || 'CONTEXTUAL_AI')}</Badge>
+              </div>
+            </div>
+            <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--foreground)' }}>
+              {selectedChapter?.title ? `${selectedChapter.title} → ` : ''}
+              {selectedSection?.sectionNumber ? `${selectedSection.sectionNumber} ` : ''}
+              {displayValue(selectedSection?.heading || selectedSection?.type)}
+            </div>
+            <p className="muted" style={{ fontSize: '0.78rem', margin: '4px 0 0' }}>
+              {selectedSection?.generationPolicy === 'SOURCE_GROUNDED_AI'
+                ? 'Comprehensive academic literature synthesis grounded in indexed project sources.'
+                : selectedSection?.generationPolicy === 'PROJECT_EVIDENCE_REQUIRED'
+                  ? 'Grounded in verified project datasets and analysis runs. Results are never fabricated.'
+                  : selectedSection?.generationPolicy === 'USER_AUTHORED_ASSISTED'
+                    ? 'Assists with phrasing and tone using your supplied personal context and project metadata.'
+                    : 'Context-aware generation adhering strictly to chapter hierarchy and project design.'}
+            </p>
+          </div>
+
+          {/* Source Scope Selection (only if not user-authored or non-source) */}
+          {selectedSection?.generationPolicy !== 'USER_AUTHORED_ASSISTED' && (
+            <div>
+              <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '6px' }}>Source Retrieval Scope</label>
+              <Select
+                value={aiDraftSourceScope}
+                onChange={(e) => setAiDraftSourceScope(e.target.value as any)}
+                style={{ fontSize: '0.85rem', width: '100%' }}
+              >
+                <option value="ALL_PROJECT_DOCUMENTS">All Indexed Project Sources</option>
+                <option value="SELECTED_DOCUMENTS">Selected Project Sources Only</option>
+                <option value="NONE">No Literature Sources (Project Metadata Only)</option>
+              </Select>
+            </div>
+          )}
+
+          {/* Document Picker if SELECTED_DOCUMENTS is chosen */}
+          {aiDraftSourceScope === 'SELECTED_DOCUMENTS' && (
+            <div style={{ maxHeight: '160px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: '6px', padding: '6px' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-muted)', display: 'block', marginBottom: '4px' }}>Select Sources to Synthesize:</span>
+              {(pageContent(projectDocumentsQuery.data) ?? []).map((doc: any) => {
+                const isChecked = aiDraftSelectedDocIds.includes(String(doc.id));
+                return (
+                  <label key={String(doc.id)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', padding: '3px 0', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setAiDraftSelectedDocIds((prev) => [...prev, String(doc.id)]);
+                        } else {
+                          setAiDraftSelectedDocIds((prev) => prev.filter((id) => id !== String(doc.id)));
+                        }
+                      }}
+                    />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {doc.filename || doc.title || 'Untitled Document'}
+                    </span>
+                  </label>
+                );
+              })}
+              {(!pageContent(projectDocumentsQuery.data) || pageContent(projectDocumentsQuery.data).length === 0) && (
+                <span className="muted" style={{ fontSize: '0.78rem' }}>No documents uploaded yet.</span>
+              )}
+            </div>
+          )}
+
+          {/* Custom Instructions */}
+          <div>
+            <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+              Researcher Instructions (Optional)
+            </label>
+            <textarea
+              value={aiDraftInstructions}
+              onChange={(e) => setAiDraftInstructions(e.target.value)}
+              placeholder="e.g. Focus on modern deep learning architectures, emphasize methodology limitations, or specify tone..."
+              rows={3}
+              style={{
+                width: '100%',
+                padding: '8px',
+                borderRadius: '6px',
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+                color: 'var(--foreground)',
+                fontSize: '0.85rem',
+                fontFamily: 'inherit',
+                resize: 'vertical',
+              }}
+            />
+          </div>
+
+          {/* Existing Content Notice */}
+          {hasSectionContent && (
+            <div className="alert warning" style={{ fontSize: '0.8rem', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+              <div>
+                This section already contains content (~{Number((selectedSection as any)?.wordCount) || selectedSectionContent.split(/\s+/).length} words). Choose whether to preview first, append to the end, or replace.
+              </div>
+            </div>
+          )}
+
+          {/* Replace Confirmation Prompt if user selected REPLACE on existing content */}
+          {aiDraftApplyMode === 'REPLACE' && hasSectionContent && !aiDraftConfirmReplace && (
+            <div style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid var(--color-danger, #ef4444)', borderRadius: '6px', padding: '8px 10px', fontSize: '0.82rem' }}>
+              <span style={{ fontWeight: 600, color: 'var(--color-danger, #ef4444)' }}>Confirmation Required:</span>
+              <p style={{ margin: '2px 0 6px' }}>Replacing existing content will overwrite the editor text (prior revisions remain saved in history).</p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={aiDraftConfirmReplace}
+                  onChange={(e) => setAiDraftConfirmReplace(e.target.checked)}
+                />
+                I confirm I want to replace existing section content
+              </label>
+            </div>
+          )}
+
+          {/* Modal Actions */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <Button type="button" variant="secondary" onClick={() => setShowAiDraftModal(false)}>
+              Cancel
+            </Button>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={generateSection.isPending}
+                onClick={() => {
+                  generateSection.mutate({
+                    targetNodeId: String(selectedSection?.id),
+                    targetNodeTitle: selectedSection?.heading ? String(selectedSection.heading) : selectedSection?.type ? String(selectedSection.type) : undefined,
+                    sourceScope: aiDraftSourceScope,
+                    documentIds: aiDraftSourceScope === 'SELECTED_DOCUMENTS' ? aiDraftSelectedDocIds : undefined,
+                    instructions: aiDraftInstructions.trim() || undefined,
+                    applyMode: 'PREVIEW',
+                  });
+                }}
+              >
+                Generate Preview
+              </Button>
+              {hasSectionContent && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={generateSection.isPending}
+                  onClick={() => {
+                    generateSection.mutate({
+                      targetNodeId: String(selectedSection?.id),
+                      targetNodeTitle: selectedSection?.heading ? String(selectedSection.heading) : selectedSection?.type ? String(selectedSection.type) : undefined,
+                      sourceScope: aiDraftSourceScope,
+                      documentIds: aiDraftSourceScope === 'SELECTED_DOCUMENTS' ? aiDraftSelectedDocIds : undefined,
+                      instructions: aiDraftInstructions.trim() || undefined,
+                      applyMode: 'APPEND',
+                    });
+                  }}
+                >
+                  Append Draft
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="primary"
+                disabled={generateSection.isPending || (hasSectionContent && aiDraftApplyMode === 'REPLACE' && !aiDraftConfirmReplace)}
+                onClick={() => {
+                  if (hasSectionContent && !aiDraftConfirmReplace) {
+                    setAiDraftApplyMode('REPLACE');
+                    return;
+                  }
+                  generateSection.mutate({
+                    targetNodeId: String(selectedSection?.id),
+                    targetNodeTitle: selectedSection?.heading ? String(selectedSection.heading) : selectedSection?.type ? String(selectedSection.type) : undefined,
+                    sourceScope: aiDraftSourceScope,
+                    documentIds: aiDraftSourceScope === 'SELECTED_DOCUMENTS' ? aiDraftSelectedDocIds : undefined,
+                    instructions: aiDraftInstructions.trim() || undefined,
+                    applyMode: 'REPLACE',
+                  });
+                }}
+              >
+                {generateSection.isPending ? 'Generating...' : hasSectionContent ? 'Replace & Save' : 'Generate & Save'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit Title Page Details Modal */}
+      <Modal
+        title="Edit Title Page Metadata"
+        open={showEditTitlePageModal}
+        onClose={() => setShowEditTitlePageModal(false)}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', minWidth: '450px', maxWidth: '600px' }}>
+          <p className="muted" style={{ fontSize: '0.82rem', margin: 0 }}>
+            Updates the project metadata and re-renders the Title Page deterministically using institutional template formatting. (0 AI credits consumed)
+          </p>
+
+          <div>
+            <label style={{ fontSize: '0.82rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Project Title</label>
+            <Input
+              value={titlePageForm.title || ''}
+              onChange={(e) => setTitlePageForm((p) => ({ ...p, title: e.target.value }))}
+              placeholder="e.g. Design and Implementation of an AI Research Assistant"
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div>
+              <label style={{ fontSize: '0.82rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Student / Author Name</label>
+              <Input
+                value={titlePageForm.authorName || ''}
+                onChange={(e) => setTitlePageForm((p) => ({ ...p, authorName: e.target.value }))}
+                placeholder="e.g. Jane Doe"
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '0.82rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Student / Index ID</label>
+              <Input
+                value={titlePageForm.studentId || ''}
+                onChange={(e) => setTitlePageForm((p) => ({ ...p, studentId: e.target.value }))}
+                placeholder="e.g. 07210001"
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div>
+              <label style={{ fontSize: '0.82rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Institution</label>
+              <Input
+                value={titlePageForm.institutionName || ''}
+                onChange={(e) => setTitlePageForm((p) => ({ ...p, institutionName: e.target.value }))}
+                placeholder="e.g. Takoradi Technical University"
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '0.82rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Department</label>
+              <Input
+                value={titlePageForm.departmentName || ''}
+                onChange={(e) => setTitlePageForm((p) => ({ ...p, departmentName: e.target.value }))}
+                placeholder="e.g. Computer Science Department"
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div>
+              <label style={{ fontSize: '0.82rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Degree / Programme</label>
+              <Input
+                value={titlePageForm.degreeProgram || ''}
+                onChange={(e) => setTitlePageForm((p) => ({ ...p, degreeProgram: e.target.value }))}
+                placeholder="e.g. B.Tech Computer Science"
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '0.82rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Supervisor</label>
+              <Input
+                value={titlePageForm.supervisorName || ''}
+                onChange={(e) => setTitlePageForm((p) => ({ ...p, supervisorName: e.target.value }))}
+                placeholder="e.g. Dr. K. Mensah"
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div>
+              <label style={{ fontSize: '0.82rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Academic Year</label>
+              <Input
+                value={titlePageForm.academicYear || ''}
+                onChange={(e) => setTitlePageForm((p) => ({ ...p, academicYear: e.target.value }))}
+                placeholder="e.g. 2024 / 2025"
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '0.82rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Submission Year (Number)</label>
+              <Input
+                type="number"
+                value={titlePageForm.submissionYear ? String(titlePageForm.submissionYear) : ''}
+                onChange={(e) => setTitlePageForm((p) => ({ ...p, submissionYear: Number(e.target.value) || new Date().getFullYear() }))}
+                placeholder="e.g. 2025"
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.5rem' }}>
+            <Button type="button" variant="secondary" onClick={() => setShowEditTitlePageModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              disabled={updateTitlePageDetailsMutation.isPending}
+              onClick={() => updateTitlePageDetailsMutation.mutate(titlePageForm)}
+            >
+              {updateTitlePageDetailsMutation.isPending ? 'Updating...' : 'Save & Re-render Title Page'}
             </Button>
           </div>
         </div>
@@ -3070,8 +4119,43 @@ export function Metric({ label, value }: { label: string; value: unknown }) {
   return <Card><span className="muted">{label}</span><p className="metric">{displayValue(value)}</p></Card>;
 }
 
-function DraftPreview({ draft }: { draft: Record<string, unknown> }) {
-  return <div className="panel"><Badge tone="info">AI draft</Badge><AssistantResponse content={displayValue(draft.draftText ?? draft.text, '')} /><div className="toolbar"><Button type="button">Accept</Button><Button type="button" variant="secondary">Edit</Button><Button type="button" variant="danger">Reject</Button></div></div>;
+function DraftPreview({
+  draft,
+  onAccept,
+  onAppend,
+  onDismiss,
+}: {
+  draft: Record<string, unknown>;
+  onAccept?: (text: string) => void;
+  onAppend?: (text: string) => void;
+  onDismiss?: () => void;
+}) {
+  const content = String(draft.content ?? draft.draftText ?? draft.text ?? '');
+  return (
+    <div className="panel" style={{ marginTop: '1rem', border: '1px solid var(--border)', borderRadius: '8px', padding: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <Badge tone="info">AI Generated Preview Draft</Badge>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {onAppend && (
+            <Button type="button" variant="secondary" onClick={() => onAppend(content)} style={{ fontSize: '0.8rem', padding: '4px 10px' }}>
+              Append to Section
+            </Button>
+          )}
+          {onAccept && (
+            <Button type="button" variant="primary" onClick={() => onAccept(content)} style={{ fontSize: '0.8rem', padding: '4px 10px' }}>
+              Accept & Replace Section
+            </Button>
+          )}
+          {onDismiss && (
+            <Button type="button" variant="secondary" onClick={onDismiss} style={{ fontSize: '0.8rem', padding: '4px 10px' }}>
+              Dismiss
+            </Button>
+          )}
+        </div>
+      </div>
+      <AssistantResponse content={content} />
+    </div>
+  );
 }
 
 export function ValidationPanel({ validation }: { validation?: Record<string, unknown> }) {

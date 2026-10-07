@@ -527,8 +527,13 @@ function authErrorMessage(error: unknown, fallback: string) {
     if (/too many attempts|rate limit/i.test(msg)) {
       return 'Too many attempts. Try again later.';
     }
-    if (/invalid authenticator code|invalid credentials/i.test(msg)) {
+    if (/invalid authenticator code/i.test(msg)) {
       return 'Invalid authenticator code.';
+    }
+    if (/invalid credentials/i.test(msg)) {
+      return fallback.toLowerCase().includes('authenticator')
+        ? 'Invalid authenticator code or email.'
+        : 'Invalid email or password.';
     }
     if (/stack trace|exception|\bat\b\s+[a-z0-9_$.]+|\bjava\./i.test(msg)) {
       return fallback;

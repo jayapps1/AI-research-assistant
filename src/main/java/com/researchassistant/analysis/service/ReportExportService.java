@@ -57,6 +57,7 @@ public class ReportExportService {
     private final ResearchReportCitationRepository citationRepository;
     private final CitationFormattingService citationFormattingService;
     private final ReportMarkdownRenderer markdownRenderer;
+    private final ReportRichTextService richTextService;
     private final DocumentStorageService storageService;
     private final ProjectAuthorizationService authorizationService;
     private final SecurityAuditService auditService;
@@ -66,16 +67,43 @@ public class ReportExportService {
     private final ProjectReferenceRepository projectReferenceRepository;
     private final org.springframework.beans.factory.ObjectProvider<AnalysisWorkflowService> workflowServiceProvider;
     private final StorageObjectMetadataService storageObjectMetadataService;
+    private final com.researchassistant.evidence.repository.ProjectEvidenceRepository evidenceRepository;
+    private final com.researchassistant.evidence.service.ProjectEvidenceNumberingService evidenceNumberingService;
+    private final com.researchassistant.evidence.service.ProjectEvidenceListService evidenceListService;
+    private final com.researchassistant.common.storage.ObjectStorageService objectStorageService;
+    private final ReportDocumentCompiler reportDocumentCompiler;
 
     public ReportExportService(ReportExportJobRepository exportJobRepository, ResearchReportRepository reportRepository,
             ResearchReportChapterRepository chapterRepository, ResearchReportSectionRepository sectionRepository,
             ResearchReportCitationRepository citationRepository, CitationFormattingService citationFormattingService,
-            ReportMarkdownRenderer markdownRenderer,
+            ReportMarkdownRenderer markdownRenderer, ReportRichTextService richTextService,
             DocumentStorageService storageService, ProjectAuthorizationService authorizationService, SecurityAuditService auditService,
             QuotaService quotaService, ReportDocumentVersionRepository documentVersionRepository,
             LiteratureMatrixRepository literatureMatrixRepository, ProjectReferenceRepository projectReferenceRepository,
             org.springframework.beans.factory.ObjectProvider<AnalysisWorkflowService> workflowServiceProvider,
             StorageObjectMetadataService storageObjectMetadataService) {
+        this(exportJobRepository, reportRepository, chapterRepository, sectionRepository,
+                citationRepository, citationFormattingService, markdownRenderer, richTextService,
+                storageService, authorizationService, auditService, quotaService,
+                documentVersionRepository, literatureMatrixRepository, projectReferenceRepository,
+                workflowServiceProvider, storageObjectMetadataService, null, null, null, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReportExportService(ReportExportJobRepository exportJobRepository, ResearchReportRepository reportRepository,
+            ResearchReportChapterRepository chapterRepository, ResearchReportSectionRepository sectionRepository,
+            ResearchReportCitationRepository citationRepository, CitationFormattingService citationFormattingService,
+            ReportMarkdownRenderer markdownRenderer, ReportRichTextService richTextService,
+            DocumentStorageService storageService, ProjectAuthorizationService authorizationService, SecurityAuditService auditService,
+            QuotaService quotaService, ReportDocumentVersionRepository documentVersionRepository,
+            LiteratureMatrixRepository literatureMatrixRepository, ProjectReferenceRepository projectReferenceRepository,
+            org.springframework.beans.factory.ObjectProvider<AnalysisWorkflowService> workflowServiceProvider,
+            StorageObjectMetadataService storageObjectMetadataService,
+            com.researchassistant.evidence.repository.ProjectEvidenceRepository evidenceRepository,
+            com.researchassistant.evidence.service.ProjectEvidenceNumberingService evidenceNumberingService,
+            com.researchassistant.evidence.service.ProjectEvidenceListService evidenceListService,
+            com.researchassistant.common.storage.ObjectStorageService objectStorageService,
+            ReportDocumentCompiler reportDocumentCompiler) {
         this.exportJobRepository = exportJobRepository;
         this.reportRepository = reportRepository;
         this.chapterRepository = chapterRepository;
@@ -83,6 +111,7 @@ public class ReportExportService {
         this.citationRepository = citationRepository;
         this.citationFormattingService = citationFormattingService;
         this.markdownRenderer = markdownRenderer;
+        this.richTextService = richTextService;
         this.storageService = storageService;
         this.authorizationService = authorizationService;
         this.auditService = auditService;
@@ -92,6 +121,11 @@ public class ReportExportService {
         this.projectReferenceRepository = projectReferenceRepository;
         this.workflowServiceProvider = workflowServiceProvider;
         this.storageObjectMetadataService = storageObjectMetadataService;
+        this.evidenceRepository = evidenceRepository;
+        this.evidenceNumberingService = evidenceNumberingService;
+        this.evidenceListService = evidenceListService;
+        this.objectStorageService = objectStorageService;
+        this.reportDocumentCompiler = reportDocumentCompiler;
     }
 
     @Transactional
@@ -131,13 +165,28 @@ public class ReportExportService {
         job.setRequestedBy(user);
         job.setStartedAt(OffsetDateTime.now());
 
-        documentVersionRepository.findFirstByReportIdOrderByVersionNumberDesc(reportId)
-                .ifPresent(job::setFinalDocumentVersion);
+        ReportDocumentVersion finalVersion = null;
+        if (!isDraft) {
+            finalVersion = documentVersionRepository.findFirstByReportIdOrderByVersionNumberDesc(reportId)
+                    .orElseThrow(() -> new IllegalStateException("Prepare a final document snapshot before final export."));
+            if (finalVersion.getSourceReportRevisionNumber() != report.getRevisionNumber()) {
+                throw new IllegalStateException("REPORT_VERSION_CONFLICT: final document is out of date. Update the final document before publication export.");
+            }
+            job.setFinalDocumentVersion(finalVersion);
+        } else {
+            documentVersionRepository.findFirstByReportIdOrderByVersionNumberDesc(reportId)
+                    .ifPresent(job::setFinalDocumentVersion);
+        }
 
         exportJobRepository.save(job);
         auditService.record(user.getId(), SecurityAuditEventType.REPORT_EXPORT_REQUESTED);
         try {
-            byte[] bytes = format == ReportExportFormat.DOCX ? renderDocx(report, isDraft) : renderPdf(report, isDraft);
+            ReportDocumentCompiler.CompiledAcademicDocument draftCompiled = isDraft && reportDocumentCompiler != null
+                    ? reportDocumentCompiler.compile(report)
+                    : null;
+            byte[] bytes = format == ReportExportFormat.DOCX
+                    ? (isDraft && draftCompiled != null ? renderDocx(draftCompiled, report, true) : renderDocx(finalVersion, report))
+                    : (isDraft && draftCompiled != null ? renderPdf(draftCompiled, report, true) : renderPdf(finalVersion, report));
             String storageKey = "projects/" + report.getProject().getId() + "/exports/" + job.getId() + "/" + job.getFilename();
             StorageObjectEntity pendingStorageObject = storageObjectMetadataService.createPending(
                     user.getId(),
@@ -207,8 +256,102 @@ public class ReportExportService {
         return renderDocx(report, false);
     }
 
+    public record FormatProfile(
+            String pageSize,
+            String orientation,
+            double topMarginInches,
+            double rightMarginInches,
+            double bottomMarginInches,
+            double leftMarginInches,
+            String defaultFont,
+            int bodyFontSize,
+            String headingFont,
+            double lineSpacing,
+            int paragraphSpacingAfterPt,
+            String alignment,
+            double firstLineIndentInches,
+            String chapterStart,
+            String frontMatterNumbering,
+            String mainContentNumbering,
+            String citationStyle
+    ) {
+        public static FormatProfile defaultProfile() {
+            return new FormatProfile("A4", "PORTRAIT", 1.0, 1.0, 1.0, 1.25,
+                    "Times New Roman", 12, "Times New Roman", 1.5, 6, "JUSTIFY", 0.5,
+                    "NEW_PAGE", "ROMAN_LOWER", "ARABIC", "APA_7");
+        }
+
+        public static FormatProfile fromTemplate(ResearchReportTemplate template) {
+            if (template == null || template.getConfigurationJson() == null || template.getConfigurationJson().isBlank()) {
+                return defaultProfile();
+            }
+            try {
+                com.fasterxml.jackson.databind.JsonNode root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(template.getConfigurationJson());
+                com.fasterxml.jackson.databind.JsonNode fp = root.get("formatProfile");
+                if (fp == null || !fp.isObject()) {
+                    return defaultProfile();
+                }
+                String pageSize = fp.has("pageSize") ? fp.get("pageSize").asText("A4") : "A4";
+                String orientation = fp.has("orientation") ? fp.get("orientation").asText("PORTRAIT") : "PORTRAIT";
+                double top = 1.0, right = 1.0, bottom = 1.0, left = 1.25;
+                if (fp.has("margins") && fp.get("margins").isObject()) {
+                    var m = fp.get("margins");
+                    top = m.has("topInches") ? m.get("topInches").asDouble(1.0) : 1.0;
+                    right = m.has("rightInches") ? m.get("rightInches").asDouble(1.0) : 1.0;
+                    bottom = m.has("bottomInches") ? m.get("bottomInches").asDouble(1.0) : 1.0;
+                    left = m.has("leftInches") ? m.get("leftInches").asDouble(1.25) : 1.25;
+                }
+                String defaultFont = fp.has("defaultFont") ? fp.get("defaultFont").asText("Times New Roman") : "Times New Roman";
+                int bodyFontSize = fp.has("bodyFontSize") ? fp.get("bodyFontSize").asInt(12) : 12;
+                String headingFont = fp.has("headingFont") ? fp.get("headingFont").asText("Times New Roman") : "Times New Roman";
+                double lineSpacing = fp.has("lineSpacing") ? fp.get("lineSpacing").asDouble(1.5) : 1.5;
+                int paragraphSpacingAfterPt = fp.has("paragraphSpacingAfterPt") ? fp.get("paragraphSpacingAfterPt").asInt(6) : 6;
+                String alignment = fp.has("alignment") ? fp.get("alignment").asText("JUSTIFY") : "JUSTIFY";
+                double firstLineIndentInches = fp.has("firstLineIndentInches") ? fp.get("firstLineIndentInches").asDouble(0.5) : 0.5;
+                String chapterStart = fp.has("chapterStart") ? fp.get("chapterStart").asText("NEW_PAGE") : "NEW_PAGE";
+                String frontNumbering = "ROMAN_LOWER";
+                String mainNumbering = "ARABIC";
+                if (fp.has("pageNumbering") && fp.get("pageNumbering").isObject()) {
+                    frontNumbering = fp.get("pageNumbering").has("frontMatter") ? fp.get("pageNumbering").get("frontMatter").asText("ROMAN_LOWER") : "ROMAN_LOWER";
+                    mainNumbering = fp.get("pageNumbering").has("mainContent") ? fp.get("pageNumbering").get("mainContent").asText("ARABIC") : "ARABIC";
+                }
+                String citationStyle = fp.has("citationStyle") ? fp.get("citationStyle").asText("APA_7") : "APA_7";
+                return new FormatProfile(pageSize, orientation, top, right, bottom, left, defaultFont, bodyFontSize,
+                        headingFont, lineSpacing, paragraphSpacingAfterPt, alignment, firstLineIndentInches, chapterStart,
+                        frontNumbering, mainNumbering, citationStyle);
+            } catch (Exception ignored) {
+                return defaultProfile();
+            }
+        }
+    }
+
+    private void applyDocxFormatProfile(XWPFDocument doc, FormatProfile profile) {
+        try {
+            CTSectPr sectPr = doc.getDocument().getBody().isSetSectPr()
+                    ? doc.getDocument().getBody().getSectPr()
+                    : doc.getDocument().getBody().addNewSectPr();
+            org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageMar pageMar = sectPr.isSetPgMar()
+                    ? sectPr.getPgMar()
+                    : sectPr.addNewPgMar();
+            pageMar.setTop(java.math.BigInteger.valueOf((long) (profile.topMarginInches() * 1440)));
+            pageMar.setRight(java.math.BigInteger.valueOf((long) (profile.rightMarginInches() * 1440)));
+            pageMar.setBottom(java.math.BigInteger.valueOf((long) (profile.bottomMarginInches() * 1440)));
+            pageMar.setLeft(java.math.BigInteger.valueOf((long) (profile.leftMarginInches() * 1440)));
+        } catch (Exception ignored) {
+        }
+    }
+
+    private boolean isCourseworkReport(ResearchReport report) {
+        if (report == null) return false;
+        if (report.getType() == ResearchReportType.COURSEWORK) return true;
+        return report.getProject() != null
+                && report.getProject().getWorkspaceType() == com.researchassistant.project.entity.AcademicWorkspaceType.COURSEWORK;
+    }
+
     private byte[] renderDocx(ResearchReport report, boolean isDraft) throws IOException {
+        FormatProfile profile = FormatProfile.fromTemplate(report.getTemplate());
         try (XWPFDocument doc = new XWPFDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            applyDocxFormatProfile(doc, profile);
             enableFieldUpdateOnOpen(doc);
             addPageNumberFooter(doc);
             Map<UUID, Integer> referenceNumbers = citationNumberMap(report);
@@ -224,28 +367,39 @@ public class ReportExportService {
             }
             writeDocxAbstract(doc, report);
             writeDocxTableOfContents(doc);
+            writeDocxListOfFigures(doc, report);
+            writeDocxListOfTables(doc, report);
+            Map<UUID, String> evidenceLabels = evidenceNumberingService != null
+                    ? evidenceNumberingService.computeDynamicLabelsForReport(report.getId())
+                    : Map.of();
+            boolean coursework = isCourseworkReport(report);
             for (ResearchReportChapter chapter : chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId())) {
                 if (chapter.getType() == ReportChapterType.PRELIMINARY || chapter.getType() == ReportChapterType.REFERENCES || chapter.getType() == ReportChapterType.APPENDICES) {
                     continue;
                 }
-                writeDocxHeading(doc, chapter.getTitle(), 1, true);
+                if (!coursework) {
+                    writeDocxHeading(doc, chapter.getTitle(), 1, true);
+                }
                 List<ResearchReportSection> rootSections = sectionRepository.findAllByChapterIdAndParentSectionIsNullOrderByDisplayOrderAsc(chapter.getId());
                 for (ResearchReportSection section : rootSections) {
                     String heading = section.getSectionNumber() != null ? section.getSectionNumber() + " " + section.getHeading() : section.getHeading();
-                    writeDocxHeading(doc, heading, 2, false);
+                    writeDocxHeading(doc, heading, coursework ? 1 : 2, coursework);
                     markdownRenderer.renderMarkdown(doc, exportText(section, report.getCitationStyle(), referenceNumbers), section.getHeading());
+                    writeDocxSectionEvidence(doc, section, evidenceLabels);
 
                     List<ResearchReportSection> subsections = sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(section.getId());
                     for (ResearchReportSection sub : subsections) {
                         String subHeading = sub.getSectionNumber() != null ? sub.getSectionNumber() + " " + sub.getHeading() : sub.getHeading();
-                        writeDocxHeading(doc, subHeading, 3, false);
+                        writeDocxHeading(doc, subHeading, coursework ? 2 : 3, false);
                         markdownRenderer.renderMarkdown(doc, exportText(sub, report.getCitationStyle(), referenceNumbers), sub.getHeading());
+                        writeDocxSectionEvidence(doc, sub, evidenceLabels);
 
                         List<ResearchReportSection> subSubs = sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(sub.getId());
                         for (ResearchReportSection subSub : subSubs) {
                             String subSubHeading = subSub.getSectionNumber() != null ? subSub.getSectionNumber() + " " + subSub.getHeading() : subSub.getHeading();
-                            writeDocxHeading(doc, subSubHeading, 4, false);
+                            writeDocxHeading(doc, subSubHeading, coursework ? 3 : 4, false);
                             markdownRenderer.renderMarkdown(doc, exportText(subSub, report.getCitationStyle(), referenceNumbers), subSub.getHeading());
+                            writeDocxSectionEvidence(doc, subSub, evidenceLabels);
                         }
                     }
                 }
@@ -267,6 +421,43 @@ public class ReportExportService {
         }
     }
 
+    private byte[] renderDocx(ReportDocumentVersion version, ResearchReport report) throws IOException {
+        if (version == null) {
+            throw new IllegalStateException("Final document snapshot is required for final DOCX export.");
+        }
+        FormatProfile profile = FormatProfile.fromTemplate(report.getTemplate());
+        try (XWPFDocument doc = new XWPFDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            applyDocxFormatProfile(doc, profile);
+            enableFieldUpdateOnOpen(doc);
+            addPageNumberFooter(doc);
+            String markdown = finalVersionMarkdown(version);
+            markdownRenderer.renderMarkdown(doc, markdown, null);
+            doc.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    private byte[] renderDocx(ReportDocumentCompiler.CompiledAcademicDocument compiled, ResearchReport report, boolean isDraft) throws IOException {
+        FormatProfile profile = FormatProfile.fromTemplate(report.getTemplate());
+        try (XWPFDocument doc = new XWPFDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            applyDocxFormatProfile(doc, profile);
+            enableFieldUpdateOnOpen(doc);
+            addPageNumberFooter(doc);
+            if (isDraft) {
+                XWPFParagraph draftPara = doc.createParagraph();
+                draftPara.setAlignment(ParagraphAlignment.CENTER);
+                XWPFRun draftRun = draftPara.createRun();
+                draftRun.setText("*** DRAFT MANUSCRIPT - FOR REVIEW ONLY ***");
+                draftRun.setBold(true);
+                draftRun.setColor("CC0000");
+                draftRun.setFontSize(14);
+            }
+            markdownRenderer.renderMarkdown(doc, compiled.markdown(), null);
+            doc.write(out);
+            return out.toByteArray();
+        }
+    }
+
     private byte[] renderPdf(ResearchReport report) throws IOException {
         return renderPdf(report, false);
     }
@@ -281,35 +472,45 @@ public class ReportExportService {
                 y = pdfLine(cursor, 12, 60, y - 5, "[ DRAFT MANUSCRIPT - FOR REVIEW ONLY ]");
             }
             y = writePdfAbstract(report, cursor, y);
+            y = writePdfListOfFigures(report, cursor, y);
+            y = writePdfListOfTables(report, cursor, y);
+            Map<UUID, String> evidenceLabelsPdf = evidenceNumberingService != null
+                    ? evidenceNumberingService.computeDynamicLabelsForReport(report.getId())
+                    : Map.of();
+            boolean coursework = isCourseworkReport(report);
             for (ResearchReportChapter chapter : chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId())) {
                 if (chapter.getType() == ReportChapterType.PRELIMINARY || chapter.getType() == ReportChapterType.REFERENCES || chapter.getType() == ReportChapterType.APPENDICES) {
                     continue;
                 }
-                y = ensurePage(cursor, y);
-                y = pdfLine(cursor, 14, 60, y - 10, chapter.getTitle());
+                if (!coursework) {
+                    y = ensurePage(cursor, y);
+                    y = pdfLine(cursor, 14, 60, y - 10, chapter.getTitle());
+                }
                 List<ResearchReportSection> rootSections = sectionRepository.findAllByChapterIdAndParentSectionIsNullOrderByDisplayOrderAsc(chapter.getId());
                 for (ResearchReportSection section : rootSections) {
                     y = ensurePage(cursor, y);
                     String heading = section.getSectionNumber() != null ? section.getSectionNumber() + " " + section.getHeading() : section.getHeading();
-                    y = pdfLine(cursor, 12, 70, y, heading);
+                    y = pdfLine(cursor, coursework ? 14 : 12, coursework ? 60 : 70, y - (coursework ? 10 : 0), heading);
                     for (String paragraph : markdownRenderer.plainLines(exportText(section, report.getCitationStyle(), referenceNumbers), section.getHeading())) {
                         for (String line : wrap(paragraph, 95)) {
                             y = ensurePage(cursor, y);
                             y = pdfLine(cursor, 11, 70, y, line);
                         }
                     }
+                    y = writePdfSectionEvidence(doc, cursor, y, section, evidenceLabelsPdf);
 
                     List<ResearchReportSection> subsections = sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(section.getId());
                     for (ResearchReportSection sub : subsections) {
                         y = ensurePage(cursor, y);
                         String subHeading = sub.getSectionNumber() != null ? sub.getSectionNumber() + " " + sub.getHeading() : sub.getHeading();
-                        y = pdfLine(cursor, 11, 75, y, subHeading);
+                        y = pdfLine(cursor, coursework ? 12 : 11, coursework ? 65 : 75, y, subHeading);
                         for (String paragraph : markdownRenderer.plainLines(exportText(sub, report.getCitationStyle(), referenceNumbers), sub.getHeading())) {
                             for (String line : wrap(paragraph, 93)) {
                                 y = ensurePage(cursor, y);
                                 y = pdfLine(cursor, 10, 75, y, line);
                             }
                         }
+                        y = writePdfSectionEvidence(doc, cursor, y, sub, evidenceLabelsPdf);
 
                         List<ResearchReportSection> subSubs = sectionRepository.findAllByParentSectionIdOrderByDisplayOrderAsc(sub.getId());
                         for (ResearchReportSection subSub : subSubs) {
@@ -322,6 +523,7 @@ public class ReportExportService {
                                     y = pdfLine(cursor, 10, 80, y, line);
                                 }
                             }
+                            y = writePdfSectionEvidence(doc, cursor, y, subSub, evidenceLabelsPdf);
                         }
                     }
                 }
@@ -375,6 +577,84 @@ public class ReportExportService {
             doc.save(out);
             return out.toByteArray();
         }
+    }
+
+    private byte[] renderPdf(ReportDocumentVersion version, ResearchReport report) throws IOException {
+        if (version == null) {
+            throw new IllegalStateException("Final document snapshot is required for final PDF export.");
+        }
+        try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            PDType1Font font = new PDType1Font(Standard14Fonts.FontName.TIMES_ROMAN);
+            PdfCursor cursor = new PdfCursor(doc, font);
+            float y = cursor.y;
+            List<ReportMarkdownRenderer.MarkdownBlock> blocks = markdownRenderer.plainBlocks(finalVersionMarkdown(version), null);
+            for (ReportMarkdownRenderer.MarkdownBlock block : blocks) {
+                if (block.headingLevel() == 1) {
+                    y = ensurePage(cursor, y);
+                    y = pdfLine(cursor, 14, 60, y - 10, block.text());
+                } else if (block.headingLevel() == 2) {
+                    y = ensurePage(cursor, y);
+                    y = pdfLine(cursor, 12, 65, y - 6, block.text());
+                } else if (block.headingLevel() >= 3) {
+                    y = ensurePage(cursor, y);
+                    y = pdfLine(cursor, 11, 70, y - 4, block.text());
+                } else {
+                    for (String line : wrap(block.text(), 95)) {
+                        y = ensurePage(cursor, y);
+                        y = pdfLine(cursor, 11, 70, y, line);
+                    }
+                }
+            }
+            cursor.close();
+            doc.save(out);
+            return out.toByteArray();
+        }
+    }
+
+    private byte[] renderPdf(ReportDocumentCompiler.CompiledAcademicDocument compiled, ResearchReport report, boolean isDraft) throws IOException {
+        try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            PDType1Font font = new PDType1Font(Standard14Fonts.FontName.TIMES_ROMAN);
+            PdfCursor cursor = new PdfCursor(doc, font);
+            float y = cursor.y;
+            if (isDraft) {
+                y = pdfLine(cursor, 12, 60, y, "[ DRAFT MANUSCRIPT - FOR REVIEW ONLY ]");
+            }
+            List<ReportMarkdownRenderer.MarkdownBlock> blocks = markdownRenderer.plainBlocks(compiled.markdown(), null);
+            for (ReportMarkdownRenderer.MarkdownBlock block : blocks) {
+                if (block.headingLevel() == 1) {
+                    y = ensurePage(cursor, y);
+                    y = pdfLine(cursor, 14, 60, y - 10, block.text());
+                } else if (block.headingLevel() == 2) {
+                    y = ensurePage(cursor, y);
+                    y = pdfLine(cursor, 12, 65, y - 6, block.text());
+                } else if (block.headingLevel() >= 3) {
+                    y = ensurePage(cursor, y);
+                    y = pdfLine(cursor, 11, 70, y - 4, block.text());
+                } else {
+                    for (String line : wrap(block.text(), 95)) {
+                        y = ensurePage(cursor, y);
+                        y = pdfLine(cursor, 11, 70, y, line);
+                    }
+                }
+            }
+            cursor.close();
+            doc.save(out);
+            return out.toByteArray();
+        }
+    }
+
+    private String finalVersionMarkdown(ReportDocumentVersion version) {
+        String markdown = version.getContentJson() == null || version.getContentJson().isBlank()
+                ? null
+                : richTextService.documentJsonToMarkdown(version.getContentJson());
+        if (markdown == null || markdown.isBlank()) {
+            markdown = version.getPlainText() == null ? "" : version.getPlainText();
+        }
+        return markdown
+                .replace("[citation metadata incomplete]", "")
+                .replace("[Citation metadata incomplete]", "")
+                .replace("REFERENCE_METADATA_INCOMPLETE", "")
+                .trim();
     }
 
     private float ensurePage(PdfCursor cursor, float y) throws IOException {
@@ -537,8 +817,24 @@ public class ReportExportService {
         return numbers;
     }
 
+    private String resolveSectionRawText(ResearchReportSection section) {
+        if (section.getContent() != null && !section.getContent().isBlank()) {
+            return section.getContent();
+        }
+        if (section.getContentJson() != null && !section.getContentJson().isBlank() && richTextService.isValidDocumentJson(section.getContentJson())) {
+            String md = richTextService.documentJsonToMarkdown(section.getContentJson());
+            if (md != null && !md.isBlank()) {
+                return md;
+            }
+        }
+        if (section.getPlainText() != null && !section.getPlainText().isBlank()) {
+            return section.getPlainText();
+        }
+        return "";
+    }
+
     private String exportText(ResearchReportSection section, CitationStyle style, Map<UUID, Integer> referenceNumbers) {
-        String text = section.getContent() == null ? "" : section.getContent();
+        String text = resolveSectionRawText(section);
         text = text.replace("[citation metadata incomplete]", "")
                 .replace("[Citation metadata incomplete]", "")
                 .replace("REFERENCE_METADATA_INCOMPLETE", "");
@@ -681,6 +977,199 @@ public class ReportExportService {
             return storageException.getErrorCode();
         }
         return exception.getClass().getSimpleName();
+    }
+
+    private void writeDocxListOfFigures(XWPFDocument doc, ResearchReport report) {
+        if (evidenceListService == null) return;
+        var figures = evidenceListService.generateListOfFigures(report.getId());
+        if (figures.isEmpty()) return;
+
+        writeDocxHeading(doc, "List of Figures", 1, true);
+        for (var fig : figures) {
+            XWPFParagraph p = doc.createParagraph();
+            XWPFRun r = p.createRun();
+            r.setFontFamily("Times New Roman");
+            r.setFontSize(11);
+            r.setBold(true);
+            r.setText(fig.figureNumber() + ": ");
+
+            XWPFRun rCap = p.createRun();
+            rCap.setFontFamily("Times New Roman");
+            rCap.setFontSize(11);
+            rCap.setText(fig.caption() + " ");
+
+            XWPFRun rPage = p.createRun();
+            rPage.setFontFamily("Times New Roman");
+            rPage.setFontSize(11);
+            rPage.setText(".................................................... " + fig.pageNumber());
+        }
+    }
+
+    private void writeDocxListOfTables(XWPFDocument doc, ResearchReport report) {
+        if (evidenceListService == null) return;
+        var tables = evidenceListService.generateListOfTables(report.getId());
+        if (tables.isEmpty()) return;
+
+        writeDocxHeading(doc, "List of Tables", 1, true);
+        for (var tab : tables) {
+            XWPFParagraph p = doc.createParagraph();
+            XWPFRun r = p.createRun();
+            r.setFontFamily("Times New Roman");
+            r.setFontSize(11);
+            r.setBold(true);
+            r.setText(tab.tableNumber() + ": ");
+
+            XWPFRun rCap = p.createRun();
+            rCap.setFontFamily("Times New Roman");
+            rCap.setFontSize(11);
+            rCap.setText(tab.caption() + " ");
+
+            XWPFRun rPage = p.createRun();
+            rPage.setFontFamily("Times New Roman");
+            rPage.setFontSize(11);
+            rPage.setText(".................................................... " + tab.pageNumber());
+        }
+    }
+
+    private void writeDocxSectionEvidence(XWPFDocument doc, ResearchReportSection section, Map<UUID, String> labels) {
+        if (evidenceRepository == null) return;
+        var evidenceList = evidenceRepository.findAllBySectionIdOrderByDisplayOrderAscCreatedAtAsc(section.getId());
+        for (var e : evidenceList) {
+            String label = labels.getOrDefault(e.getId(), e.getFigureLabel() != null ? e.getFigureLabel() : "Figure");
+            String renderedCaption = (e.getCaption() != null && !e.getCaption().isBlank())
+                    ? label + ": " + e.getCaption()
+                    : label;
+
+            if (e.getStorageKey() != null && objectStorageService != null) {
+                try {
+                    var storageObj = objectStorageService.open(e.getStorageKey());
+                    byte[] imgBytes;
+                    try (var is = storageObj.contentStream()) {
+                        imgBytes = is.readAllBytes();
+                    }
+                    if (imgBytes.length > 0) {
+                        XWPFParagraph imgPara = doc.createParagraph();
+                        imgPara.setAlignment(ParagraphAlignment.CENTER);
+                        XWPFRun imgRun = imgPara.createRun();
+                        int picType = (e.getMimeType() != null && e.getMimeType().contains("png"))
+                                ? XWPFDocument.PICTURE_TYPE_PNG
+                                : XWPFDocument.PICTURE_TYPE_JPEG;
+                        imgRun.addPicture(new ByteArrayInputStream(imgBytes), picType, e.getOriginalFilename(),
+                                400 * 12700, 240 * 12700);
+
+                        XWPFParagraph capPara = doc.createParagraph();
+                        capPara.setAlignment(ParagraphAlignment.CENTER);
+                        XWPFRun capRun = capPara.createRun();
+                        capRun.setFontFamily("Times New Roman");
+                        capRun.setFontSize(10);
+                        capRun.setItalic(true);
+                        capRun.setBold(true);
+                        capRun.setText(renderedCaption);
+                    }
+                } catch (Exception ex) {
+                    paragraph(doc, renderedCaption, ParagraphAlignment.CENTER, true, 10);
+                }
+            } else if (e.getEvidenceType() == com.researchassistant.evidence.entity.EvidenceType.TABLE && e.getMetadataJson() != null) {
+                paragraph(doc, renderedCaption, ParagraphAlignment.LEFT, true, 11);
+                renderStructuredDocxTable(doc, e.getMetadataJson());
+            }
+        }
+    }
+
+    private void renderStructuredDocxTable(XWPFDocument doc, String metadataJson) {
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(metadataJson);
+            if (root.has("headers") && root.has("rows")) {
+                var headers = root.get("headers");
+                var rows = root.get("rows");
+                int colCount = headers.size();
+                int rowCount = 1 + rows.size();
+                XWPFTable table = doc.createTable(rowCount, colCount);
+                table.setWidth("100%");
+                for (int c = 0; c < colCount; c++) {
+                    table.getRow(0).getCell(c).setText(headers.get(c).asText());
+                }
+                for (int r = 0; r < rows.size(); r++) {
+                    var rowNode = rows.get(r);
+                    for (int c = 0; c < colCount; c++) {
+                        String cellVal = c < rowNode.size() ? rowNode.get(c).asText() : "";
+                        table.getRow(r + 1).getCell(c).setText(cellVal);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private float writePdfListOfFigures(ResearchReport report, PdfCursor cursor, float y) throws IOException {
+        if (evidenceListService == null) return y;
+        var figures = evidenceListService.generateListOfFigures(report.getId());
+        if (figures.isEmpty()) return y;
+
+        y = ensurePage(cursor, y);
+        y = pdfLine(cursor, 14, 60, y - 10, "List of Figures");
+        for (var fig : figures) {
+            y = ensurePage(cursor, y);
+            String entry = fig.figureNumber() + ": " + fig.caption() + " .................... " + fig.pageNumber();
+            y = pdfLine(cursor, 10, 70, y, entry);
+        }
+        return y;
+    }
+
+    private float writePdfListOfTables(ResearchReport report, PdfCursor cursor, float y) throws IOException {
+        if (evidenceListService == null) return y;
+        var tables = evidenceListService.generateListOfTables(report.getId());
+        if (tables.isEmpty()) return y;
+
+        y = ensurePage(cursor, y);
+        y = pdfLine(cursor, 14, 60, y - 10, "List of Tables");
+        for (var tab : tables) {
+            y = ensurePage(cursor, y);
+            String entry = tab.tableNumber() + ": " + tab.caption() + " .................... " + tab.pageNumber();
+            y = pdfLine(cursor, 10, 70, y, entry);
+        }
+        return y;
+    }
+
+    private float writePdfSectionEvidence(PDDocument doc, PdfCursor cursor, float y, ResearchReportSection section, Map<UUID, String> labels) throws IOException {
+        if (evidenceRepository == null) return y;
+        var evidenceList = evidenceRepository.findAllBySectionIdOrderByDisplayOrderAscCreatedAtAsc(section.getId());
+        for (var e : evidenceList) {
+            String label = labels.getOrDefault(e.getId(), e.getFigureLabel() != null ? e.getFigureLabel() : "Figure");
+            String renderedCaption = (e.getCaption() != null && !e.getCaption().isBlank())
+                    ? label + ": " + e.getCaption()
+                    : label;
+
+            if (e.getStorageKey() != null && objectStorageService != null) {
+                try {
+                    var storageObj = objectStorageService.open(e.getStorageKey());
+                    byte[] imgBytes;
+                    try (var is = storageObj.contentStream()) {
+                        imgBytes = is.readAllBytes();
+                    }
+                    if (imgBytes.length > 0) {
+                        org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject pdImg =
+                                org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject.createFromByteArray(doc, imgBytes, e.getOriginalFilename());
+                        float width = 380;
+                        float height = Math.min(220, ((float) pdImg.getHeight() / pdImg.getWidth()) * width);
+                        if (y - height - 30 < 60) {
+                            cursor.newPage();
+                            y = 790;
+                        }
+                        cursor.contentStream.drawImage(pdImg, (612 - width) / 2, y - height, width, height);
+                        y -= (height + 14);
+                        y = pdfLine(cursor, 10, (612 - width) / 2, y, renderedCaption);
+                        y -= 10;
+                    }
+                } catch (Exception ex) {
+                    y = ensurePage(cursor, y);
+                    y = pdfLine(cursor, 10, 70, y, renderedCaption);
+                }
+            } else {
+                y = ensurePage(cursor, y);
+                y = pdfLine(cursor, 10, 70, y, renderedCaption);
+            }
+        }
+        return y;
     }
 
     private static final class PdfCursor implements Closeable {

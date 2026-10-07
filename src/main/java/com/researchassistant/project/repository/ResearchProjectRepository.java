@@ -79,11 +79,13 @@ public interface ResearchProjectRepository
             from ResearchProject p
             where p.workspace.id = :workspaceId
               and (:status is null or p.status = :status)
-              and (lower(p.title) like :pattern or lower(p.description) like :pattern)
+              and (:workspaceType is null or p.workspaceType = :workspaceType)
+              and (:pattern is null or lower(p.title) like :pattern or lower(coalesce(p.description, '')) like :pattern)
             """)
-    Page<ResearchProject> findAllByWorkspaceIdWithPattern(
+    Page<ResearchProject> findAllByWorkspaceIdFiltered(
             @Param("workspaceId") UUID workspaceId,
             @Param("status") com.researchassistant.project.entity.ResearchProjectStatus status,
+            @Param("workspaceType") com.researchassistant.project.entity.AcademicWorkspaceType workspaceType,
             @Param("pattern") String pattern,
             Pageable pageable
     );
@@ -93,19 +95,21 @@ public interface ResearchProjectRepository
             from ResearchProject p
             where p.workspace.id = :workspaceId
               and (:status is null or p.status = :status)
-              and (lower(p.title) like :pattern or lower(p.description) like :pattern)
+              and (:workspaceType is null or p.workspaceType = :workspaceType)
+              and (:pattern is null or lower(p.title) like :pattern or lower(coalesce(p.description, '')) like :pattern)
               and exists (
                   select m.id
                   from ProjectMembership m
                   where m.project = p
                     and m.user.id = :userId
                     and m.status = com.researchassistant.project.entity.ProjectMembershipStatus.ACTIVE
-              )
+                  )
             """)
-    Page<ResearchProject> findAuthorizedMemberProjectsWithPattern(
+    Page<ResearchProject> findAuthorizedMemberProjectsFiltered(
             @Param("workspaceId") UUID workspaceId,
             @Param("userId") UUID userId,
             @Param("status") com.researchassistant.project.entity.ResearchProjectStatus status,
+            @Param("workspaceType") com.researchassistant.project.entity.AcademicWorkspaceType workspaceType,
             @Param("pattern") String pattern,
             Pageable pageable
     );
@@ -157,12 +161,14 @@ public interface ResearchProjectRepository
                   and m.status = com.researchassistant.project.entity.ProjectMembershipStatus.ACTIVE
             )
             and (:status is null or p.status = :status)
-            and (lower(p.title) like :pattern or lower(p.description) like :pattern)
+            and (:workspaceType is null or p.workspaceType = :workspaceType)
+            and (:pattern is null or lower(p.title) like :pattern or lower(coalesce(p.description, '')) like :pattern)
             order by p.updatedAt desc
             """)
-    Page<ResearchProject> findAllAuthorizedProjectsForUserWithPattern(
+    Page<ResearchProject> findAllAuthorizedProjectsForUserFiltered(
             @Param("userId") UUID userId,
             @Param("status") com.researchassistant.project.entity.ResearchProjectStatus status,
+            @Param("workspaceType") com.researchassistant.project.entity.AcademicWorkspaceType workspaceType,
             @Param("pattern") String pattern,
             Pageable pageable
     );

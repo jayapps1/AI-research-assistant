@@ -253,6 +253,22 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(com.researchassistant.analysis.exception.InsufficientProjectEvidenceException.class)
+    public ResponseEntity<ApiErrorResponse> handleInsufficientProjectEvidence(
+            com.researchassistant.analysis.exception.InsufficientProjectEvidenceException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "INSUFFICIENT_PROJECT_EVIDENCE",
+                exception.getMessage(),
+                request.getRequestURI(),
+                exception.getRequiredEvidence() != null
+                        ? Map.of("requiredEvidence", exception.getRequiredEvidence(), "sectionTitle", String.valueOf(exception.getSectionTitle()))
+                        : Map.of()
+        );
+    }
+
 
     @ExceptionHandler(DocumentStorageException.class)
     public ResponseEntity<ApiErrorResponse> handleDocumentStorage(

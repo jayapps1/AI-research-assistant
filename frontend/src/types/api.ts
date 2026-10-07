@@ -149,11 +149,36 @@ export interface Workspace {
   updatedAt?: string;
 }
 
+export type AcademicWorkspaceType = 'ACADEMIC_RESEARCH' | 'ACADEMIC_PROJECT' | 'COURSEWORK';
+
+export type AcademicProjectType =
+  | 'SOFTWARE_SYSTEM_DEVELOPMENT'
+  | 'ENGINEERING_PROJECT'
+  | 'RESEARCH_BASED_PROJECT'
+  | 'BUSINESS_PROJECT'
+  | 'GENERAL_ACADEMIC_PROJECT'
+  | 'OTHER';
+
 export interface ResearchProject {
   id: UUID;
   workspaceId?: UUID;
   title: string;
   description?: string;
+  workspaceType?: AcademicWorkspaceType;
+  workspaceTypeLabel?: string;
+  projectType?: AcademicProjectType;
+  reportType?: string;
+  finalDocumentLabel?: string;
+  workAreaLabel?: string;
+  institution?: string;
+  department?: string;
+  programme?: string;
+  academicYear?: string;
+  supervisor?: string;
+  courseName?: string;
+  courseCode?: string;
+  lecturer?: string;
+  deadline?: string;
   researchAim?: string;
   studyArea?: string;
   researchType?: string;
@@ -236,6 +261,7 @@ export interface DocumentItem {
   pageCount?: number | null;
   chunkCount?: number | null;
   type?: string;
+  academicRole?: AcademicFileRole;
   createdAt?: string;
   updatedAt?: string;
   archivedAt?: string | null;
@@ -346,6 +372,17 @@ export interface SubmitConversationResponse {
   userMessage: ConversationMessage;
   assistantMessage?: ConversationMessage | null;
   run: ConversationRun;
+}
+
+export interface ConversationAttachment {
+  id: UUID;
+  conversationId: UUID;
+  originalFilename: string;
+  mediaType: string;
+  sizeBytes: number;
+  checksumSha256?: string;
+  status: string;
+  createdAt: string;
 }
 
 export interface RagAnswer {
@@ -812,10 +849,14 @@ export interface AdminGrantAiCreditsRequest {
 export interface ReportTemplateItem {
   id: UUID;
   name: string;
+  type?: string;
+  institution?: string;
   description?: string;
   citationStyle?: string;
+  defaultCitationStyle?: string;
   citationStyleLocked?: boolean;
   department?: string;
+  supportedWorkspaceTypes?: string;
   active?: boolean;
   configurationJson?: string;
 }
@@ -880,12 +921,15 @@ export interface SectionStructureResponse {
   sectionNumber?: string | null;
   title?: string;
   heading?: string;
+  type?: string;
   sectionType: string;
   status: string;
   displayOrder: number;
   required: boolean;
   systemDefined: boolean;
   aiEnabled: boolean;
+  semanticPurpose?: SectionSemanticPurpose;
+  generationPolicy?: SectionGenerationPolicy;
   wordCount: number;
   citationCount: number;
   subsections: SectionStructureResponse[];
@@ -893,6 +937,7 @@ export interface SectionStructureResponse {
 
 export interface ChapterStructureResponse {
   id: UUID;
+  type?: string;
   chapterNumber?: number | null;
   title: string;
   description?: string | null;
@@ -944,3 +989,285 @@ export interface SaveLiteratureMatrixRequest {
   matrixDataJson?: string;
   markdownTable?: string;
 }
+
+export type SectionSemanticPurpose =
+  | 'TITLE_PAGE'
+  | 'TABLE_OF_CONTENTS'
+  | 'LIST_OF_FIGURES'
+  | 'LIST_OF_TABLES'
+  | 'DECLARATION'
+  | 'CERTIFICATION'
+  | 'DEDICATION'
+  | 'ACKNOWLEDGEMENTS'
+  | 'ABSTRACT'
+  | 'BACKGROUND'
+  | 'PROBLEM_STATEMENT'
+  | 'OBJECTIVES'
+  | 'RESEARCH_QUESTIONS'
+  | 'SIGNIFICANCE'
+  | 'SCOPE'
+  | 'LIMITATIONS'
+  | 'LITERATURE_REVIEW'
+  | 'RELATED_SYSTEMS'
+  | 'SYSTEM_REQUIREMENTS'
+  | 'SYSTEM_DESIGN'
+  | 'METHODOLOGY'
+  | 'IMPLEMENTATION'
+  | 'TESTING'
+  | 'FINDINGS'
+  | 'DISCUSSION'
+  | 'CONCLUSIONS'
+  | 'RECOMMENDATIONS'
+  | 'FUTURE_WORK'
+  | 'REFERENCES'
+  | 'APPENDICES'
+  | 'CUSTOM';
+
+export type SectionGenerationPolicy =
+  | 'DETERMINISTIC'
+  | 'USER_AUTHORED_FRONT_MATTER'
+  | 'SOURCE_GROUNDED_AI'
+  | 'PROJECT_DERIVED_AI'
+  | 'PROJECT_EVIDENCE_REQUIRED'
+  | 'CONTEXTUAL_AI';
+
+export interface GenerateSectionRequest {
+  documentIds?: UUID[];
+  generationType?: string;
+  targetNodeId?: UUID;
+  targetNodeTitle?: string;
+  sourceScope?: string;
+  instructions?: string;
+  evidenceLimit?: number;
+  applyMode?: 'PREVIEW' | 'APPEND' | 'REPLACE';
+}
+
+export interface UpdateTitlePageDetailsRequest {
+  title?: string;
+  authorName?: string;
+  studentId?: string;
+  institutionName?: string;
+  departmentName?: string;
+  degreeProgram?: string;
+  supervisorName?: string;
+  academicYear?: string;
+  submissionYear?: number;
+}
+
+export interface DeterministicRepairResponse {
+  repairedSectionsCount: number;
+  repairedSectionTitles: string[];
+  message: string;
+}
+
+export type AcademicFileRole = 'RESEARCH_SOURCE' | 'TEMPLATE_GUIDELINE' | 'EXAMPLE_REPORT';
+
+export type SectionRequirementLevel = 'REQUIRED' | 'RECOMMENDED' | 'OPTIONAL';
+
+export interface TemplateMargins {
+  top: string;
+  bottom: string;
+  left: string;
+  right: string;
+}
+
+export interface TemplateFormattingRules {
+  fontFamily: string;
+  bodyFontSize: string;
+  heading1FontSize: string;
+  heading2FontSize: string;
+  lineSpacing: string;
+  margins: TemplateMargins;
+  numberingStyle: string;
+  pageNumbering: string;
+  chapterBreak: string;
+}
+
+export interface UncertainItem {
+  field: string;
+  reason: string;
+}
+
+export interface TemplateSectionDefinition {
+  sectionNumber?: string | null;
+  heading: string;
+  requirementLevel: SectionRequirementLevel;
+  semanticPurpose?: SectionSemanticPurpose | null;
+  generationPolicy?: SectionGenerationPolicy | null;
+  description?: string | null;
+  subsections: TemplateSectionDefinition[];
+}
+
+export interface TemplateChapterDefinition {
+  chapterNumber?: number | null;
+  title: string;
+  type: string;
+  required: boolean;
+  sections: TemplateSectionDefinition[];
+}
+
+export interface ExtractedAcademicTemplate {
+  institution: string;
+  department: string;
+  programme: string;
+  documentType: string;
+  citationStyle: string;
+  formattingRules: TemplateFormattingRules;
+  frontMatter: TemplateSectionDefinition[];
+  chapters: TemplateChapterDefinition[];
+  appendices: TemplateSectionDefinition[];
+  uncertainItems: UncertainItem[];
+  rawTextPreview?: string | null;
+}
+
+export interface AcademicDocumentGuidelineResponse {
+  id: UUID;
+  workspaceId: UUID;
+  projectId?: UUID | null;
+  documentId?: UUID | null;
+  originalFileName: string;
+  sourceType: string;
+  status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
+  version: number;
+  extractedTemplate: ExtractedAcademicTemplate;
+  uploadedAt: string;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
+}
+
+export interface DynamicTocItem {
+  id: string;
+  chapterNumber?: number | null;
+  sectionNumber?: string | null;
+  title: string;
+  pageNumber: number;
+  level: number;
+  requirementLevel?: SectionRequirementLevel;
+}
+
+export interface DynamicTocResponse {
+  reportId: UUID;
+  reportTitle: string;
+  items: DynamicTocItem[];
+  generatedAt: string;
+}
+
+export interface MissingRequiredSection {
+  chapterTitle: string;
+  heading: string;
+  sectionNumber?: string | null;
+  semanticPurpose?: string | null;
+  description?: string | null;
+}
+
+export interface ReportStructureValidationResponse {
+  valid: boolean;
+  totalRequired: number;
+  totalPresent: number;
+  missingRequiredCount: number;
+  missingRequiredSections: MissingRequiredSection[];
+  warnings: string[];
+}
+
+export interface RecommendedTemplateItem {
+  guidelineId?: UUID | null;
+  templateId?: UUID | null;
+  name: string;
+  institution?: string | null;
+  department?: string | null;
+  programme?: string | null;
+  documentType: string;
+  relevanceScore: number;
+  matchReasons: string[];
+  builtIn: boolean;
+}
+
+export type EvidenceType =
+  | 'SCREENSHOT'
+  | 'FIGURE'
+  | 'DIAGRAM'
+  | 'ARCHITECTURE_DIAGRAM'
+  | 'USE_CASE_DIAGRAM'
+  | 'ER_DIAGRAM'
+  | 'FLOWCHART'
+  | 'TABLE'
+  | 'CHART'
+  | 'TEST_RESULT'
+  | 'SYSTEM_OUTPUT'
+  | 'DATASET_RESULT'
+  | 'PHOTO'
+  | 'USER_NOTE'
+  | 'OTHER';
+
+export type EvidenceAnalysisStatus = 'NOT_ANALYZED' | 'ANALYZING' | 'ANALYZED' | 'UNAVAILABLE' | 'FAILED';
+
+export interface ProjectEvidenceItem {
+  id: UUID;
+  projectId: UUID;
+  workspaceId: UUID;
+  reportId?: UUID | null;
+  sectionId?: UUID | null;
+  sectionNumber?: string | null;
+  sectionHeading?: string | null;
+  chapterTitle?: string | null;
+  chapterNumber?: number | null;
+  storageObjectId?: UUID | null;
+  downloadUrl?: string | null;
+  originalFilename: string;
+  mimeType: string;
+  fileSizeBytes: number;
+  evidenceType: EvidenceType;
+  figureLabel: string;
+  caption?: string | null;
+  renderedCaption: string;
+  description?: string | null;
+  altText?: string | null;
+  displayOrder: number;
+  aiVisualAnalysis?: string | null;
+  aiAnalysisStatus: EvidenceAnalysisStatus;
+  aiAnalysisError?: string | null;
+  metadataJson?: string | null;
+  createdById?: UUID | null;
+  createdByEmail?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectImageAnalysisResult {
+  status: EvidenceAnalysisStatus;
+  visibleSummary?: string | null;
+  observableComponents: string[];
+  observableWorkflow?: string | null;
+  sectionRelevance?: string | null;
+  rawAnalysis?: string | null;
+  errorMessage?: string | null;
+}
+
+export interface ListOfFiguresItem {
+  evidenceId: UUID;
+  figureLabel: string;
+  caption?: string | null;
+  renderedCaption: string;
+  chapterNumber?: number | null;
+  chapterTitle?: string | null;
+  sectionNumber?: string | null;
+  sectionHeading?: string | null;
+  pageNumber: number;
+  evidenceType: EvidenceType;
+  downloadUrl?: string | null;
+}
+
+export interface ListOfTablesItem {
+  evidenceId: UUID;
+  tableLabel: string;
+  caption?: string | null;
+  renderedCaption: string;
+  chapterNumber?: number | null;
+  chapterTitle?: string | null;
+  sectionNumber?: string | null;
+  sectionHeading?: string | null;
+  pageNumber: number;
+  metadataJson?: string | null;
+}
+
+

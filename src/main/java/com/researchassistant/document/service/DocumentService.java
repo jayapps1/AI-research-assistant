@@ -10,6 +10,7 @@ import com.researchassistant.document.dto.DocumentProcessingJobResponse;
 import com.researchassistant.document.dto.DocumentResponse;
 import com.researchassistant.document.dto.DocumentVersionResponse;
 import com.researchassistant.document.dto.UpdateDocumentMetadataRequest;
+import com.researchassistant.document.entity.AcademicFileRole;
 import com.researchassistant.document.entity.Document;
 import com.researchassistant.document.entity.DocumentProcessingJob;
 import com.researchassistant.document.entity.DocumentProcessingJobType;
@@ -38,6 +39,7 @@ import com.researchassistant.document.security.FileSecurityScanner;
 import com.researchassistant.document.storage.DocumentStorageObject;
 import com.researchassistant.document.storage.DocumentStorageService;
 import com.researchassistant.document.storage.StoredDocumentObject;
+import com.researchassistant.document.util.DocumentTitleNormalizer;
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.project.entity.ResearchProject;
 import com.researchassistant.project.repository.ResearchProjectRepository;
@@ -67,7 +69,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.text.Normalizer;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -172,6 +173,16 @@ public class DocumentService {
             MultipartFile file,
             String title
     ) {
+        return uploadDocument(projectId, user, file, title, AcademicFileRole.RESEARCH_SOURCE);
+    }
+
+    public DocumentResponse uploadDocument(
+            UUID projectId,
+            User user,
+            MultipartFile file,
+            String title,
+            AcademicFileRole role
+    ) {
         validateFile(file);
         ProjectAuthorizationContext auth =
                 projectAuthorizationService.requireProjectEditor(
@@ -189,17 +200,19 @@ public class DocumentService {
 
         ResearchProject lockedProject = projectRepository
                 .findByIdForDocumentNumberAllocation(projectId)
-                .orElseThrow(DocumentNotFoundException::new);
+                .orElse(auth.project());
 
         long number = lockedProject.getNextDocumentNumber();
         lockedProject.setNextDocumentNumber(number + 1L);
+        ResearchProject savedProject = projectRepository.saveAndFlush(lockedProject);
 
         Document document = new Document();
-        document.setProject(auth.project());
+        document.setProject(savedProject);
         document.setDocumentNumber(number);
         document.setDocumentCode(toDocumentCode(number));
         document.setTitle(resolveTitle(title, file.getOriginalFilename()));
         document.setType(toDocumentType(file.getContentType()));
+        document.setAcademicRole(role != null ? role : AcademicFileRole.RESEARCH_SOURCE);
         document.setStatus(DocumentStatus.UPLOADING);
         document.setCreatedBy(user);
         document.setNextVersionNumber(2);
@@ -357,7 +370,7 @@ public class DocumentService {
                 documentAuthorizationService.requireDocumentEditor(documentId, user);
         Document document = context.document();
         if (request.title() != null) {
-            String title = normalizeOptional(request.title());
+            String title = DocumentTitleNormalizer.normalizeDisplayTitle(request.title());
             if (title == null) {
                 throw new InvalidDocumentOperationException("Document title is required.");
             }
@@ -886,27 +899,15 @@ public class DocumentService {
     }
 
     private String resolveTitle(String suppliedTitle, String filename) {
-        String normalized = normalizeOptional(suppliedTitle);
+        String normalized = DocumentTitleNormalizer.normalizeDisplayTitle(suppliedTitle);
         if (normalized != null) {
             return normalized;
         }
-
-        String safeName = safeOriginalFilename(filename);
-        int dotIndex = safeName.lastIndexOf('.');
-        String base = dotIndex > 0 ? safeName.substring(0, dotIndex) : safeName;
-        return base.isBlank() ? "Untitled document" : base;
+        return DocumentTitleNormalizer.displayTitleFromFilename(filename);
     }
 
     private String safeOriginalFilename(String originalFilename) {
-        String value = originalFilename == null
-                ? "document"
-                : originalFilename;
-        value = Normalizer.normalize(value, Normalizer.Form.NFKC)
-                .replace('\\', '_')
-                .replace('/', '_')
-                .replaceAll("[\\p{Cntrl}\\r\\n\"]", "_")
-                .trim();
-        return value.isEmpty() ? "document" : value;
+        return DocumentTitleNormalizer.safeOriginalFilename(originalFilename);
     }
 
     private String sanitizeHeaderFilename(String filename) {
@@ -971,6 +972,7 @@ public class DocumentService {
                 document.getBibliographicMetadataConfidence(),
                 document.getBibliographicMetadataExtractedAt(),
                 document.getType(),
+                document.getAcademicRole() != null ? document.getAcademicRole() : AcademicFileRole.RESEARCH_SOURCE,
                 document.getStatus(),
                 currentVersion == null
                         ? null

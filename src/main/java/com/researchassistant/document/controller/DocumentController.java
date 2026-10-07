@@ -62,10 +62,11 @@ public class DocumentController {
             Authentication authentication,
             @PathVariable UUID projectId,
             @RequestPart("file") MultipartFile file,
-            @RequestParam(required = false) String title
+            @RequestParam(required = false) String title,
+            @RequestParam(required = false) com.researchassistant.document.entity.AcademicFileRole role
     ) {
         User user = authenticatedUserResolver.requireActiveUser(authentication);
-        return documentService.uploadDocument(projectId, user, file, title);
+        return documentService.uploadDocument(projectId, user, file, title, role);
     }
 
     @GetMapping("/projects/{projectId}/documents")

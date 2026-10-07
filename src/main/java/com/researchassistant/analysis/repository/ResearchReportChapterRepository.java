@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface ResearchReportChapterRepository extends JpaRepository<ResearchReportChapter, UUID> {
     List<ResearchReportChapter> findAllByReportIdOrderByDisplayOrderAsc(UUID reportId);
+    void deleteAllByReportId(UUID reportId);
 }

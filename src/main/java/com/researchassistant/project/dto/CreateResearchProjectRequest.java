@@ -3,6 +3,7 @@ package com.researchassistant.project.dto;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 public record CreateResearchProjectRequest(
@@ -14,6 +15,36 @@ public record CreateResearchProjectRequest(
 
         @Size(max = 5000, message = "Project description must not exceed 5000 characters")
         String description,
+
+        com.researchassistant.project.entity.AcademicWorkspaceType workspaceType,
+
+        com.researchassistant.project.entity.AcademicProjectType projectType,
+
+        @Size(max = 255, message = "Institution must not exceed 255 characters")
+        String institution,
+
+        @Size(max = 255, message = "Department must not exceed 255 characters")
+        String department,
+
+        @Size(max = 255, message = "Programme must not exceed 255 characters")
+        String programme,
+
+        @Size(max = 40, message = "Academic year must not exceed 40 characters")
+        String academicYear,
+
+        @Size(max = 255, message = "Supervisor must not exceed 255 characters")
+        String supervisor,
+
+        @Size(max = 255, message = "Course name must not exceed 255 characters")
+        String courseName,
+
+        @Size(max = 80, message = "Course code must not exceed 80 characters")
+        String courseCode,
+
+        @Size(max = 255, message = "Lecturer must not exceed 255 characters")
+        String lecturer,
+
+        LocalDate deadline,
 
         @Size(max = 5000, message = "Research aim must not exceed 5000 characters")
         String researchAim,
@@ -42,11 +73,63 @@ public record CreateResearchProjectRequest(
         Boolean includeUrl
 ) {
     public CreateResearchProjectRequest(String title, String description) {
-        this(null, title, description, null, null, null, null, null, null, null, null, null, null, null);
+        this(
+                null,
+                title,
+                description,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        );
     }
 
     public CreateResearchProjectRequest(UUID workspaceId, String title, String description) {
-        this(workspaceId, title, description, null, null, null, null, null, null, null, null, null, null, null);
+        this(
+                workspaceId,
+                title,
+                description,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        );
     }
 
     public CreateResearchProjectRequest(
@@ -58,6 +141,32 @@ public record CreateResearchProjectRequest(
             String researchType,
             String keywords
     ) {
-        this(workspaceId, title, description, researchAim, studyArea, researchType, keywords, null, null, null, null, null, null, null);
+        this(
+                workspaceId,
+                title,
+                description,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                researchAim,
+                studyArea,
+                researchType,
+                keywords,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        );
     }
 }

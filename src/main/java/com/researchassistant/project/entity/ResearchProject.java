@@ -21,6 +21,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -65,6 +66,41 @@ public class ResearchProject {
 
     @Column(name = "description")
     private String description;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "workspace_type", nullable = false, length = 40)
+    private AcademicWorkspaceType workspaceType = AcademicWorkspaceType.ACADEMIC_RESEARCH;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "academic_project_type", length = 80)
+    private AcademicProjectType academicProjectType;
+
+    @Column(name = "institution", length = 255)
+    private String institution;
+
+    @Column(name = "department", length = 255)
+    private String department;
+
+    @Column(name = "programme", length = 255)
+    private String programme;
+
+    @Column(name = "academic_year", length = 40)
+    private String academicYear;
+
+    @Column(name = "supervisor", length = 255)
+    private String supervisor;
+
+    @Column(name = "course_name", length = 255)
+    private String courseName;
+
+    @Column(name = "course_code", length = 80)
+    private String courseCode;
+
+    @Column(name = "lecturer", length = 255)
+    private String lecturer;
+
+    @Column(name = "deadline")
+    private LocalDate deadline;
 
     @Column(name = "research_aim", columnDefinition = "TEXT")
     private String researchAim;
@@ -141,6 +177,9 @@ public class ResearchProject {
         updatedAt = now;
         if (status == null) {
             status = ResearchProjectStatus.DRAFT;
+        }
+        if (workspaceType == null) {
+            workspaceType = AcademicWorkspaceType.ACADEMIC_RESEARCH;
         }
         if (citationPresentation == null) {
             citationPresentation = com.researchassistant.analysis.entity.CitationPresentation.PARENTHETICAL;

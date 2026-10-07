@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { HomeDashboard, ProjectsPage, ProjectDashboard } from './DashboardPages';
 import { ResearchWorkflowPage } from './ResearchPages';
-import { dashboardApi, projectApi, researchApi, workspaceApi } from '../api/endpoints';
+import { dashboardApi, projectApi, reportApi, researchApi, workspaceApi } from '../api/endpoints';
 import { WorkspaceProvider } from '../features/workspaces/WorkspaceProvider';
 
 vi.mock('../api/endpoints', () => ({
@@ -23,6 +23,9 @@ vi.mock('../api/endpoints', () => ({
     members: vi.fn(),
     tasks: vi.fn(),
     allMyTasks: vi.fn(),
+  },
+  reportApi: {
+    templates: vi.fn(),
   },
   workspaceApi: {
     list: vi.fn(),
@@ -74,6 +77,7 @@ describe('DashboardPages Suite', () => {
     vi.mocked(workspaceApi.list).mockResolvedValue([
       { id: 'ws-123', name: 'Personal Workspace', type: 'PERSONAL' },
     ]);
+    vi.mocked(reportApi.templates).mockResolvedValue([]);
   });
 
   describe('HomeDashboard', () => {
@@ -138,7 +142,7 @@ describe('DashboardPages Suite', () => {
       expect(screen.getByText('Audit literature matrix')).toBeInTheDocument();
     });
 
-    it('opens CreateProjectModal when New Research Project button is clicked', async () => {
+    it('opens CreateProjectModal when Create Workspace button is clicked', async () => {
       const user = userEvent.setup();
       vi.mocked(dashboardApi.userDashboard).mockResolvedValue({
         greeting: 'Welcome back',
@@ -166,11 +170,12 @@ describe('DashboardPages Suite', () => {
         expect(screen.getByText('Welcome back')).toBeInTheDocument();
       });
 
-      const newProjectBtn = screen.getAllByRole('button', { name: /New Research Project/i })[0];
+      const newProjectBtn = screen.getAllByRole('button', { name: /Create Workspace/i })[0];
       await user.click(newProjectBtn);
 
-      expect(await screen.findByRole('dialog', { name: /Create Research Project/i })).toBeInTheDocument();
-      expect(screen.getByLabelText(/Research Project Title/i)).toBeInTheDocument();
+      expect(await screen.findByRole('dialog', { name: /Create Workspace/i })).toBeInTheDocument();
+      expect(screen.getByText(/What are you working on/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Academic Research/i })).toBeInTheDocument();
     });
   });
 
@@ -213,18 +218,20 @@ describe('DashboardPages Suite', () => {
 
       expect(await screen.findByText('Empirical Study on Climate Adaptation')).toBeInTheDocument();
 
-      const newProjectBtn = screen.getByRole('button', { name: /New Research Project/i });
+      const newProjectBtn = screen.getByRole('button', { name: /Create Workspace/i });
       await user.click(newProjectBtn);
 
-      expect(await screen.findByRole('dialog', { name: /Create Research Project/i })).toBeInTheDocument();
+      expect(await screen.findByRole('dialog', { name: /Create Workspace/i })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /Continue/i }));
 
-      const titleInput = screen.getByLabelText(/Research Project Title/i);
+      const titleInput = screen.getByLabelText(/Title \/ Research Topic/i);
       await user.type(titleInput, 'Cognitive Biases in Peer Review');
 
       const descInput = screen.getByLabelText(/Description/i);
       await user.type(descInput, 'Double-blind experimental setup');
 
-      const submitBtn = screen.getByRole('button', { name: /Create Project & Launch/i });
+      await user.click(screen.getByRole('button', { name: /Continue/i }));
+      const submitBtn = screen.getByRole('button', { name: /Create Workspace & Launch/i });
       await user.click(submitBtn);
 
       await waitFor(() => {
@@ -233,6 +240,7 @@ describe('DashboardPages Suite', () => {
           expect.objectContaining({
             title: 'Cognitive Biases in Peer Review',
             description: 'Double-blind experimental setup',
+            workspaceType: 'ACADEMIC_RESEARCH',
           })
         );
       });

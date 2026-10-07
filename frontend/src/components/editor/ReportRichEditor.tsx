@@ -35,12 +35,16 @@ import {
   Undo,
   Redo,
   Bookmark,
+  AlertCircle,
   CheckCircle2,
   Clock,
   Wand2,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { Button } from '../ui';
 import { InsertCitationModal } from './InsertCitationModal';
+import { InsertFigureModal } from '../../features/evidence/InsertFigureModal';
+import type { ProjectEvidenceItem } from '../../types/api';
 
 export const CitationNode = Node.create({
   name: 'citation',
@@ -89,6 +93,82 @@ export const CitationNode = Node.create({
   },
 });
 
+export const FigureNode = Node.create({
+  name: 'figure',
+  group: 'block',
+  selectable: true,
+  draggable: true,
+  atom: true,
+
+  addAttributes() {
+    return {
+      evidenceId: { default: null },
+      src: { default: '' },
+      alt: { default: '' },
+      figureLabel: { default: 'Figure' },
+      caption: { default: '' },
+      alignment: { default: 'center' },
+    };
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'figure[data-type="project-figure"]',
+        getAttrs: (element: HTMLElement | string) => {
+          if (typeof element === 'string') return {};
+          const img = element.querySelector('img');
+          const figcaption = element.querySelector('figcaption');
+          return {
+            evidenceId: element.getAttribute('data-evidence-id'),
+            src: img?.getAttribute('src') || element.getAttribute('data-src') || '',
+            alt: img?.getAttribute('alt') || element.getAttribute('data-alt') || '',
+            figureLabel: element.getAttribute('data-figure-label') || 'Figure',
+            caption: figcaption?.textContent?.replace(/^Figure\s+[\d.]*:\s*/i, '') || element.getAttribute('data-caption') || '',
+            alignment: element.getAttribute('data-alignment') || 'center',
+          };
+        },
+      },
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    const label = HTMLAttributes.figureLabel || 'Figure';
+    const cap = HTMLAttributes.caption || '';
+    const renderedCaption = cap ? `${label}: ${cap}` : label;
+
+    return [
+      'figure',
+      mergeAttributes(HTMLAttributes, {
+        'data-type': 'project-figure',
+        'data-evidence-id': HTMLAttributes.evidenceId,
+        'data-src': HTMLAttributes.src,
+        'data-alt': HTMLAttributes.alt,
+        'data-figure-label': HTMLAttributes.figureLabel,
+        'data-caption': HTMLAttributes.caption,
+        'data-alignment': HTMLAttributes.alignment || 'center',
+        class: 'report-figure-block',
+        style: `display: flex; flex-direction: column; align-items: ${HTMLAttributes.alignment === 'left' ? 'flex-start' : HTMLAttributes.alignment === 'right' ? 'flex-end' : 'center'}; margin: 18px 0; text-align: center;`,
+      }),
+      [
+        'img',
+        {
+          src: HTMLAttributes.src,
+          alt: HTMLAttributes.alt || cap || 'Figure',
+          style: 'max-width: 100%; max-height: 480px; object-fit: contain; border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); border: 1px solid #cbd5e1;',
+        },
+      ],
+      [
+        'figcaption',
+        {
+          style: 'margin-top: 8px; font-size: 0.88rem; font-weight: 600; color: #475569; font-style: italic;',
+        },
+        renderedCaption,
+      ],
+    ];
+  },
+});
+
 function markdownToHtml(md: string): string {
   if (!md) return '<p></p>';
 
@@ -108,6 +188,18 @@ function markdownToHtml(md: string): string {
         inList = false;
         listType = null;
       }
+      continue;
+    }
+
+    // Markdown Figure / Image: ![caption](url)
+    const imgMatch = line.match(/^!\[(.*?)\]\((.*?)\)$/);
+    if (imgMatch) {
+      if (inList) { out.push(listType === 'ul' ? '</ul>' : '</ol>'); inList = false; listType = null; }
+      const captionText = imgMatch[1];
+      const srcUrl = imgMatch[2];
+      out.push(
+        `<figure data-type="project-figure" data-src="${srcUrl}" data-caption="${captionText}" class="report-figure-block" style="display: flex; flex-direction: column; align-items: center; margin: 18px 0; text-align: center;"><img src="${srcUrl}" alt="${captionText}" style="max-width: 100%; max-height: 480px; object-fit: contain; border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); border: 1px solid #cbd5e1;" /><figcaption style="margin-top: 8px; font-size: 0.88rem; font-weight: 600; color: #475569; font-style: italic;">${captionText}</figcaption></figure>`
+      );
       continue;
     }
 
@@ -197,25 +289,29 @@ export interface ReportRichEditorProps {
   content?: string;
   contentJson?: string;
   projectId?: string;
+  sectionId?: string;
   citationStyle?: string;
   readOnly?: boolean;
   minHeight?: string | number;
-  onSave?: (data: { contentJson: string; plainText: string; markdown: string }) => void;
+  onSave?: (data: { contentJson: string; plainText: string; markdown: string }) => void | Promise<void>;
 }
 
 export function ReportRichEditor({
   content = '',
   contentJson = '',
   projectId = '',
+  sectionId = '',
   citationStyle = 'APA_7',
   readOnly = false,
   minHeight = '420px',
   onSave,
 }: ReportRichEditorProps) {
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
   const [citationModalOpen, setCitationModalOpen] = useState(false);
+  const [figureModalOpen, setFigureModalOpen] = useState(false);
   const saveTimeoutRef = useRef<any>(null);
   const lastSavedJsonRef = useRef<string>('');
+  const hydratingRef = useRef(true);
 
   const initialParsedContent = useCallback(() => {
     if (contentJson && contentJson.trim()) {
@@ -255,11 +351,17 @@ export function ReportRichEditor({
         openOnClick: false,
       }),
       CitationNode,
+      FigureNode,
     ],
     content: initialParsedContent(),
     editable: !readOnly,
+    onCreate: ({ editor }) => {
+      lastSavedJsonRef.current = JSON.stringify(editor.getJSON());
+      hydratingRef.current = false;
+    },
     onUpdate: ({ editor }) => {
       if (readOnly || !onSave) return;
+      if (hydratingRef.current) return;
       setSaveState('saving');
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
 
@@ -269,16 +371,21 @@ export function ReportRichEditor({
           setSaveState('saved');
           return;
         }
-        lastSavedJsonRef.current = json;
         const text = editor.getText();
         const html = editor.getHTML();
-        onSave({
+        Promise.resolve(onSave({
           contentJson: json,
           plainText: text,
           markdown: html,
-        });
-        setSaveState('saved');
-        setTimeout(() => setSaveState('idle'), 2500);
+        }))
+          .then(() => {
+            lastSavedJsonRef.current = json;
+            setSaveState('saved');
+            setTimeout(() => setSaveState('idle'), 2500);
+          })
+          .catch(() => {
+            setSaveState('failed');
+          });
       }, 1400);
     },
   });
@@ -286,22 +393,26 @@ export function ReportRichEditor({
   // Re-sync editor content if incoming props change externally
   useEffect(() => {
     if (!editor) return;
+    hydratingRef.current = true;
     const currentJson = JSON.stringify(editor.getJSON());
     if (contentJson && contentJson.trim()) {
       try {
         const parsed = JSON.parse(contentJson);
         if (JSON.stringify(parsed) !== currentJson) {
-          editor.commands.setContent(parsed);
+          editor.commands.setContent(parsed, { emitUpdate: false });
           lastSavedJsonRef.current = contentJson;
         }
+        hydratingRef.current = false;
         return;
       } catch {
         // fallback
       }
     }
     if (content && content !== editor.getText() && !editor.isFocused) {
-      editor.commands.setContent(markdownToHtml(content));
+      editor.commands.setContent(markdownToHtml(content), { emitUpdate: false });
+      lastSavedJsonRef.current = JSON.stringify(editor.getJSON());
     }
+    hydratingRef.current = false;
   }, [content, contentJson, editor]);
 
   if (!editor) {
@@ -325,6 +436,30 @@ export function ReportRichEditor({
         },
       })
       .insertContent(' ')
+      .run();
+  };
+
+  const insertFigure = (evidence: ProjectEvidenceItem) => {
+    const src =
+      evidence.downloadUrl ||
+      (evidence.storageObjectId ? `/api/v1/storage-objects/${evidence.storageObjectId}/download` : '');
+    const label = evidence.figureLabel || 'Figure';
+    const cap = evidence.caption || '';
+    editor
+      .chain()
+      .focus()
+      .insertContent({
+        type: 'figure',
+        attrs: {
+          evidenceId: evidence.id,
+          src,
+          alt: evidence.altText || cap || label,
+          figureLabel: label,
+          caption: cap,
+          alignment: 'center',
+        },
+      })
+      .insertContent('<p></p>')
       .run();
   };
 
@@ -575,20 +710,36 @@ export function ReportRichEditor({
           {/* Actions: Insert Citation & Academic Template */}
           <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto', alignItems: 'center' }}>
             {projectId && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setCitationModalOpen(true)}
-                style={{
-                  fontSize: '0.82rem',
-                  padding: '3px 8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}
-              >
-                <Bookmark size={13} /> Insert Citation
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setFigureModalOpen(true)}
+                  style={{
+                    fontSize: '0.82rem',
+                    padding: '3px 8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <ImageIcon size={13} /> Insert Figure
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setCitationModalOpen(true)}
+                  style={{
+                    fontSize: '0.82rem',
+                    padding: '3px 8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <Bookmark size={13} /> Insert Citation
+                </Button>
+              </>
             )}
             <Button
               type="button"
@@ -672,6 +823,11 @@ export function ReportRichEditor({
               <CheckCircle2 size={13} /> All changes saved
             </span>
           )}
+          {saveState === 'failed' && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#ef4444' }}>
+              <AlertCircle size={13} /> Save failed
+            </span>
+          )}
         </div>
       </div>
 
@@ -683,6 +839,17 @@ export function ReportRichEditor({
           projectId={projectId}
           citationStyle={citationStyle}
           onSelectReference={insertCitation}
+        />
+      )}
+
+      {/* Figure Insertion Modal */}
+      {projectId && (
+        <InsertFigureModal
+          isOpen={figureModalOpen}
+          onClose={() => setFigureModalOpen(false)}
+          projectId={projectId}
+          sectionId={sectionId}
+          onInsert={insertFigure}
         />
       )}
     </div>

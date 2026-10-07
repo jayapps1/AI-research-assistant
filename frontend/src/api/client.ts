@@ -60,7 +60,9 @@ async function refreshAccessToken() {
 export function mapApiError(error: AxiosError<ApiErrorResponse>): ApiClientError {
   const payload = error.response?.data;
   const status = error.response?.status;
-  const message = friendlyMessage(status, payload);
+  const message = error.response
+    ? friendlyMessage(status, payload)
+    : 'Cannot reach the API service. Make sure the backend is running and try again.';
   const mapped = new Error(message) as ApiClientError;
   mapped.status = status;
   mapped.code = payload?.errorCode;

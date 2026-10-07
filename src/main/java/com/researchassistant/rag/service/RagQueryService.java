@@ -20,6 +20,7 @@ import com.researchassistant.rag.entity.RagQueryEvidence;
 import com.researchassistant.rag.entity.RagQueryStatus;
 import com.researchassistant.rag.evidence.EvidenceBundle;
 import com.researchassistant.rag.evidence.EvidenceBundleService;
+import com.researchassistant.rag.evidence.EvidenceDisplayTitleResolver;
 import com.researchassistant.rag.evidence.EvidenceItem;
 import com.researchassistant.rag.exception.RagCapabilityUnavailableException;
 import com.researchassistant.rag.exception.RagVerificationException;
@@ -318,7 +319,7 @@ public class RagQueryService {
         String generationStrategy = forcedStrategy == null ? resolveGenerationStrategy(stage.bundle()) : forcedStrategy;
         persistGenerationPreflight(stage.query(), stage.bundle(), estimatedInputTokens, budget, generationStrategy);
         log.info(
-                "RAG generation preflight: correlationId={} taskType={} projectId={} selectedDocumentCount={} candidateChunkCount={} selectedEvidenceCount={} estimatedInputTokens={} configuredModel={} contextWindow={} evidenceTokenLimit={} contextBudget={} truncatedEvidenceCount={} generationStrategy={}",
+                "RAG generation preflight: correlationId={} taskType={} projectId={} selectedDocumentCount={} candidateChunkCount={} selectedEvidenceCount={} estimatedInputTokens={} provider={} configuredModel={} contextWindow={} evidenceTokenLimit={} contextBudget={} truncatedEvidenceCount={} generationStrategy={}",
                 MDC.get("requestId"),
                 com.researchassistant.ai.orchestration.AiTaskType.GROUNDED_QA,
                 stage.bundle().scope() != null ? stage.bundle().scope().projectId() : null,
@@ -326,6 +327,7 @@ public class RagQueryService {
                 stage.bundle().rerankedCandidatesCount(),
                 stage.bundle().items().size(),
                 estimatedInputTokens,
+                answerGenerator.providerName(),
                 answerGenerator.modelName(),
                 budget.modelContextWindow(),
                 budget.maxEvidenceTokens(),
@@ -905,7 +907,7 @@ public class RagQueryService {
             snapshot.setChunk(chunk);
             snapshot.setDocumentId(item.documentId());
             snapshot.setDocumentCode(item.documentCode());
-            snapshot.setDocumentTitle(item.documentTitle());
+            snapshot.setDocumentTitle(EvidenceDisplayTitleResolver.resolve(item, document));
             snapshot.setDocumentVersionId(item.documentVersionId());
             snapshot.setVersionNumber(item.versionNumber());
             snapshot.setPageNumber(item.pageNumber());

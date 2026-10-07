@@ -205,6 +205,16 @@ public class User {
 
 
     /**
+     * Helper to return the user's full name.
+     */
+    public String getFullName() {
+        String first = firstName != null ? firstName.trim() : "";
+        String last = lastName != null ? lastName.trim() : "";
+        String full = (first + " " + last).trim();
+        return full.isEmpty() ? (email != null ? email : "User") : full;
+    }
+
+    /**
      * Refreshes the modification timestamp before Hibernate
      * performs an UPDATE operation.
      */

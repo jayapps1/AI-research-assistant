@@ -4,5 +4,7 @@ public enum ContentOrigin {
     USER,
     AI_ASSISTED,
     AI_GENERATED,
-    IMPORTED
+    IMPORTED,
+    DETERMINISTIC_SYSTEM,
+    TEMPLATE
 }

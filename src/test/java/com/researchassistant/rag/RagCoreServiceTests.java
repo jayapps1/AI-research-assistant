@@ -16,6 +16,7 @@ import com.researchassistant.rag.evidence.EvidenceItem;
 import com.researchassistant.rag.generation.GeneratedAnswerDraft;
 import com.researchassistant.rag.generation.GeneratedCitation;
 import com.researchassistant.rag.generation.GroundingPromptBuilder;
+import com.researchassistant.rag.generation.SourceGroundedFallbackSynthesizer;
 import com.researchassistant.rag.entity.RagConversation;
 import com.researchassistant.rag.entity.RagQuery;
 import com.researchassistant.rag.exception.RagAccessDeniedException;
@@ -173,6 +174,32 @@ class RagCoreServiceTests {
     }
 
     @Test
+    void evidenceBundlePreservesFilenameLikeDisplayTitles() {
+        EvidenceBundle bundle = evidenceBundleService().build(
+                "question",
+                scope(),
+                new RetrievalSearchResponse(true, false, List.of(
+                        candidate(
+                                UUID.randomUUID(),
+                                UUID.randomUUID(),
+                                "DOC-001",
+                                "evidence about digital agriculture",
+                                1.0,
+                                1,
+                                "Exploring_the_impact_of_agricultural_digitalizatio"
+                        )
+                )),
+                1,
+                null,
+                "NoOpEvidenceReranker"
+        );
+
+        assertThat(bundle.items()).singleElement()
+                .extracting(EvidenceItem::documentTitle)
+                .isEqualTo("Exploring_the_impact_of_agricultural_digitalizatio");
+    }
+
+    @Test
     void evidenceBundleKeepsReasonableSourceDiversityWhenCandidatesAreRelevant() {
         EvidenceBundleService service = evidenceBundleService();
         UUID firstDocument = UUID.randomUUID();
@@ -256,6 +283,48 @@ class RagCoreServiceTests {
         assertThat(new CitationVerificationService()
                 .verify(draft, List.of(evidence))
                 .verified()).isTrue();
+    }
+
+    @Test
+    void sourceGroundedFallbackSynthesizerProducesVerifiedDraft() {
+        EvidenceItem item1 = new EvidenceItem(
+                java.util.UUID.randomUUID(), 1, java.util.UUID.randomUUID(),
+                java.util.UUID.randomUUID(), java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
+                "DOC-001", "Transformer Networks for NLP", java.util.UUID.randomUUID(), 1, 1, 1,
+                "Self-attention mechanisms allow modeling dependencies regardless of distance in sequence.",
+                0.9, 0.8, 0.85, 0.9, 1
+        );
+        EvidenceItem item2 = new EvidenceItem(
+                java.util.UUID.randomUUID(), 2, java.util.UUID.randomUUID(),
+                java.util.UUID.randomUUID(), java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
+                "DOC-002", "Empirical Evaluation of LLMs", java.util.UUID.randomUUID(), 1, 2, 1,
+                "Extensive experimentation proves significant accuracy improvements across benchmarks.",
+                0.8, 0.85, 0.82, 0.85, 2
+        );
+
+        EvidenceBundle bundle = new EvidenceBundle(
+                "Generate a structured, evidence-grounded academic draft for the section: 'Background and Context'.",
+                null, List.of(item1, item2), 2, 2, 2, 2, 4000, 200, 0,
+                "HYBRID", "test-model", "test-reranker", java.time.OffsetDateTime.now()
+        );
+
+        SourceGroundedFallbackSynthesizer synthesizer = new SourceGroundedFallbackSynthesizer();
+        GeneratedAnswerDraft draft = synthesizer.synthesize(bundle);
+
+        assertThat(draft.answerText()).isNotBlank();
+        assertThat(draft.citations()).isNotEmpty();
+        assertThat(draft.citations()).allMatch(c -> c.evidenceOrdinal() > 0);
+
+        RagQueryEvidence ev1 = new RagQueryEvidence();
+        ev1.setEvidenceOrdinal(1);
+        ev1.setDocumentCode("DOC-001");
+        RagQueryEvidence ev2 = new RagQueryEvidence();
+        ev2.setEvidenceOrdinal(2);
+        ev2.setDocumentCode("DOC-002");
+
+        var verificationResult = new CitationVerificationService().verify(draft, List.of(ev1, ev2));
+        assertThat(verificationResult.verified()).isTrue();
+        assertThat(verificationResult.errors()).isEmpty();
     }
 
     @Test
@@ -424,7 +493,8 @@ class RagCoreServiceTests {
         return new EvidenceBundleService(
                 ragProperties(),
                 aiProperties,
-                new RagContextBudgetService(aiProperties, new TokenEstimator())
+                new RagContextBudgetService(aiProperties, new TokenEstimator()),
+                new com.researchassistant.document.chunk.ChunkHygieneService()
         );
     }
 
@@ -451,6 +521,10 @@ class RagCoreServiceTests {
     }
 
     private EvidenceCandidate candidate(UUID chunkId, UUID documentId, String documentCode, String text, Double fusedScore, int pageNumber) {
+        return candidate(chunkId, documentId, documentCode, text, fusedScore, pageNumber, "Document");
+    }
+
+    private EvidenceCandidate candidate(UUID chunkId, UUID documentId, String documentCode, String text, Double fusedScore, int pageNumber, String documentTitle) {
         return new EvidenceCandidate(
                 chunkId,
                 UUID.randomUUID(),
@@ -465,7 +539,7 @@ class RagCoreServiceTests {
                 1.0,
                 null,
                 fusedScore,
-                "Document"
+                documentTitle
         );
     }
 

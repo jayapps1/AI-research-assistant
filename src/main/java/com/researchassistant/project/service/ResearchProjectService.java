@@ -1,5 +1,7 @@
 package com.researchassistant.project.service;
 
+import com.researchassistant.analysis.entity.ResearchReportTemplate;
+import com.researchassistant.analysis.entity.ResearchReportType;
 import com.researchassistant.cache.CacheInvalidationService;
 import com.researchassistant.common.exception.DuplicateResourceException;
 import com.researchassistant.common.exception.ResourceNotFoundException;
@@ -14,6 +16,8 @@ import com.researchassistant.project.dto.UpdateResearchProjectRequest;
 import com.researchassistant.project.entity.ProjectMembership;
 import com.researchassistant.project.entity.ProjectMembershipStatus;
 import com.researchassistant.project.entity.ProjectRole;
+import com.researchassistant.project.entity.AcademicProjectType;
+import com.researchassistant.project.entity.AcademicWorkspaceType;
 import com.researchassistant.project.entity.ResearchProject;
 import com.researchassistant.project.entity.ResearchProjectStatus;
 import com.researchassistant.project.exception.InvalidProjectOperationException;
@@ -32,6 +36,7 @@ import com.researchassistant.workspace.repository.WorkspaceMembershipRepository;
 import com.researchassistant.workspace.service.WorkspaceAuthorizationService;
 
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -60,11 +65,6 @@ public class ResearchProjectService {
     private final QuotaService quotaService;
     private final com.researchassistant.analysis.repository.ResearchReportTemplateRepository templateRepository;
     private final EntityManager entityManager;
-    private static final UUID TTU_COMPUTER_SCIENCE_TEMPLATE_ID = UUID.fromString("00000000-0000-0000-0000-000000000517");
-    private static final UUID GENERAL_FIVE_CHAPTER_TEMPLATE_ID = UUID.fromString("00000000-0000-0000-0000-000000000518");
-    private static final UUID QUANTITATIVE_SURVEY_TEMPLATE_ID = UUID.fromString("00000000-0000-0000-0000-000000000519");
-    private static final UUID QUALITATIVE_TEMPLATE_ID = UUID.fromString("00000000-0000-0000-0000-000000000520");
-    private static final UUID MIXED_METHODS_TEMPLATE_ID = UUID.fromString("00000000-0000-0000-0000-000000000521");
 
     public ResearchProjectService(
             ResearchProjectRepository projectRepository,
@@ -113,16 +113,34 @@ public class ResearchProjectService {
         quotaService.requireWithinQuota(workspaceId, PlanFeature.PROJECT_CREATION, UsageMetricType.PROJECT_COUNT, 1L);
 
         ResearchProject project = new ResearchProject();
+        AcademicWorkspaceType workspaceType = request.workspaceType() == null
+                ? AcademicWorkspaceType.ACADEMIC_RESEARCH
+                : request.workspaceType();
+        validateWorkspaceMetadata(workspaceType, request.projectType());
         project.setWorkspace(workspace);
         project.setTitle(normalizeRequiredTitle(request.title()));
         project.setDescription(normalizeOptionalText(request.description()));
+        project.setWorkspaceType(workspaceType);
+        project.setAcademicProjectType(workspaceType == AcademicWorkspaceType.ACADEMIC_PROJECT
+                ? request.projectType()
+                : null);
+        project.setInstitution(normalizeOptionalText(request.institution()));
+        project.setDepartment(normalizeOptionalText(request.department()));
+        project.setProgramme(normalizeOptionalText(request.programme()));
+        project.setAcademicYear(normalizeOptionalText(request.academicYear()));
+        project.setSupervisor(normalizeOptionalText(request.supervisor()));
+        project.setCourseName(normalizeOptionalText(request.courseName()));
+        project.setCourseCode(normalizeOptionalText(request.courseCode()));
+        project.setLecturer(normalizeOptionalText(request.lecturer()));
+        project.setDeadline(request.deadline());
         project.setResearchAim(normalizeOptionalText(request.researchAim()));
         project.setStudyArea(normalizeOptionalText(request.studyArea()));
         project.setResearchType(normalizeOptionalText(request.researchType()));
         project.setKeywords(normalizeOptionalText(request.keywords()));
-        com.researchassistant.analysis.entity.ResearchReportTemplate template = resolveTemplate(
+        ResearchReportTemplate template = resolveTemplate(
                 request.reportTemplateId(),
-                request.researchType()
+                workspaceType,
+                defaultReportType(workspaceType)
         );
         project.setReportTemplate(template);
         if (request.citationStyle() != null) {
@@ -166,6 +184,14 @@ public class ResearchProjectService {
                 currentUser.getId(),
                 SecurityAuditEventType.RESEARCH_PROJECT_CREATED
         );
+        auditService.record(
+                currentUser.getId(),
+                SecurityAuditEventType.ACADEMIC_WORKSPACE_CREATED
+        );
+        auditService.record(
+                currentUser.getId(),
+                SecurityAuditEventType.ACADEMIC_WORKSPACE_TYPE_SELECTED
+        );
         cacheInvalidationService.evictProjectMetadata(savedProject.getId());
 
         return toProjectResponse(savedProject, membership);
@@ -177,6 +203,7 @@ public class ResearchProjectService {
             User currentUser,
             String query,
             ResearchProjectStatus status,
+            AcademicWorkspaceType workspaceType,
             Pageable pageable
     ) {
         WorkspaceMembership workspaceMembership =
@@ -186,23 +213,11 @@ public class ResearchProjectService {
                 );
 
         String trimmedQuery = (query != null && !query.isBlank()) ? query.trim() : null;
+        String pattern = trimmedQuery == null ? null : "%" + trimmedQuery.toLowerCase() + "%";
         boolean isAdmin = authorizationService.isWorkspaceAdmin(workspaceMembership);
-        Page<ResearchProject> projects;
-
-        if (trimmedQuery != null) {
-            String pattern = "%" + trimmedQuery.toLowerCase() + "%";
-            projects = isAdmin
-                    ? projectRepository.findAllByWorkspaceIdWithPattern(workspaceId, status, pattern, pageable)
-                    : projectRepository.findAuthorizedMemberProjectsWithPattern(workspaceId, currentUser.getId(), status, pattern, pageable);
-        } else if (status != null) {
-            projects = isAdmin
-                    ? projectRepository.findAllByWorkspaceIdAndStatus(workspaceId, status, pageable)
-                    : projectRepository.findAuthorizedMemberProjectsByStatus(workspaceId, currentUser.getId(), status, pageable);
-        } else {
-            projects = isAdmin
-                    ? projectRepository.findAllByWorkspaceId(workspaceId, pageable)
-                    : projectRepository.findAuthorizedMemberProjects(workspaceId, currentUser.getId(), pageable);
-        }
+        Page<ResearchProject> projects = isAdmin
+                ? projectRepository.findAllByWorkspaceIdFiltered(workspaceId, status, workspaceType, pattern, pageable)
+                : projectRepository.findAuthorizedMemberProjectsFiltered(workspaceId, currentUser.getId(), status, workspaceType, pattern, pageable);
 
         return projects.map(project -> toProjectResponse(
                 project,
@@ -222,7 +237,7 @@ public class ResearchProjectService {
             User currentUser,
             Pageable pageable
     ) {
-        return listWorkspaceProjects(workspaceId, currentUser, null, null, pageable);
+        return listWorkspaceProjects(workspaceId, currentUser, null, null, null, pageable);
     }
 
     @Transactional(readOnly = true)
@@ -230,31 +245,18 @@ public class ResearchProjectService {
             User currentUser,
             String query,
             ResearchProjectStatus status,
+            AcademicWorkspaceType workspaceType,
             Pageable pageable
     ) {
         String trimmedQuery = (query != null && !query.isBlank()) ? query.trim() : null;
-        Page<ResearchProject> projects;
-
-        if (trimmedQuery != null) {
-            String pattern = "%" + trimmedQuery.toLowerCase() + "%";
-            projects = projectRepository.findAllAuthorizedProjectsForUserWithPattern(
-                    currentUser.getId(),
-                    status,
-                    pattern,
-                    pageable
-            );
-        } else if (status != null) {
-            projects = projectRepository.findAllAuthorizedProjectsForUserByStatus(
-                    currentUser.getId(),
-                    status,
-                    pageable
-            );
-        } else {
-            projects = projectRepository.findAllAuthorizedProjectsForUser(
-                    currentUser.getId(),
-                    pageable
-            );
-        }
+        String pattern = trimmedQuery == null ? null : "%" + trimmedQuery.toLowerCase() + "%";
+        Page<ResearchProject> projects = projectRepository.findAllAuthorizedProjectsForUserFiltered(
+                currentUser.getId(),
+                status,
+                workspaceType,
+                pattern,
+                pageable
+        );
 
         return projects.map(project -> toProjectResponse(
                 project,
@@ -304,11 +306,49 @@ public class ResearchProjectService {
 
         ResearchProject project = context.project();
 
+        if (request.workspaceType() != null && request.workspaceType() != project.getWorkspaceType()) {
+            throw new InvalidProjectOperationException(
+                    "Workspace type cannot be changed after creation. Create a new workspace or request a validated conversion."
+            );
+        }
+        if (request.projectType() != null && project.getWorkspaceType() != AcademicWorkspaceType.ACADEMIC_PROJECT) {
+            throw new InvalidProjectOperationException("Project type applies only to Academic Project workspaces.");
+        }
         if (request.title() != null) {
             project.setTitle(normalizeRequiredTitle(request.title()));
         }
         if (request.description() != null) {
             project.setDescription(normalizeOptionalText(request.description()));
+        }
+        if (request.projectType() != null) {
+            project.setAcademicProjectType(request.projectType());
+        }
+        if (request.institution() != null) {
+            project.setInstitution(normalizeOptionalText(request.institution()));
+        }
+        if (request.department() != null) {
+            project.setDepartment(normalizeOptionalText(request.department()));
+        }
+        if (request.programme() != null) {
+            project.setProgramme(normalizeOptionalText(request.programme()));
+        }
+        if (request.academicYear() != null) {
+            project.setAcademicYear(normalizeOptionalText(request.academicYear()));
+        }
+        if (request.supervisor() != null) {
+            project.setSupervisor(normalizeOptionalText(request.supervisor()));
+        }
+        if (request.courseName() != null) {
+            project.setCourseName(normalizeOptionalText(request.courseName()));
+        }
+        if (request.courseCode() != null) {
+            project.setCourseCode(normalizeOptionalText(request.courseCode()));
+        }
+        if (request.lecturer() != null) {
+            project.setLecturer(normalizeOptionalText(request.lecturer()));
+        }
+        if (request.deadline() != null) {
+            project.setDeadline(request.deadline());
         }
         if (request.researchAim() != null) {
             project.setResearchAim(normalizeOptionalText(request.researchAim()));
@@ -323,12 +363,20 @@ public class ResearchProjectService {
             project.setKeywords(normalizeOptionalText(request.keywords()));
         }
         if (request.reportTemplateId() != null) {
-            com.researchassistant.analysis.entity.ResearchReportTemplate template = resolveTemplate(request.reportTemplateId(), project.getResearchType());
+            ResearchReportTemplate template = resolveTemplate(
+                    request.reportTemplateId(),
+                    project.getWorkspaceType(),
+                    defaultReportType(project.getWorkspaceType())
+            );
             project.setReportTemplate(template);
             if (!project.isCitationStyleLocked() && template != null && template.getDefaultCitationStyle() != null) {
                 project.setCitationStyle(template.getDefaultCitationStyle());
                 project.setCitationStyleLocked(template.isCitationStyleLocked());
             }
+            auditService.record(
+                    currentUser.getId(),
+                    SecurityAuditEventType.WORKSPACE_TEMPLATE_CHANGED
+            );
         }
         if (request.citationStyle() != null && !project.isCitationStyleLocked()) {
             project.setCitationStyle(request.citationStyle());
@@ -754,21 +802,27 @@ public class ResearchProjectService {
         );
     }
 
-    private com.researchassistant.analysis.entity.ResearchReportTemplate resolveTemplate(UUID requestedTemplateId, String researchType) {
+    private ResearchReportTemplate resolveTemplate(
+            UUID requestedTemplateId,
+            AcademicWorkspaceType workspaceType,
+            ResearchReportType reportType
+    ) {
         if (requestedTemplateId != null) {
-            return templateRepository.findById(requestedTemplateId).orElse(null);
+            ResearchReportTemplate template = templateRepository.findById(requestedTemplateId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Report template not found."));
+            if (!templateSupportsWorkspace(template, workspaceType)) {
+                throw new InvalidProjectOperationException("Selected template is not compatible with this workspace type.");
+            }
+            return template;
         }
-        UUID defaultTemplateId = switch (normalizeOptionalText(researchType) == null ? "" : normalizeOptionalText(researchType)) {
-            case "SOFTWARE_SYSTEM_PROJECT" -> TTU_COMPUTER_SCIENCE_TEMPLATE_ID;
-            case "QUANTITATIVE_SURVEY", "EXPERIMENTAL_RESEARCH" -> QUANTITATIVE_SURVEY_TEMPLATE_ID;
-            case "QUALITATIVE_RESEARCH", "CASE_STUDY" -> QUALITATIVE_TEMPLATE_ID;
-            case "MIXED_METHODS" -> MIXED_METHODS_TEMPLATE_ID;
-            default -> GENERAL_FIVE_CHAPTER_TEMPLATE_ID;
-        };
-        return templateRepository.findById(defaultTemplateId)
-                .or(() -> templateRepository.findFirstByTypeAndSystemTemplateTrueOrderByCreatedAtAsc(
-                        com.researchassistant.analysis.entity.ResearchReportType.RESEARCH_REPORT
-                ))
+        return templateRepository.findSystemTemplatesForWorkspaceType(
+                        reportType,
+                        workspaceType.name(),
+                        PageRequest.of(0, 1)
+                )
+                .stream()
+                .findFirst()
+                .or(() -> templateRepository.findFirstByTypeAndSystemTemplateTrueOrderByCreatedAtAsc(reportType))
                 .orElse(null);
     }
 
@@ -776,11 +830,29 @@ public class ResearchProjectService {
             ResearchProject project,
             ProjectMembership currentUserMembership
     ) {
+        AcademicWorkspaceType workspaceType = project.getWorkspaceType() == null
+                ? AcademicWorkspaceType.ACADEMIC_RESEARCH
+                : project.getWorkspaceType();
         return new ResearchProjectResponse(
                 project.getId(),
                 project.getWorkspace().getId(),
                 project.getTitle(),
                 project.getDescription(),
+                workspaceType,
+                workspaceTypeLabel(workspaceType),
+                project.getAcademicProjectType(),
+                defaultReportType(workspaceType),
+                finalDocumentLabel(workspaceType),
+                workAreaLabel(workspaceType),
+                project.getInstitution(),
+                project.getDepartment(),
+                project.getProgramme(),
+                project.getAcademicYear(),
+                project.getSupervisor(),
+                project.getCourseName(),
+                project.getCourseCode(),
+                project.getLecturer(),
+                project.getDeadline(),
                 project.getResearchAim(),
                 project.getStudyArea(),
                 project.getResearchType(),
@@ -801,6 +873,57 @@ public class ResearchProjectService {
                 project.getCreatedAt(),
                 project.getUpdatedAt()
         );
+    }
+
+    private void validateWorkspaceMetadata(
+            AcademicWorkspaceType workspaceType,
+            AcademicProjectType projectType
+    ) {
+        if (workspaceType != AcademicWorkspaceType.ACADEMIC_PROJECT && projectType != null) {
+            throw new InvalidProjectOperationException("Project type applies only to Academic Project workspaces.");
+        }
+    }
+
+    private boolean templateSupportsWorkspace(
+            ResearchReportTemplate template,
+            AcademicWorkspaceType workspaceType
+    ) {
+        String supportedTypes = template.getSupportedWorkspaceTypes();
+        return supportedTypes == null
+                || supportedTypes.isBlank()
+                || supportedTypes.contains(workspaceType.name());
+    }
+
+    private ResearchReportType defaultReportType(AcademicWorkspaceType workspaceType) {
+        return switch (workspaceType == null ? AcademicWorkspaceType.ACADEMIC_RESEARCH : workspaceType) {
+            case ACADEMIC_RESEARCH -> ResearchReportType.RESEARCH_REPORT;
+            case ACADEMIC_PROJECT -> ResearchReportType.ACADEMIC_PROJECT_REPORT;
+            case COURSEWORK -> ResearchReportType.COURSEWORK;
+        };
+    }
+
+    private String workspaceTypeLabel(AcademicWorkspaceType workspaceType) {
+        return switch (workspaceType == null ? AcademicWorkspaceType.ACADEMIC_RESEARCH : workspaceType) {
+            case ACADEMIC_RESEARCH -> "Academic Research";
+            case ACADEMIC_PROJECT -> "Academic Project";
+            case COURSEWORK -> "Coursework";
+        };
+    }
+
+    private String finalDocumentLabel(AcademicWorkspaceType workspaceType) {
+        return switch (workspaceType == null ? AcademicWorkspaceType.ACADEMIC_RESEARCH : workspaceType) {
+            case ACADEMIC_RESEARCH -> "Research Report";
+            case ACADEMIC_PROJECT -> "Project Report";
+            case COURSEWORK -> "Coursework Document";
+        };
+    }
+
+    private String workAreaLabel(AcademicWorkspaceType workspaceType) {
+        return switch (workspaceType == null ? AcademicWorkspaceType.ACADEMIC_RESEARCH : workspaceType) {
+            case ACADEMIC_RESEARCH -> "Study Design";
+            case ACADEMIC_PROJECT -> "Project Work";
+            case COURSEWORK -> "Notes / Work";
+        };
     }
 
     private ProjectMemberResponse toMemberResponse(

@@ -29,4 +29,9 @@ describe('mapApiError', () => {
     const error = { response: { status: 401, data: { status: 401, message: 'stack trace' }, headers: {} } } as unknown as AxiosError<ApiErrorResponse>;
     expect(mapApiError(error).message).toBe('Your session has expired. Sign in again to continue.');
   });
+
+  it('reports a clear message when the API cannot be reached', () => {
+    const error = { request: {}, message: 'Network Error' } as unknown as AxiosError<ApiErrorResponse>;
+    expect(mapApiError(error).message).toBe('Cannot reach the API service. Make sure the backend is running and try again.');
+  });
 });

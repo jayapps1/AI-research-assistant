@@ -168,6 +168,7 @@ export function Drawer({ title, open, onClose, children }: { title: string; open
 export function Modal({
   title,
   open,
+  isOpen,
   onClose,
   children,
   footer,
@@ -176,7 +177,8 @@ export function Modal({
   closeDisabled = false,
 }: {
   title: string;
-  open: boolean;
+  open?: boolean;
+  isOpen?: boolean;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
@@ -184,11 +186,12 @@ export function Modal({
   bodyClassName?: string;
   closeDisabled?: boolean;
 }) {
+  const isModalOpen = Boolean(open ?? isOpen);
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedElement = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!isModalOpen) return undefined;
 
     const originalOverflow = document.body.style.overflow;
     const originalPaddingRight = document.body.style.paddingRight;
@@ -203,10 +206,10 @@ export function Modal({
       document.body.style.overflow = originalOverflow;
       document.body.style.paddingRight = originalPaddingRight;
     };
-  }, [open]);
+  }, [isModalOpen]);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!isModalOpen) return undefined;
 
     previouslyFocusedElement.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
@@ -224,7 +227,7 @@ export function Modal({
       previouslyFocusedElement.current?.focus({ preventScroll: true });
       previouslyFocusedElement.current = null;
     };
-  }, [open]);
+  }, [isModalOpen]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
@@ -258,7 +261,7 @@ export function Modal({
     }
   };
 
-  if (!open) return null;
+  if (!isModalOpen) return null;
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={closeDisabled ? undefined : onClose}>
       <div

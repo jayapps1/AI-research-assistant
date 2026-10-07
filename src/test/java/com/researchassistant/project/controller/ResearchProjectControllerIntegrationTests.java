@@ -5,7 +5,12 @@ import com.researchassistant.identity.dto.AuthTokenResponse;
 import com.researchassistant.identity.dto.CreateUserRequest;
 import com.researchassistant.identity.dto.UserResponse;
 import com.researchassistant.identity.service.UserService;
+import com.researchassistant.analysis.entity.ResearchReportTemplate;
+import com.researchassistant.analysis.entity.ResearchReportType;
+import com.researchassistant.analysis.repository.ResearchReportTemplateRepository;
 import com.researchassistant.project.dto.ResearchProjectResponse;
+import com.researchassistant.project.entity.AcademicProjectType;
+import com.researchassistant.project.entity.AcademicWorkspaceType;
 import com.researchassistant.project.entity.ProjectMembership;
 import com.researchassistant.project.entity.ProjectMembershipStatus;
 import com.researchassistant.project.entity.ProjectRole;
@@ -68,6 +73,9 @@ class ResearchProjectControllerIntegrationTests {
 
     @Autowired
     private WorkspaceMembershipRepository workspaceMembershipRepository;
+
+    @Autowired
+    private ResearchReportTemplateRepository reportTemplateRepository;
 
     @Test
     void ownerAndAdminCanCreateProjectAndCreatorBecomesLead()
@@ -531,6 +539,28 @@ class ResearchProjectControllerIntegrationTests {
         );
     }
 
+    private ResearchProjectResponse createProjectWithJson(
+            String accessToken,
+            UUID workspaceId,
+            String json
+    ) throws Exception {
+        String responseJson = mockMvc.perform(post(
+                        "/api/v1/workspaces/{workspaceId}/projects",
+                        workspaceId
+                )
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return objectMapper.readValue(
+                responseJson,
+                ResearchProjectResponse.class
+        );
+    }
+
     private ResultActions addWorkspaceMember(
             String accessToken,
             UUID workspaceId,
@@ -671,6 +701,229 @@ class ResearchProjectControllerIntegrationTests {
                         .param("q", "NonExistentTerm"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    @Test
+    void createsAcademicResearchWorkspaceWithResearchReportDefaults()
+            throws Exception {
+        UserResponse owner = createUser();
+        String ownerToken = login(owner.email()).accessToken();
+        WorkspaceResponse workspace = createWorkspace(ownerToken);
+
+        ResearchProjectResponse project = createProjectWithJson(
+                ownerToken,
+                workspace.id(),
+                """
+                        {
+                          "title": "Digital Agriculture Adoption Among Smallholder Farmers",
+                          "description": "Formal academic study",
+                          "workspaceType": "ACADEMIC_RESEARCH",
+                          "studyArea": "Digital Agriculture",
+                          "researchType": "GENERAL_ACADEMIC_RESEARCH",
+                          "researchAim": "Assess adoption factors among smallholder farmers",
+                          "citationStyle": "APA_7"
+                        }
+                        """
+        );
+
+        assertThat(project.workspaceType()).isEqualTo(AcademicWorkspaceType.ACADEMIC_RESEARCH);
+        assertThat(project.finalDocumentLabel()).isEqualTo("Research Report");
+        assertThat(project.workAreaLabel()).isEqualTo("Study Design");
+        ResearchProject stored = projectRepository.findById(project.id()).orElseThrow();
+        assertThat(stored.getWorkspaceType()).isEqualTo(AcademicWorkspaceType.ACADEMIC_RESEARCH);
+        assertThat(stored.getStudyArea()).isEqualTo("Digital Agriculture");
+    }
+
+    @Test
+    void createsAcademicProjectWorkspaceWithProjectTypeAndProjectReportLabel()
+            throws Exception {
+        UserResponse owner = createUser();
+        String ownerToken = login(owner.email()).accessToken();
+        WorkspaceResponse workspace = createWorkspace(ownerToken);
+
+        ResearchProjectResponse project = createProjectWithJson(
+                ownerToken,
+                workspace.id(),
+                """
+                        {
+                          "title": "Farmer-to-Buyer Agricultural Marketplace",
+                          "description": "Capstone implementation project",
+                          "workspaceType": "ACADEMIC_PROJECT",
+                          "projectType": "SOFTWARE_SYSTEM_DEVELOPMENT",
+                          "institution": "Generic University",
+                          "department": "Computer Science",
+                          "programme": "BSc Software Engineering",
+                          "academicYear": "2026/2027",
+                          "supervisor": "Dr. Supervisor",
+                          "citationStyle": "APA_7"
+                        }
+                        """
+        );
+
+        assertThat(project.workspaceType()).isEqualTo(AcademicWorkspaceType.ACADEMIC_PROJECT);
+        assertThat(project.projectType()).isEqualTo(AcademicProjectType.SOFTWARE_SYSTEM_DEVELOPMENT);
+        assertThat(project.finalDocumentLabel()).isEqualTo("Project Report");
+        ResearchProject stored = projectRepository.findById(project.id()).orElseThrow();
+        assertThat(stored.getAcademicProjectType()).isEqualTo(AcademicProjectType.SOFTWARE_SYSTEM_DEVELOPMENT);
+        assertThat(stored.getResearchAim()).isNull();
+    }
+
+    @Test
+    void createsCourseworkWorkspaceWithoutResearchMethodologyFields()
+            throws Exception {
+        UserResponse owner = createUser();
+        String ownerToken = login(owner.email()).accessToken();
+        WorkspaceResponse workspace = createWorkspace(ownerToken);
+
+        ResearchProjectResponse project = createProjectWithJson(
+                ownerToken,
+                workspace.id(),
+                """
+                        {
+                          "title": "Software Development Methodologies Assignment",
+                          "description": "Compare selected delivery methodologies",
+                          "workspaceType": "COURSEWORK",
+                          "courseName": "Software Engineering",
+                          "courseCode": "SENG 401",
+                          "lecturer": "Dr. Lecturer",
+                          "citationStyle": "APA_7"
+                        }
+                        """
+        );
+
+        assertThat(project.workspaceType()).isEqualTo(AcademicWorkspaceType.COURSEWORK);
+        assertThat(project.finalDocumentLabel()).isEqualTo("Coursework Document");
+        assertThat(project.courseName()).isEqualTo("Software Engineering");
+        ResearchProject stored = projectRepository.findById(project.id()).orElseThrow();
+        assertThat(stored.getResearchAim()).isNull();
+        assertThat(stored.getResearchType()).isNull();
+        assertThat(stored.getAcademicProjectType()).isNull();
+    }
+
+    @Test
+    void workspaceTypeFilteringAndTypeChangeProtectionAreEnforced()
+            throws Exception {
+        UserResponse owner = createUser();
+        String ownerToken = login(owner.email()).accessToken();
+        WorkspaceResponse workspace = createWorkspace(ownerToken);
+
+        createProjectWithJson(ownerToken, workspace.id(), """
+                {"title":"Research Workspace","workspaceType":"ACADEMIC_RESEARCH"}
+                """);
+        createProjectWithJson(ownerToken, workspace.id(), """
+                {"title":"Project Workspace","workspaceType":"ACADEMIC_PROJECT","projectType":"GENERAL_ACADEMIC_PROJECT"}
+                """);
+        ResearchProjectResponse coursework = createProjectWithJson(ownerToken, workspace.id(), """
+                {"title":"Coursework Workspace","workspaceType":"COURSEWORK","courseName":"Software Engineering"}
+                """);
+
+        mockMvc.perform(get("/api/v1/workspaces/{workspaceId}/projects", workspace.id())
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .param("workspaceType", "COURSEWORK"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(coursework.id().toString()));
+
+        mockMvc.perform(patch("/api/v1/projects/{projectId}", coursework.id())
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workspaceType": "ACADEMIC_RESEARCH"
+                                }
+                                """))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void projectTypeIsRejectedOutsideAcademicProjectWorkspaces()
+            throws Exception {
+        UserResponse owner = createUser();
+        String ownerToken = login(owner.email()).accessToken();
+        WorkspaceResponse workspace = createWorkspace(ownerToken);
+
+        mockMvc.perform(post("/api/v1/workspaces/{workspaceId}/projects", workspace.id())
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Invalid Coursework",
+                                  "workspaceType": "COURSEWORK",
+                                  "projectType": "SOFTWARE_SYSTEM_DEVELOPMENT"
+                                }
+                                """))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void reportTemplateCompatibilityIsEnforced()
+            throws Exception {
+        UserResponse owner = createUser();
+        String ownerToken = login(owner.email()).accessToken();
+        WorkspaceResponse workspace = createWorkspace(ownerToken);
+        ResearchReportTemplate courseworkTemplate = new ResearchReportTemplate();
+        courseworkTemplate.setName("Generic Coursework Compatibility Test");
+        courseworkTemplate.setType(ResearchReportType.COURSEWORK);
+        courseworkTemplate.setSupportedWorkspaceTypes("COURSEWORK");
+        courseworkTemplate.setSystemTemplate(true);
+        courseworkTemplate.setConfigurationJson("{\"chapters\":[]}");
+        reportTemplateRepository.save(courseworkTemplate);
+
+        mockMvc.perform(post("/api/v1/workspaces/{workspaceId}/projects", workspace.id())
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Template Mismatch",
+                                  "workspaceType": "ACADEMIC_RESEARCH",
+                                  "reportTemplateId": "%s"
+                                }
+                                """.formatted(courseworkTemplate.getId())))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void acceptanceTest4_existingPreMigrationProjectOpensSafelyWithoutRecreation()
+            throws Exception {
+        UserResponse owner = createUser();
+        String ownerToken = login(owner.email()).accessToken();
+        WorkspaceResponse workspace = createWorkspace(ownerToken);
+
+        // Simulate an existing pre-migration project created with legacy defaults
+        ResearchProjectResponse created = createProject(
+                ownerToken,
+                workspace.id(),
+                "Pre-Migration Legacy Research Study"
+        );
+
+        ResearchProject legacyProject = projectRepository.findById(created.id()).orElseThrow();
+        legacyProject.setNextDocumentNumber(42L);
+        legacyProject.setStatus(ResearchProjectStatus.ACTIVE);
+        projectRepository.save(legacyProject);
+
+        // Open existing pre-migration project via API
+        String responseJson = mockMvc.perform(get("/api/v1/projects/{projectId}", legacyProject.getId())
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(legacyProject.getId().toString()))
+                .andExpect(jsonPath("$.title").value("Pre-Migration Legacy Research Study"))
+                .andExpect(jsonPath("$.workspaceType").value("ACADEMIC_RESEARCH"))
+                .andExpect(jsonPath("$.finalDocumentLabel").value("Research Report"))
+                .andExpect(jsonPath("$.workAreaLabel").value("Study Design"))
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        ResearchProjectResponse response = objectMapper.readValue(responseJson, ResearchProjectResponse.class);
+        assertThat(response.id()).isEqualTo(legacyProject.getId());
+        assertThat(response.workspaceType()).isEqualTo(AcademicWorkspaceType.ACADEMIC_RESEARCH);
+        assertThat(response.finalDocumentLabel()).isEqualTo("Research Report");
+
+        // Verify nextDocumentNumber allocation state is preserved
+        ResearchProject refreshed = projectRepository.findById(legacyProject.getId()).orElseThrow();
+        assertThat(refreshed.getNextDocumentNumber()).isEqualTo(42L);
+        assertThat(refreshed.getId()).isEqualTo(legacyProject.getId());
     }
 
     private void setWorkspaceMembershipStatus(

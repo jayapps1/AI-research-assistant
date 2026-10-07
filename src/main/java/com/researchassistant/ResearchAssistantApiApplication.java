@@ -61,8 +61,10 @@ public class ResearchAssistantApiApplication {
 					} else if (value.startsWith("'") && value.endsWith("'") && value.length() >= 2) {
 						value = value.substring(1, value.length() - 1);
 					}
-					if (!key.isEmpty()) {
-						System.setProperty(key, value);
+					if (!key.isEmpty() && !value.isEmpty()) {
+						if (System.getProperty(key) == null && (System.getenv(key) == null || System.getenv(key).isBlank())) {
+							System.setProperty(key, value);
+						}
 					}
 				}
 			}

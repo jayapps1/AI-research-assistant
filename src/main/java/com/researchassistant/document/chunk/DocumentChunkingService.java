@@ -25,17 +25,20 @@ public class DocumentChunkingService {
     private final DocumentChunkRepository chunkRepository;
     private final DocumentChunkEmbeddingRepository embeddingRepository;
     private final DeterministicTextChunker textChunker;
+    private final ChunkHygieneService chunkHygieneService;
 
     public DocumentChunkingService(
             DocumentPageRepository pageRepository,
             DocumentChunkRepository chunkRepository,
             DocumentChunkEmbeddingRepository embeddingRepository,
-            DeterministicTextChunker textChunker
+            DeterministicTextChunker textChunker,
+            ChunkHygieneService chunkHygieneService
     ) {
         this.pageRepository = pageRepository;
         this.chunkRepository = chunkRepository;
         this.embeddingRepository = embeddingRepository;
         this.textChunker = textChunker;
+        this.chunkHygieneService = chunkHygieneService;
     }
 
     @Transactional
@@ -64,6 +67,7 @@ public class DocumentChunkingService {
                     chunk.setCharacterCount(slice.text().length());
                     chunk.setEstimatedTokenCount(estimateTokens(slice.text()));
                     chunk.setContentChecksumSha256(TextNormalization.sha256(slice.text()));
+                    chunk.setSemanticType(chunkHygieneService.classify(slice.text(), page.getPageNumber(), chunk.getChunkNumber()));
                     chunkRepository.save(chunk);
                 }
             }

@@ -103,6 +103,29 @@ public class ReportMarkdownRenderer {
         }
     }
 
+    public record MarkdownBlock(String text, int headingLevel) {}
+
+    public List<MarkdownBlock> plainBlocks(String markdown, String duplicateHeading) {
+        String normalized = normalizeSectionMarkdown(duplicateHeading, markdown);
+        if (normalized.isBlank()) return List.of();
+        Node parsed = parser.parse(normalized);
+        List<MarkdownBlock> blocks = new ArrayList<>();
+        for (Node child = parsed.getFirstChild(); child != null; child = child.getNext()) {
+            if (child instanceof Heading heading) {
+                blocks.add(new MarkdownBlock(literalText(heading), heading.getLevel()));
+            } else if (child instanceof Paragraph paragraph) {
+                blocks.add(new MarkdownBlock(literalText(paragraph), 0));
+            } else {
+                List<String> lines = new ArrayList<>();
+                renderPlainBlock(child, lines, 0, 1);
+                for (String l : lines) {
+                    blocks.add(new MarkdownBlock(l, 0));
+                }
+            }
+        }
+        return blocks.stream().filter(b -> b.text() != null && !b.text().isBlank()).toList();
+    }
+
     public List<String> plainLines(String markdown, String duplicateHeading) {
         String normalized = normalizeSectionMarkdown(duplicateHeading, markdown);
         if (normalized.isBlank()) return List.of();

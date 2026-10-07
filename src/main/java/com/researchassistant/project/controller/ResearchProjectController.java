@@ -66,6 +66,7 @@ public class ResearchProjectController {
             @PathVariable UUID workspaceId,
             @RequestParam(required = false) String q,
             @RequestParam(required = false) com.researchassistant.project.entity.ResearchProjectStatus status,
+            @RequestParam(required = false) com.researchassistant.project.entity.AcademicWorkspaceType workspaceType,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
@@ -75,6 +76,7 @@ public class ResearchProjectController {
                 user,
                 q,
                 status,
+                workspaceType,
                 pageable(page, size)
         ));
     }
@@ -84,6 +86,7 @@ public class ResearchProjectController {
             Authentication authentication,
             @RequestParam(required = false) String q,
             @RequestParam(required = false) com.researchassistant.project.entity.ResearchProjectStatus status,
+            @RequestParam(required = false) com.researchassistant.project.entity.AcademicWorkspaceType workspaceType,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size
     ) {
@@ -92,6 +95,7 @@ public class ResearchProjectController {
                 user,
                 q,
                 status,
+                workspaceType,
                 pageable(page, size)
         ));
     }

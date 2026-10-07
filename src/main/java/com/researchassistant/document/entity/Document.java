@@ -3,6 +3,7 @@ package com.researchassistant.document.entity;
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.project.entity.ResearchProject;
 import com.researchassistant.reference.entity.ReferenceMetadataStatus;
+import com.researchassistant.document.util.DocumentTitleNormalizer;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -143,6 +144,10 @@ public class Document {
     private DocumentType type;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "academic_role", nullable = false, length = 60)
+    private AcademicFileRole academicRole = AcademicFileRole.RESEARCH_SOURCE;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 40)
     private DocumentStatus status = DocumentStatus.UPLOADING;
 
@@ -182,13 +187,18 @@ public class Document {
         if (status == null) {
             status = DocumentStatus.UPLOADING;
         }
+        if (academicRole == null) {
+            academicRole = AcademicFileRole.RESEARCH_SOURCE;
+        }
         if (bibliographicMetadataStatus == null) {
             bibliographicMetadataStatus = ReferenceMetadataStatus.INCOMPLETE;
         }
+        title = DocumentTitleNormalizer.requireDisplayTitle(title);
     }
 
     @PreUpdate
     protected void onUpdate() {
         updatedAt = OffsetDateTime.now();
+        title = DocumentTitleNormalizer.requireDisplayTitle(title);
     }
 }

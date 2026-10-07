@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, Edit3, FileText, FolderPlus, MoveRight, Plus, RotateCcw, Search, Send, Trash2 } from 'lucide-react';
+import { Archive, ArrowUp, ChevronDown, Edit3, FileText, FolderPlus, Image as ImageIcon, Mic, MicOff, MoveRight, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { conversationApi, documentApi, projectApi } from '../api/endpoints';
 import { AssistantResponse, AssistantSources } from '../components/AssistantResponse';
@@ -37,6 +37,114 @@ export function ConversationWorkspacePage() {
   const shouldFocusComposerRef = useRef(false);
   const submitInFlightRef = useRef(false);
   const submittedDraftRef = useRef('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [searchDepth, setSearchDepth] = useState<'Standard' | 'High' | 'Deep Research'>('High');
+  const [showDepthMenu, setShowDepthMenu] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  const getFileExtension = (filename: string) => {
+    const parts = filename.split('.');
+    return parts.length > 1 ? parts.pop()?.toUpperCase() ?? 'FILE' : 'FILE';
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 50 * 1024 * 1024) {
+      setFormError('Attachment file size cannot exceed 50 MB.');
+      return;
+    }
+    setSelectedFile(file);
+    if (file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+    } else {
+      setPreviewUrl(null);
+    }
+    setFormError(null);
+  };
+
+  const clearSelectedFile = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setSelectedFile(null);
+    setPreviewUrl(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch { /* ignore */ }
+      }
+      setIsRecording(false);
+      return;
+    }
+
+    const SpeechRecognition = typeof window !== 'undefined'
+      ? ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
+      : null;
+
+    if (!SpeechRecognition) {
+      setFormError('Voice dictation is supported in Chrome, Edge, Safari, and Chromium browsers.');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsRecording(true);
+        setFormError(null);
+      };
+
+      recognition.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        if (transcript.trim()) {
+          setDraft((prev) => {
+            const trimmed = prev.trim();
+            return trimmed ? `${trimmed} ${transcript.trim()}` : transcript.trim();
+          });
+        }
+      };
+
+      recognition.onerror = () => {
+        setIsRecording(false);
+      };
+
+      recognition.onend = () => {
+        setIsRecording(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch {
+      setIsRecording(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch { /* ignore */ }
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!showDepthMenu) return;
+    const close = () => setShowDepthMenu(false);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [showDepthMenu]);
 
   const conversationQuery = useQuery({
     queryKey: ['conversation', projectId ?? 'general', conversationId],
@@ -86,6 +194,12 @@ export function ConversationWorkspacePage() {
       setDraft('');
       setFormError(null);
       shouldFocusComposerRef.current = true;
+      if (selectedFile) {
+        conversationApi.uploadAttachment(response.conversation.id, selectedFile).then(() => {
+          queryClient.invalidateQueries({ queryKey: ['conversation-attachments', response.conversation.id] });
+          clearSelectedFile();
+        }).catch(() => {});
+      }
       navigate(conversationPath(response.conversation.id, response.conversation.projectId ?? projectId), { replace: true });
     },
     onError: (error) => {
@@ -109,6 +223,13 @@ export function ConversationWorkspacePage() {
       setDraft('');
       setFormError(null);
       shouldFocusComposerRef.current = true;
+      const targetId = response.conversation?.id || conversationId;
+      if (selectedFile && targetId) {
+        conversationApi.uploadAttachment(targetId, selectedFile).then(() => {
+          queryClient.invalidateQueries({ queryKey: ['conversation-attachments', targetId] });
+          clearSelectedFile();
+        }).catch(() => {});
+      }
     },
     onError: (error) => {
       setFormError(error instanceof Error ? error.message : 'Unable to send this message.');
@@ -211,9 +332,9 @@ export function ConversationWorkspacePage() {
   function submitDraft() {
     if (submitInFlightRef.current || isBusy || !canSend) return false;
 
-    const content = draft.trim();
-    if (!content) {
-      setFormError('Enter a question before sending.');
+    const raw = draft.trim();
+    if (!raw && !selectedFile) {
+      setFormError('Enter a question or attach a file to analyze before sending.');
       return false;
     }
 
@@ -221,6 +342,10 @@ export function ConversationWorkspacePage() {
       setFormError('Select at least one ready document or switch to All Ready Sources.');
       return false;
     }
+
+    const content = selectedFile
+      ? (raw ? `${raw}\n\n[Attached File: ${selectedFile.name}]` : `Please analyze this uploaded document/file: ${selectedFile.name}`)
+      : raw;
 
     submitInFlightRef.current = true;
     submittedDraftRef.current = draft;
@@ -515,21 +640,159 @@ export function ConversationWorkspacePage() {
           {formError ? <div className="conversation-form-error" role="alert">{formError}</div> : null}
 
           <form className="conversation-composer" onSubmit={handleSubmit}>
-            <Textarea
-              ref={composerRef}
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={handleComposerKeyDown}
-              placeholder={canSend ? (projectMode ? 'Ask about this project...' : 'Ask a general AI question...') : 'Restore this conversation before continuing.'}
-              aria-label="Message"
-              disabled={!canSend || isBusy}
-              rows={1}
+            {selectedFile && (
+              <div className="composer-attachment-preview">
+                {previewUrl ? (
+                  <img
+                    src={previewUrl}
+                    alt="Preview"
+                    style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)' }}
+                  />
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <FileText size={20} className="text-primary" />
+                    <span className="attachment-doc-badge">{getFileExtension(selectedFile.name)}</span>
+                  </div>
+                )}
+                <div style={{ flex: 1, minWidth: 0, fontSize: '0.84rem' }}>
+                  <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {selectedFile.name}
+                  </div>
+                  <div className="muted" style={{ fontSize: '0.75rem' }}>
+                    {(selectedFile.size / 1024).toFixed(1)} KB • {selectedFile.type.startsWith('image/') ? 'Image ready for analysis' : 'Document ready for analysis'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearSelectedFile}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: 0.7, padding: '4px' }}
+                  title="Remove attachment"
+                  aria-label="Remove attachment"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx,.xls,.ppt,.pptx"
+              onChange={handleFileSelect}
+              style={{ display: 'none' }}
+              aria-label="Upload research image or document for analysis"
             />
-            <div className="conversation-composer-footer">
-              {!canSend ? <span className="muted">Archived and trashed conversations are read-only until restored.</span> : <span />}
-              <LoadingButton type="submit" loading={isBusy} loadingLabel="Sending..." disabled={!canSend}>
-                <Send size={15} /> Send
-              </LoadingButton>
+
+            <div className="conversation-composer-pill">
+              <button
+                type="button"
+                className="composer-attach-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!canSend || isBusy}
+                title="Attach documents (PDF, DOCX, TXT, CSV) or images"
+                aria-label="Attach file"
+              >
+                <Plus size={18} />
+              </button>
+
+              <Textarea
+                ref={composerRef}
+                className="composer-textarea"
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={handleComposerKeyDown}
+                placeholder={
+                  canSend
+                    ? (projectMode ? 'Ask about this project or attach documents / images...' : 'Ask Skilite Scholar or attach documents / images...')
+                    : 'Restore this conversation before continuing.'
+                }
+                aria-label="Message"
+                disabled={!canSend || isBusy}
+                rows={1}
+              />
+
+              <div className="composer-right-controls">
+                <div style={{ position: 'relative' }}>
+                  <button
+                    type="button"
+                    className="composer-depth-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowDepthMenu((prev) => !prev);
+                    }}
+                    title="Reasoning and search depth"
+                    aria-label="Reasoning depth"
+                  >
+                    <span>{searchDepth}</span>
+                    <ChevronDown size={14} style={{ opacity: 0.7 }} />
+                  </button>
+
+                  {showDepthMenu && (
+                    <div className="composer-depth-menu" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        className={`composer-depth-option ${searchDepth === 'Standard' ? 'active' : ''}`}
+                        onClick={() => {
+                          setSearchDepth('Standard');
+                          setShowDepthMenu(false);
+                        }}
+                      >
+                        <span>Standard</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`composer-depth-option ${searchDepth === 'High' ? 'active' : ''}`}
+                        onClick={() => {
+                          setSearchDepth('High');
+                          setShowDepthMenu(false);
+                        }}
+                      >
+                        <span>High</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`composer-depth-option ${searchDepth === 'Deep Research' ? 'active' : ''}`}
+                        onClick={() => {
+                          setSearchDepth('Deep Research');
+                          setShowDepthMenu(false);
+                        }}
+                      >
+                        <span>Deep Research</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  className={`composer-mic-btn ${isRecording ? 'recording' : ''}`}
+                  onClick={toggleRecording}
+                  disabled={!canSend || isBusy}
+                  title={isRecording ? 'Stop voice recording' : 'Dictate with voice'}
+                  aria-label={isRecording ? 'Stop recording' : 'Start voice recording'}
+                >
+                  {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
+                </button>
+
+                <button
+                  type="submit"
+                  className={`composer-action-btn ${isRecording ? 'recording' : ''}`}
+                  disabled={!canSend || isBusy}
+                  aria-label="Send"
+                  title={draft.trim() ? 'Send message' : 'Voice and AI search'}
+                >
+                  {draft.trim() ? (
+                    <ArrowUp size={18} strokeWidth={2.5} />
+                  ) : (
+                    <div className="audio-waveform-icon">
+                      <span className="audio-waveform-bar bar-1" />
+                      <span className="audio-waveform-bar bar-2" />
+                      <span className="audio-waveform-bar bar-3" />
+                      <span className="audio-waveform-bar bar-4" />
+                    </div>
+                  )}
+                </button>
+              </div>
             </div>
           </form>
         </div>
@@ -668,11 +931,32 @@ function ProjectSourceControls({
 
 function MessageBubble({ message }: { message: ConversationMessage }) {
   const isUser = message.role === 'USER';
+  const match = message.content.match(/\[Attached (?:Artifact|File): ([^\]]+)\]/);
+  const attachmentName = match ? match[1] : null;
+  const isImageAttachment = Boolean(attachmentName && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(attachmentName));
+  const displayBody = message.content.replace(/\[Attached (?:Artifact|File): [^\]]+\]/, '').trim();
+
   return (
     <article className={`conversation-message ${isUser ? 'user' : 'assistant'}`}>
       <div className="conversation-message-role">{isUser ? 'You' : 'Assistant'}</div>
+      {attachmentName && (
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '6px',
+          padding: '4px 8px',
+          borderRadius: '4px',
+          background: isUser ? 'rgba(255, 255, 255, 0.2)' : 'var(--surface-hover)',
+          border: '1px solid var(--border)',
+          fontSize: '0.8rem',
+          marginBottom: '6px',
+        }}>
+          {isImageAttachment ? <ImageIcon size={13} /> : <FileText size={13} />}
+          <span>{isImageAttachment ? 'Attached Image: ' : 'Attached File: '}<strong>{attachmentName}</strong></span>
+        </div>
+      )}
       {isUser ? (
-        <div className="conversation-message-body">{message.content}</div>
+        <div className="conversation-message-body">{displayBody || (attachmentName ? (isImageAttachment ? 'Please analyze this uploaded research image.' : 'Please analyze this uploaded document.') : message.content)}</div>
       ) : (
         <div className="conversation-message-body">
           <AssistantResponse content={message.content} />

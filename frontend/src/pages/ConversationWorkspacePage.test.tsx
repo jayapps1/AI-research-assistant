@@ -53,6 +53,7 @@ describe('ConversationWorkspacePage', () => {
     projectApiMock.mine.mockResolvedValue(pageResponse([]));
     documentApiMock.list.mockResolvedValue(pageResponse([]));
     conversationApiMock.listProject.mockResolvedValue(pageResponse([]));
+    conversationApiMock.get.mockImplementation(async (id) => conversationDetail(id));
   });
 
   it('starts a new search and displays the persisted response', async () => {

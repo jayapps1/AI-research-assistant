@@ -28,7 +28,8 @@ import java.util.UUID;
         indexes = {
                 @Index(name = "idx_document_chunks_version_id", columnList = "document_version_id"),
                 @Index(name = "idx_document_chunks_page_id", columnList = "page_id"),
-                @Index(name = "idx_document_chunks_version_number", columnList = "document_version_id,chunk_number")
+                @Index(name = "idx_document_chunks_version_number", columnList = "document_version_id,chunk_number"),
+                @Index(name = "idx_document_chunks_semantic_type", columnList = "semantic_type")
         }
 )
 @Getter
@@ -78,6 +79,10 @@ public class DocumentChunk {
     @Column(name = "heading", length = 1000)
     private String heading;
 
+    @jakarta.persistence.Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(name = "semantic_type", nullable = false, length = 50)
+    private ChunkSemanticType semanticType;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -88,6 +93,9 @@ public class DocumentChunk {
         }
         if (createdAt == null) {
             createdAt = OffsetDateTime.now();
+        }
+        if (semanticType == null) {
+            semanticType = ChunkSemanticType.BODY;
         }
     }
 }

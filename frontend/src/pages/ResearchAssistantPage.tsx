@@ -43,26 +43,73 @@ import { useWorkspace } from '../features/workspaces/WorkspaceProvider';
 import { pageContent } from '../utils/collections';
 import type { Citation, DocumentItem, RagAnswer } from '../types/api';
 
-const SECTION_OPTIONS = [
-  { key: 'LITERATURE_REVIEW', label: 'Literature Review', desc: 'Thematic synthesis, comparative analysis, and research gaps across uploaded sources', recommended: true, requiresData: false },
+export type SectionOption = {
+  key: string;
+  label: string;
+  desc: string;
+  recommended?: boolean;
+  requiresData?: boolean;
+  badge?: string;
+};
+
+const RESEARCH_SECTION_OPTIONS: SectionOption[] = [
+  { key: 'BACKGROUND', label: 'Background', desc: 'Broader scholarly and contextual foundation for the investigation', recommended: false, requiresData: false },
   { key: 'PROBLEM_STATEMENT', label: 'Problem Statement', desc: 'Formulate the empirical gap, background context, and problem magnitude', recommended: false, requiresData: false },
-  { key: 'BACKGROUND', label: 'Background of the Study', desc: 'Broader scholarly and contextual foundation for the investigation', recommended: false, requiresData: false },
-  { key: 'RESEARCH_GAP', label: 'Research Gap', desc: 'Synthesized omissions, conflicting findings, and methodological limitations in existing literature', recommended: false, requiresData: false },
-  { key: 'OBJECTIVES', label: 'General & Specific Objectives', desc: 'Hierarchical research aims derived from the study topic and problem', recommended: false, requiresData: false },
+  { key: 'OBJECTIVES', label: 'Aim / Objectives', desc: 'Hierarchical research aims derived from the study topic and problem', recommended: false, requiresData: false },
   { key: 'RESEARCH_QUESTIONS', label: 'Research Questions', desc: 'Empirically answerable research questions aligned with study aims', recommended: false, requiresData: false },
-  { key: 'HYPOTHESES', label: 'Hypotheses', desc: 'Directional or null hypotheses grounded in theoretical literature', recommended: false, requiresData: false },
+  { key: 'LITERATURE_REVIEW', label: 'Literature Review', desc: 'Thematic synthesis, comparative analysis, and research gaps across uploaded sources', recommended: true, requiresData: false },
+  { key: 'RESEARCH_GAP', label: 'Research Gap', desc: 'Synthesized omissions, conflicting findings, and methodological limitations in existing literature', recommended: false, requiresData: false },
   { key: 'CONCEPTUAL_FRAMEWORK', label: 'Conceptual Framework', desc: 'Key constructs, variables, and hypothesized interrelationships', recommended: false, requiresData: false },
   { key: 'THEORETICAL_FRAMEWORK', label: 'Theoretical Framework', desc: 'Grounding theoretical paradigms and explanatory models', recommended: false, requiresData: false },
-  { key: 'METHODOLOGY', label: 'Methodology Draft (Proposal)', desc: 'Research design, paradigm, population, and sampling strategy proposal for user review', recommended: false, requiresData: false },
+  { key: 'METHODOLOGY', label: 'Methodology Draft', desc: 'Research design, paradigm, population, and sampling strategy proposal for user review', recommended: false, requiresData: false },
   { key: 'POPULATION_SAMPLING', label: 'Population & Sampling Draft', desc: 'Sampling frame, sample size determination, and selection criteria proposal', recommended: false, requiresData: false },
   { key: 'DATA_COLLECTION_METHOD', label: 'Data Collection Method Draft', desc: 'Procedures for primary or secondary empirical data collection', recommended: false, requiresData: false },
   { key: 'RESEARCH_INSTRUMENT', label: 'Research Instrument Draft', desc: 'Structured questionnaire or interview guide draft based on literature', recommended: false, requiresData: false },
-  { key: 'FINDINGS', label: 'Findings (Requires Dataset)', desc: 'Empirical results — cannot be synthesized without uploaded datasets or results data', recommended: false, requiresData: true, badge: 'DATA REQUIRED' },
-  { key: 'DISCUSSION', label: 'Discussion Draft', desc: 'Interpretation of empirical findings contextualized against literature', recommended: false, requiresData: true, badge: 'FINDINGS REQUIRED' },
-  { key: 'CONCLUSION', label: 'Conclusion Draft', desc: 'Synthesized conclusions directly addressing research objectives', recommended: false, requiresData: true, badge: 'FINDINGS REQUIRED' },
-  { key: 'RECOMMENDATIONS', label: 'Recommendations Draft', desc: 'Actionable policy, practical, and future research recommendations', recommended: false, requiresData: true, badge: 'FINDINGS REQUIRED' },
+  { key: 'FINDINGS', label: 'Results Interpretation', desc: 'Empirical results — cannot be synthesized without uploaded datasets or results data', recommended: false, requiresData: true, badge: 'DATA REQUIRED' },
+  { key: 'DISCUSSION', label: 'Discussion', desc: 'Interpretation of empirical findings contextualized against literature', recommended: false, requiresData: true, badge: 'FINDINGS REQUIRED' },
+  { key: 'CONCLUSION', label: 'Conclusion', desc: 'Synthesized conclusions directly addressing research objectives', recommended: false, requiresData: true, badge: 'FINDINGS REQUIRED' },
+  { key: 'RECOMMENDATIONS', label: 'Recommendations', desc: 'Actionable policy, practical, and future research recommendations', recommended: false, requiresData: true, badge: 'FINDINGS REQUIRED' },
   { key: 'CUSTOM', label: 'Custom Section', desc: 'Define your own section title and specific generation prompt', recommended: false, requiresData: false },
-] as const;
+];
+
+const PROJECT_SECTION_OPTIONS: SectionOption[] = [
+  { key: 'BACKGROUND', label: 'Background', desc: 'Organizational and technical context motivating the project', recommended: false, requiresData: false },
+  { key: 'PROBLEM_STATEMENT', label: 'Problem Statement', desc: 'Operational challenges, technical bottlenecks, and user problem domain', recommended: false, requiresData: false },
+  { key: 'OBJECTIVES', label: 'Objectives', desc: 'General and specific implementation goals and deliverables', recommended: false, requiresData: false },
+  { key: 'LITERATURE_REVIEW', label: 'Literature Review', desc: 'Academic and industrial theoretical concepts underlying the system', recommended: true, requiresData: false },
+  { key: 'RELATED_SYSTEMS', label: 'Related Systems', desc: 'Critical review of existing software solutions, strengths, and deficiencies', recommended: false, requiresData: false },
+  { key: 'REQUIREMENTS', label: 'Requirements', desc: 'Functional and non-functional specifications, user personas, and constraints', recommended: false, requiresData: false },
+  { key: 'SYSTEM_ANALYSIS', label: 'System Analysis', desc: 'Feasibility, workflow analysis, domain modeling, and data flow processes', recommended: false, requiresData: false },
+  { key: 'SYSTEM_DESIGN', label: 'System Design', desc: 'High-level design specifications, component interactions, and UI flows', recommended: false, requiresData: false },
+  { key: 'ARCHITECTURE', label: 'Architecture', desc: 'Architectural pattern, technology stack, microservices, and system tiers', recommended: false, requiresData: false },
+  { key: 'DATABASE_DESIGN', label: 'Database Design', desc: 'Entity-relationship schema, normalization, table structures, and data dictionaries', recommended: false, requiresData: false },
+  { key: 'IMPLEMENTATION_DISCUSSION', label: 'Implementation Discussion', desc: 'Core modules, API implementations, security enforcement, and integrations', recommended: false, requiresData: false },
+  { key: 'TESTING_DISCUSSION', label: 'Testing Discussion', desc: 'Unit, integration, system, user acceptance test suites, and bug mitigation', recommended: false, requiresData: false },
+  { key: 'CONCLUSION', label: 'Conclusion', desc: 'Evaluation of project deliverables against original objectives', recommended: false, requiresData: false },
+  { key: 'RECOMMENDATIONS', label: 'Recommendations', desc: 'Deployment, administrative, and organizational adoption recommendations', recommended: false, requiresData: false },
+  { key: 'FUTURE_WORK', label: 'Future Work', desc: 'Planned enhancements, scalability expansions, and mobile/cloud roadmaps', recommended: false, requiresData: false },
+  { key: 'CUSTOM', label: 'Custom Section', desc: 'Define your own project section title and specific generation prompt', recommended: false, requiresData: false },
+];
+
+const COURSEWORK_SECTION_OPTIONS: SectionOption[] = [
+  { key: 'OUTLINE', label: 'Outline', desc: 'Structured assignment outline, key arguments, and section milestones', recommended: false, requiresData: false },
+  { key: 'INTRODUCTION', label: 'Introduction', desc: 'Topic introduction, contextual scope, purpose, and assignment questions', recommended: false, requiresData: false },
+  { key: 'LITERATURE_REVIEW', label: 'Literature Review', desc: 'Thematic scholarly review, conceptual foundations, and previous studies', recommended: true, requiresData: false },
+  { key: 'MAIN_DISCUSSION', label: 'Main Discussion', desc: 'Comprehensive academic argumentation addressing assignment criteria', recommended: false, requiresData: false },
+  { key: 'CASE_STUDY', label: 'Case Study', desc: 'Detailed case analysis, practical scenarios, and applied evidence', recommended: false, requiresData: false },
+  { key: 'ANALYSIS', label: 'Analysis', desc: 'Critical evaluation, comparative synthesis, and theoretical application', recommended: false, requiresData: false },
+  { key: 'CONCLUSION', label: 'Conclusion', desc: 'Synthesized closing remarks, key takeaways, and assignment resolution', recommended: false, requiresData: false },
+  { key: 'RECOMMENDATIONS', label: 'Recommendations', desc: 'Practical recommendations or managerial suggestions based on findings', recommended: false, requiresData: false },
+  { key: 'CUSTOM', label: 'Custom Section', desc: 'Define your own coursework topic section and specific prompt', recommended: false, requiresData: false },
+];
+
+export function getSectionOptions(workspaceType?: string): SectionOption[] {
+  if (workspaceType === 'ACADEMIC_PROJECT') return PROJECT_SECTION_OPTIONS;
+  if (workspaceType === 'COURSEWORK') return COURSEWORK_SECTION_OPTIONS;
+  return RESEARCH_SECTION_OPTIONS;
+}
+
+export const SECTION_OPTIONS = RESEARCH_SECTION_OPTIONS;
 
 const ANALYZE_OPTIONS = [
   { key: 'LITERATURE_MATRIX', label: 'Literature Matrix (Structured Table)', desc: 'Generate a comprehensive comparison matrix table across Author, Year, Title, Purpose, Theory, Methodology, Population, Sample, Data Collection, Analysis, Findings, Limitations, Gap, and Relevance.', isTable: true },
@@ -103,8 +150,30 @@ function reportSectionType(sectionKey: string) {
     case 'DATA_COLLECTION_METHOD':
     case 'RESEARCH_INSTRUMENT':
       return 'METHODOLOGY';
+    case 'REQUIREMENTS':
+      return 'SYSTEM_REQUIREMENTS';
+    case 'SYSTEM_ANALYSIS':
+    case 'SYSTEM_DESIGN':
+    case 'ARCHITECTURE':
+    case 'DATABASE_DESIGN':
+      return 'SYSTEM_DESIGN';
+    case 'RELATED_SYSTEMS':
+      return 'RELATED_SYSTEMS';
+    case 'IMPLEMENTATION_DISCUSSION':
+      return 'IMPLEMENTATION';
+    case 'TESTING_DISCUSSION':
+      return 'TESTING';
+    case 'MAIN_DISCUSSION':
+    case 'CASE_STUDY':
+    case 'ANALYSIS':
+      return 'RESULTS';
+    case 'THEORETICAL_FRAMEWORK':
+      return 'THEORETICAL_REVIEW';
     case 'CONCLUSION':
       return 'CONCLUSIONS';
+    case 'FUTURE_WORK':
+    case 'RECOMMENDATIONS':
+      return 'RECOMMENDATIONS';
     case 'CUSTOM':
       return 'CUSTOM';
     default:
@@ -113,17 +182,21 @@ function reportSectionType(sectionKey: string) {
 }
 
 function reportChapterType(sectionKey: string) {
-  if (sectionKey === 'LITERATURE_REVIEW' || sectionKey === 'RESEARCH_GAP' || sectionKey === 'CONCEPTUAL_FRAMEWORK' || sectionKey === 'THEORETICAL_FRAMEWORK') {
+  if (sectionKey === 'LITERATURE_REVIEW' || sectionKey === 'RESEARCH_GAP' || sectionKey === 'CONCEPTUAL_FRAMEWORK' || sectionKey === 'THEORETICAL_FRAMEWORK' || sectionKey === 'RELATED_SYSTEMS') {
     return 'LITERATURE_REVIEW';
   }
-  if (sectionKey === 'PROBLEM_STATEMENT' || sectionKey === 'BACKGROUND' || sectionKey === 'OBJECTIVES' || sectionKey === 'RESEARCH_QUESTIONS' || sectionKey === 'HYPOTHESES') {
+  if (sectionKey === 'PROBLEM_STATEMENT' || sectionKey === 'BACKGROUND' || sectionKey === 'OBJECTIVES' || sectionKey === 'RESEARCH_QUESTIONS' || sectionKey === 'HYPOTHESES' || sectionKey === 'OUTLINE' || sectionKey === 'INTRODUCTION') {
     return 'INTRODUCTION';
   }
-  if (sectionKey === 'METHODOLOGY' || sectionKey === 'POPULATION_SAMPLING' || sectionKey === 'DATA_COLLECTION_METHOD' || sectionKey === 'RESEARCH_INSTRUMENT') {
+  if (sectionKey === 'METHODOLOGY' || sectionKey === 'POPULATION_SAMPLING' || sectionKey === 'DATA_COLLECTION_METHOD' || sectionKey === 'RESEARCH_INSTRUMENT' || sectionKey === 'REQUIREMENTS' || sectionKey === 'SYSTEM_ANALYSIS' || sectionKey === 'SYSTEM_DESIGN' || sectionKey === 'ARCHITECTURE' || sectionKey === 'DATABASE_DESIGN') {
     return 'METHODOLOGY';
   }
-  if (sectionKey === 'FINDINGS') return 'RESULTS';
-  if (sectionKey === 'DISCUSSION' || sectionKey === 'CONCLUSION' || sectionKey === 'RECOMMENDATIONS') return 'DISCUSSION';
+  if (sectionKey === 'FINDINGS' || sectionKey === 'IMPLEMENTATION_DISCUSSION' || sectionKey === 'TESTING_DISCUSSION' || sectionKey === 'MAIN_DISCUSSION' || sectionKey === 'CASE_STUDY' || sectionKey === 'ANALYSIS') {
+    return 'RESULTS';
+  }
+  if (sectionKey === 'DISCUSSION' || sectionKey === 'CONCLUSION' || sectionKey === 'RECOMMENDATIONS' || sectionKey === 'FUTURE_WORK') {
+    return 'DISCUSSION';
+  }
   return 'INTRODUCTION';
 }
 
@@ -160,7 +233,7 @@ function aiCreditDetail(error: any) {
 
 export function ResearchAssistantPage() {
   const projectId = useProjectId();
-  const { selectedWorkspaceId: workspaceId } = useWorkspace();
+  const { selectedWorkspaceId: workspaceId, selectedWorkspace } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const client = useQueryClient();
 
@@ -199,6 +272,8 @@ export function ResearchAssistantPage() {
     queryFn: () => projectApi.get(projectId),
     enabled: Boolean(projectId),
   });
+
+  const sectionOptions = getSectionOptions((projectQuery.data as any)?.workspaceType || (selectedWorkspace as any)?.type || (selectedWorkspace as any)?.workspaceType);
 
   const documentsQuery = useQuery({
     queryKey: ['documents', projectId],
@@ -259,7 +334,7 @@ export function ResearchAssistantPage() {
       chapters = await reportApi.chapters(reportId);
     }
 
-    const sectionMeta = SECTION_OPTIONS.find((s) => s.key === selectedSection);
+    const sectionMeta = sectionOptions.find((s) => s.key === selectedSection) ?? SECTION_OPTIONS.find((s) => s.key === selectedSection);
     const heading = selectedSection === 'CUSTOM' ? (customSectionTitle || 'Custom Section') : sectionMeta?.label;
 
     const targetChapterType = reportChapterType(selectedSection);
@@ -326,7 +401,7 @@ export function ResearchAssistantPage() {
       chapters = await reportApi.chapters(reportId);
     }
 
-    const sectionMeta = SECTION_OPTIONS.find((s) => s.key === selectedSection);
+    const sectionMeta = sectionOptions.find((s) => s.key === selectedSection) ?? SECTION_OPTIONS.find((s) => s.key === selectedSection);
     const heading = selectedSection === 'CUSTOM' ? (customSectionTitle || 'Custom Section') : sectionMeta?.label;
     const targetChapterType = reportChapterType(selectedSection);
     const targetSectionType = reportSectionType(selectedSection);
@@ -474,99 +549,14 @@ export function ResearchAssistantPage() {
   // Generate Section Mutation
   const generateMutation = useMutation({
     mutationFn: async () => {
-      const sectionMeta = SECTION_OPTIONS.find((s) => s.key === selectedSection);
+      const sectionMeta = sectionOptions.find((s) => s.key === selectedSection) ?? SECTION_OPTIONS.find((s) => s.key === selectedSection);
       if (sectionMeta?.requiresData && !hasDatasets) {
         throw new Error(
           selectedSection === 'FINDINGS'
             ? 'Dataset or analysis results required. Please upload or import a dataset in Data Analysis first.'
             : 'Findings and empirical results required. Cannot synthesize section without real research results.'
-        );
-      }
-
-      const project = projectQuery.data;
-      const sectionName = selectedSection === 'CUSTOM' ? (customSectionTitle || 'Custom Section') : sectionMeta?.label;
-
-      let prompt = `Generate a structured, evidence-grounded academic draft for the section: "${sectionName}".\n`;
-      prompt += `Project Research Topic: "${project?.title ?? ''}"\n`;
-      if (project?.description) {
-        prompt += `Project Description: "${project.description}"\n`;
-      }
-      if (project?.researchAim) {
-        prompt += `Research Aim: "${project.researchAim}"\n`;
-      }
-      if (project?.studyArea) {
-        prompt += `Study Area: "${project.studyArea}"\n`;
-      }
-      if (project?.researchType) {
-        prompt += `Research Type: "${project.researchType}"\n`;
-      }
-
-      if (selectedSection === 'LITERATURE_REVIEW') {
-        prompt += `\nLITERATURE REVIEW SPECIFIC INSTRUCTIONS:\n`;
-        prompt += `- Synthesize the uploaded research sources into thematic subsections (e.g. Introduction, Thematic Findings, Comparative Evidence, Methodological Patterns, Research Gaps, and Summary).\n`;
-        prompt += `- Adapt the thematic structure to the specific topic rather than using generic headings.\n`;
-        prompt += `- Compare and contrast studies, showing areas of scholarly agreement and disagreement.\n`;
-        prompt += `- Do NOT write an article-by-article summary ("Author A said... Author B said...").\n`;
-        prompt += `- Cite every source-dependent claim with evidence references.\n`;
-      } else if (selectedSection === 'PROBLEM_STATEMENT') {
-        prompt += `\nPROBLEM STATEMENT INSTRUCTIONS:\n`;
-        prompt += `- Articulate the background context, the identified empirical/theoretical gap from the uploaded literature, the magnitude/relevance of the problem, and why research is needed.\n`;
-        prompt += `- Do not invent unsupported statistics.\n`;
-      } else if (selectedSection === 'BACKGROUND') {
-        prompt += `\nBACKGROUND OF THE STUDY INSTRUCTIONS:\n`;
-        prompt += `- Establish the scholarly and contextual foundation using the uploaded sources.\n`;
-        prompt += `- Cite all source-derived factual assertions. Do not invent historical or statistical claims.\n`;
-      } else if (selectedSection === 'RESEARCH_GAP') {
-        prompt += `\nRESEARCH GAP INSTRUCTIONS:\n`;
-        prompt += `- Identify only research gaps reasonably supported by the uploaded literature (empirical, methodological, population, geographic, theoretical, contextual, or contradictory findings).\n`;
-        prompt += `- Do not manufacture gaps not supported by the literature.\n`;
-      } else if (selectedSection === 'OBJECTIVES') {
-        prompt += `\nOBJECTIVES INSTRUCTIONS:\n`;
-        prompt += `- Formulate one primary General Objective and 3-5 Specific Objectives derived from the study topic, problem statement, and literature context.\n`;
-        prompt += `- Do not fabricate evidence.\n`;
-      } else if (selectedSection === 'RESEARCH_QUESTIONS') {
-        prompt += `\nRESEARCH QUESTIONS INSTRUCTIONS:\n`;
-        prompt += `- Derive empirically answerable research questions directly from the topic, problem, and objectives.\n`;
-        prompt += `- Ensure clear one-to-one alignment between each specific objective and research question.\n`;
-      } else if (selectedSection === 'HYPOTHESES') {
-        prompt += `\nHYPOTHESES INSTRUCTIONS:\n`;
-        prompt += `- Only generate hypotheses where the research context and uploaded literature support testable variables and relationships.\n`;
-        prompt += `- If the study is qualitative or exploratory, state clearly that hypotheses are Not Applicable.\n`;
-      } else if (selectedSection === 'CONCEPTUAL_FRAMEWORK') {
-        prompt += `\nCONCEPTUAL FRAMEWORK INSTRUCTIONS:\n`;
-        prompt += `- Map key constructs, variables (independent, dependent, moderating/mediating), and hypothesized relationships grounded in the literature.\n`;
-        prompt += `- Do not invent validated causal relationships.\n`;
-      } else if (selectedSection === 'THEORETICAL_FRAMEWORK') {
-        prompt += `\nTHEORETICAL FRAMEWORK INSTRUCTIONS:\n`;
-        prompt += `- Synthesize theoretical paradigms and explanatory models explicitly found in the uploaded literature.\n`;
-        prompt += `- Do not invent theory citations. If literature is insufficient, state that more theoretical sources are required.\n`;
-      } else if (selectedSection === 'METHODOLOGY') {
-        prompt += `\nMETHODOLOGY PROPOSAL INSTRUCTIONS:\n`;
-        prompt += `- Classify this draft clearly as a 'PROPOSED METHODOLOGY DRAFT'.\n`;
-        prompt += `- Propose research design, paradigm, target population, sampling technique, and data collection approach based on study aims and literature patterns.\n`;
-        prompt += `- State clearly that this proposal requires researcher review; never present proposed methods as completed fieldwork.\n`;
-      } else if (selectedSection === 'POPULATION_SAMPLING') {
-        prompt += `\nPOPULATION & SAMPLING INSTRUCTIONS:\n`;
-        prompt += `- Propose target population considerations, sampling techniques, and sample-size determination approaches based on literature conventions.\n`;
-        prompt += `- Do NOT fabricate actual population numbers, sample sizes, or participant counts.\n`;
-      } else if (selectedSection === 'DATA_COLLECTION_METHOD') {
-        prompt += `\nDATA COLLECTION METHODS INSTRUCTIONS:\n`;
-        prompt += `- Propose primary/secondary data collection procedures based on objectives and research design.\n`;
-        prompt += `- Clearly distinguish proposed methods from completed fieldwork.\n`;
-      } else if (selectedSection === 'RESEARCH_INSTRUMENT') {
-        prompt += `\nRESEARCH INSTRUMENT INSTRUCTIONS:\n`;
-        prompt += `- Draft sample questionnaire items, interview guides, or observation protocols aligned with research questions.\n`;
-        prompt += `- Do not claim instrument validation or pilot testing has occurred.\n`;
-      } else if (selectedSection === 'CUSTOM') {
-        prompt += `\nCUSTOM SECTION INSTRUCTIONS:\n`;
-        prompt += `- Generate the section "${customSectionTitle || 'Custom Section'}" following the user's specific instructions below.\n`;
-      }
-
-      if (customInstructions.trim()) {
-        prompt += `\nADDITIONAL RESEARCHER INSTRUCTIONS:\n${customInstructions.trim()}\n`;
-      }
-
-      prompt += `\nProvide an academic, publication-grade draft with comprehensive coverage and verified citations to the provided sources.`;
+          );
+        }
 
       const targetSection = await ensureTargetReportSection();
       const documentIds = scopeType === 'SELECTED_DOCUMENTS'
@@ -574,8 +564,10 @@ export function ResearchAssistantPage() {
         : readyDocuments.map((doc) => doc.id);
 
       return reportApi.generateSection(String(targetSection.id), {
+        targetNodeId: String(targetSection.id),
+        targetNodeTitle: targetSection.heading || (targetSection as any).title,
         documentIds,
-        instructions: prompt,
+        instructions: customInstructions.trim() || undefined,
         evidenceLimit: Math.max(12, documentIds.length * 6),
       }) as Promise<GeneratedSectionResponse>;
     },
@@ -609,7 +601,7 @@ export function ResearchAssistantPage() {
 
   // Evaluate blockers for generation
   let generateBlocker: string | null = null;
-  const currentSectionMeta = SECTION_OPTIONS.find((s) => s.key === selectedSection);
+    const currentSectionMeta = sectionOptions.find((s) => s.key === selectedSection) ?? SECTION_OPTIONS.find((s) => s.key === selectedSection);
   if (!projectId || !projectQuery.data) {
     generateBlocker = 'Please open an active research project.';
   } else if (currentSectionMeta?.requiresData && !hasDatasets) {
@@ -811,7 +803,7 @@ export function ResearchAssistantPage() {
                 Choose What to Generate
               </h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 360, overflowY: 'auto' }}>
-                {SECTION_OPTIONS.map((section) => {
+                {sectionOptions.map((section) => {
                   const isSelected = selectedSection === section.key;
                   return (
                     <div
@@ -896,12 +888,12 @@ export function ResearchAssistantPage() {
                   {isGenerating ? (
                     <>
                       <RefreshCw size={16} className="spin" />
-                      Retrieving evidence & generating {SECTION_OPTIONS.find((s) => s.key === selectedSection)?.label}...
+                        Retrieving evidence & generating {currentSectionMeta?.label}...
                     </>
                   ) : (
                     <>
                       <Sparkles size={16} />
-                      Generate {SECTION_OPTIONS.find((s) => s.key === selectedSection)?.label} Draft
+                        Generate {currentSectionMeta?.label} Draft
                     </>
                   )}
                 </Button>
@@ -935,7 +927,7 @@ export function ResearchAssistantPage() {
                     AI Draft Workspace
                   </h2>
                   <span className="muted" style={{ fontSize: '0.82rem' }}>
-                    {SECTION_OPTIONS.find((s) => s.key === selectedSection)?.label} • {draftCitations.length} citations verified
+                    {currentSectionMeta?.label} • {draftCitations.length} citations verified
                   </span>
                 </div>
                 {saveStatus ? (
@@ -1032,7 +1024,7 @@ export function ResearchAssistantPage() {
                       style={{ display: 'flex', alignItems: 'center', gap: 6 }}
                     >
                       <Save size={14} />
-                      {saveDraftMutation.isPending ? 'Saving...' : `Save as ${SECTION_OPTIONS.find((s) => s.key === selectedSection)?.label}`}
+                        {saveDraftMutation.isPending ? 'Saving...' : `Save as ${currentSectionMeta?.label}`}
                     </Button>
                     <Button
                       type="button"

@@ -70,7 +70,7 @@ public final class AnalysisDtos {
                                       String institutionName, String departmentName, String authorName,
                                       String supervisorName, String degreeProgram, Integer submissionYear,
                                       CitationStyle citationStyle, ContentOrigin origin) {}
-    public record UpdateReportRequest(String title, String institutionName, String departmentName, String authorName,
+    public record UpdateReportRequest(String title, UUID templateId, String institutionName, String departmentName, String authorName,
                                       String supervisorName, String degreeProgram, Integer submissionYear,
                                       CitationStyle citationStyle) {}
     public record CreateChapterRequest(ReportChapterType type, @NotBlank String title,
@@ -105,6 +105,8 @@ public final class AnalysisDtos {
                                            ReportSectionType type, String heading, ReportSectionStatus status,
                                            int displayOrder, boolean required, boolean systemDefined, boolean aiEnabled,
                                            boolean manuallyEdited, int revisionNumber,
+                                           SectionSemanticPurpose semanticPurpose,
+                                           SectionGenerationPolicy generationPolicy,
                                            List<SectionStructureResponse> subsections) {}
     public record ChapterStructureResponse(UUID id, UUID reportId, ReportChapterType type, String title,
                                            Integer chapterNumber, int displayOrder, boolean required, boolean systemDefined,
@@ -113,7 +115,17 @@ public final class AnalysisDtos {
                                           CitationStyle citationStyle, boolean includeUncitedReferences,
                                           String literatureMatrixInclusion,
                                           List<ChapterStructureResponse> chapters) {}
-    public record GenerateSectionRequest(List<UUID> documentIds, String instructions, Integer evidenceLimit) {}
+    public record GenerateSectionRequest(List<UUID> documentIds, String generationType, UUID targetNodeId,
+                                         String targetNodeTitle, String sourceScope, String instructions,
+                                         Integer evidenceLimit, String applyMode) {}
+    public record UpdateTitlePageDetailsRequest(
+            String title, String authorName, String studentId, String institutionName,
+            String departmentName, String degreeProgram, String supervisorName,
+            String academicYear, Integer submissionYear
+    ) {}
+    public record DeterministicRepairResponse(
+            int repairedSectionsCount, List<String> repairedSectionTitles, String message
+    ) {}
     public record PrepareFinalDocumentRequest(Boolean refresh) {}
     public record UpdateFinalDocumentRequest(String contentJson, String plainText, ReportDocumentVersionStatus status) {}
 
@@ -217,7 +229,9 @@ public final class AnalysisDtos {
                                   int displayOrder, ContentOrigin origin, String sourceArtifactType, UUID sourceArtifactId,
                                   Integer sourceRevisionNumber, boolean sourceOutOfDate, boolean manuallyEdited,
                                   boolean required, boolean systemDefined, boolean aiEnabled,
-                                  int revisionNumber) {
+                                  int revisionNumber,
+                                  SectionSemanticPurpose semanticPurpose,
+                                  SectionGenerationPolicy generationPolicy) {
         public static SectionResponse from(ResearchReportSection section) {
             return new SectionResponse(section.getId(), section.getChapter().getId(),
                     section.getParentSection() != null ? section.getParentSection().getId() : null,
@@ -227,7 +241,9 @@ public final class AnalysisDtos {
                     section.getDisplayOrder(), section.getOrigin(), section.getSourceArtifactType(),
                     section.getSourceArtifactId(), section.getSourceRevisionNumber(), section.isSourceOutOfDate(),
                     section.isManuallyEdited(), section.isRequired(), section.isSystemDefined(), section.isAiEnabled(),
-                    section.getRevisionNumber());
+                    section.getRevisionNumber(),
+                    section.resolveSemanticPurpose(),
+                    section.resolveGenerationPolicy());
         }
     }
     public record CitationResponse(UUID id, UUID sectionId, UUID documentId, UUID documentVersionId, UUID pageId, UUID chunkId,
@@ -248,11 +264,12 @@ public final class AnalysisDtos {
     public record TraceabilityMatrixResponse(UUID projectId, List<TraceabilityRow> rows, List<String> projectWarnings) {}
 
     public record TemplateResponse(UUID id, String name, ResearchReportType type, String institution, String department,
+                                    String supportedWorkspaceTypes,
                                     boolean systemTemplate, CitationStyle defaultCitationStyle, boolean citationStyleLocked,
                                     String description, String configurationJson) {
         public static TemplateResponse from(ResearchReportTemplate template) {
             return new TemplateResponse(template.getId(), template.getName(), template.getType(), template.getInstitution(),
-                    template.getDepartment(), template.isSystemTemplate(), template.getDefaultCitationStyle(),
+                    template.getDepartment(), template.getSupportedWorkspaceTypes(), template.isSystemTemplate(), template.getDefaultCitationStyle(),
                     template.isCitationStyleLocked(), template.getDescription(), template.getConfigurationJson());
         }
     }
@@ -260,7 +277,8 @@ public final class AnalysisDtos {
     public record SectionCapability(String sectionKey, String capabilityStatus, String description, boolean requiresData, boolean requiresFindings) {}
     public record SectionCapabilitiesResponse(UUID projectId, List<SectionCapability> capabilities) {}
 
-    public record TableOfContentsSectionItem(String heading, Integer displayOrder, ReportSectionType type) {}
+    public record TableOfContentsSectionItem(String heading, String sectionNumber, Integer displayOrder,
+                                             ReportSectionType type, List<TableOfContentsSectionItem> subsections) {}
     public record TableOfContentsItem(String title, Integer chapterNumber, Integer displayOrder, List<TableOfContentsSectionItem> sections) {}
     public record TableOfContentsResponse(UUID reportId, String reportTitle, List<TableOfContentsItem> chapters, String formattedMarkdown) {}
     public record FinalDocumentResponse(UUID id, UUID reportId, UUID projectId, int versionNumber, String title,

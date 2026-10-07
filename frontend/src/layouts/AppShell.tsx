@@ -24,15 +24,23 @@ import {
   X,
 } from 'lucide-react';
 import { useTheme } from '../app/ThemeProvider';
+import { useQuery } from '@tanstack/react-query';
+import { projectApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthProvider';
 import { Badge, Button } from '../components/ui';
 import { Avatar } from '../components/Avatar';
 import { ConversationSidebarSection } from '../features/conversations/ConversationSidebarSection';
 import { NotificationBell } from '../features/notifications/NotificationBell';
 import { useOptionalActiveProject } from '../features/projects/ActiveProjectProvider';
+import {
+  finalDocumentLabel,
+  workAreaLabel,
+  workspaceTypeOf,
+} from '../features/projects/workspaceMeta';
 import { WorkspaceSwitcher } from '../features/workspaces/WorkspaceSwitcher';
 import { useWorkspace } from '../features/workspaces/WorkspaceProvider';
 import { paths } from '../routes/paths';
+import type { ResearchProject } from '../types/api';
 
 const workspaceNav = [
   ['Dashboard', paths.dashboard, Home, true],
@@ -40,26 +48,74 @@ const workspaceNav = [
   ['My Tasks', paths.tasks, BriefcaseBusiness, false],
 ] as const;
 
-const researchNav = [
-  ['Conversations', paths.search, MessageSquare],
-  ['Documents', paths.documents, FileText],
-  ['Research', paths.research, BookOpen],
-  ['AI Assistant', paths.ai, MessageSquare],
-  ['Analysis', paths.analysis, ChartNoAxesColumn],
-  ['Reports', paths.reports, Library],
-  ['References', paths.references, BookOpen],
-] as const;
+function workspaceModuleNav(projectId: string, project?: ResearchProject | null) {
+  const route = (fallback: string, suffix: string) =>
+    projectId ? `/app/projects/${projectId}/${suffix}` : fallback;
+  const type = workspaceTypeOf(project);
+  if (type === 'COURSEWORK') {
+    return [
+      ['Sources', route(paths.documents, 'documents'), FileText],
+      [workAreaLabel(type), route(paths.writing, 'writing'), BookOpen],
+      ['AI Assistant', route(paths.ai, 'assistant'), MessageSquare],
+      [finalDocumentLabel(type), route(paths.reports, 'reports'), Library],
+      ['References', route(paths.references, 'references'), BookOpen],
+    ] as const;
+  }
+  if (type === 'ACADEMIC_PROJECT') {
+    return [
+      ['Sources', route(paths.documents, 'documents'), FileText],
+      [workAreaLabel(type), route(paths.research, 'research'), BookOpen],
+      ['Analysis', route(paths.analysis, 'analysis'), ChartNoAxesColumn],
+      ['AI Assistant', route(paths.ai, 'assistant'), MessageSquare],
+      [finalDocumentLabel(type), route(paths.reports, 'reports'), Library],
+      ['References', route(paths.references, 'references'), BookOpen],
+    ] as const;
+  }
+  return [
+    ['Sources', route(paths.documents, 'documents'), FileText],
+    [workAreaLabel(type), route(paths.research, 'research'), BookOpen],
+    ['Data Collection', route('/app/data', 'data'), ChartNoAxesColumn],
+    ['Analysis', route(paths.analysis, 'analysis'), ChartNoAxesColumn],
+    ['AI Assistant', route(paths.ai, 'assistant'), MessageSquare],
+    [finalDocumentLabel(type), route(paths.reports, 'reports'), Library],
+    ['References', route(paths.references, 'references'), BookOpen],
+  ] as const;
+}
 
-const projectSections = [
-  ['Overview', ''],
-  ['Conversations', 'conversations'],
-  ['Documents', 'documents'],
-  ['Research', 'research'],
-  ['AI Assistant', 'assistant'],
-  ['Analysis', 'analysis'],
-  ['Reports', 'reports'],
-  ['References', 'references'],
-] as const;
+function projectSectionsFor(project?: ResearchProject | null) {
+  const type = workspaceTypeOf(project);
+  if (type === 'COURSEWORK') {
+    return [
+      ['Overview', ''],
+      ['Sources', 'documents'],
+      [workAreaLabel(type), 'writing'],
+      ['AI Assistant', 'assistant'],
+      [finalDocumentLabel(type), 'reports'],
+      ['References', 'references'],
+    ] as const;
+  }
+  if (type === 'ACADEMIC_PROJECT') {
+    return [
+      ['Overview', ''],
+      ['Sources', 'documents'],
+      [workAreaLabel(type), 'research'],
+      ['Analysis', 'analysis'],
+      ['AI Assistant', 'assistant'],
+      [finalDocumentLabel(type), 'reports'],
+      ['References', 'references'],
+    ] as const;
+  }
+  return [
+    ['Overview', ''],
+    ['Sources', 'documents'],
+    [workAreaLabel(type), 'research'],
+    ['Data Collection', 'data'],
+    ['Analysis', 'analysis'],
+    ['AI Assistant', 'assistant'],
+    [finalDocumentLabel(type), 'reports'],
+    ['References', 'references'],
+  ] as const;
+}
 
 export function AppShell() {
   const [open, setOpen] = useState(false);
@@ -80,8 +136,19 @@ export function AppShell() {
     new URLSearchParams(location.search).get('projectId') ??
     activeProject?.activeProjectId ??
     '';
-  const modulePath = (fallback: string, projectSuffix: string) =>
-    activeProject?.activeProjectId ? `/app/projects/${activeProject.activeProjectId}/${projectSuffix}` : fallback;
+  const activeAcademicWorkspace = activeProject?.activeProject ?? null;
+
+  const directProjectQuery = useQuery({
+    queryKey: ['project', projectId],
+    queryFn: () => projectApi.get(projectId),
+    enabled: Boolean(projectId && (!activeAcademicWorkspace || activeAcademicWorkspace.id !== projectId)),
+  });
+
+  const currentProject =
+    (activeAcademicWorkspace?.id === projectId ? activeAcademicWorkspace : directProjectQuery.data) ??
+    activeAcademicWorkspace;
+  const effectiveProjectId = projectId || activeProject?.activeProjectId || '';
+  const moduleNav = workspaceModuleNav(effectiveProjectId, currentProject);
 
   // Close drawer and menu on Escape key
   useEffect(() => {
@@ -295,19 +362,10 @@ export function AppShell() {
 
         {/* RESEARCH GROUP */}
         <div className="nav-group">
-          <div className="nav-title">Research</div>
-          {researchNav.map(([label, to, Icon]) => {
-            const scopedTo =
-              label === 'Documents' ? modulePath(to, 'documents') :
-              label === 'Conversations' ? modulePath(to, 'conversations') :
-              label === 'Research' ? modulePath(to, 'research') :
-              label === 'AI Assistant' ? modulePath(to, 'assistant') :
-              label === 'Analysis' ? modulePath(to, 'analysis') :
-              label === 'Reports' ? modulePath(to, 'reports') :
-              label === 'References' ? modulePath(to, 'references') :
-              to;
+          <div className="nav-title">Academic Workspace</div>
+          {moduleNav.map(([label, to, Icon]) => {
             return (
-            <NavLink key={label} className="nav-link" to={scopedTo} onClick={() => setOpen(false)}>
+            <NavLink key={label} className="nav-link" to={to} onClick={() => setOpen(false)}>
               <Icon size={18} aria-hidden />
               <span>{label}</span>
             </NavLink>
@@ -366,17 +424,18 @@ export function AppShell() {
       </aside>
 
       <main className={`main ${isConversationRoute ? 'main-conversation' : ''}`}>
-        {projectId ? <ProjectNav projectId={projectId} /> : null}
+        {effectiveProjectId ? <ProjectNav projectId={effectiveProjectId} project={currentProject} /> : null}
         <Outlet />
       </main>
     </div>
   );
 }
 
-function ProjectNav({ projectId }: { projectId: string }) {
+function ProjectNav({ projectId, project }: { projectId: string; project?: ResearchProject | null }) {
+  const sections = projectSectionsFor(project);
   return (
-    <nav className="project-nav" aria-label="Project">
-      {projectSections.map(([label, suffix]) => {
+    <nav className="project-nav" aria-label="Academic workspace">
+      {sections.map(([label, suffix]) => {
         const to = suffix ? `/app/projects/${projectId}/${suffix}` : `/app/projects/${projectId}`;
         return (
           <NavLink key={label} className="button secondary" to={to}>

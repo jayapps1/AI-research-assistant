@@ -210,7 +210,12 @@ public class AnalysisWorkflowController {
         return service.assembleReport(reportId, user(authentication));
     }
 
-    @PostMapping("/reports/{reportId}/validate")
+    @PostMapping("/reports/{reportId}/template-formatting/apply")
+    public ReportResponse applyTemplateFormatting(Authentication authentication, @PathVariable UUID reportId) {
+        return service.applyTemplateFormatting(reportId, user(authentication));
+    }
+
+    @RequestMapping(value = "/reports/{reportId}/validate", method = {RequestMethod.GET, RequestMethod.POST})
     public ReportValidationResponse validateReport(Authentication authentication, @PathVariable UUID reportId) {
         return service.validateReport(reportId, user(authentication));
     }
@@ -315,6 +320,36 @@ public class AnalysisWorkflowController {
         return service.refreshReportReferences(reportId, user(authentication));
     }
 
+    @PostMapping("/reports/{reportId}/title-page/refresh")
+    public SectionResponse refreshTitlePage(Authentication authentication, @PathVariable UUID reportId) {
+        return service.refreshTitlePage(reportId, user(authentication));
+    }
+
+    @PostMapping("/reports/{reportId}/title-page/details")
+    public SectionResponse updateTitlePageDetails(Authentication authentication, @PathVariable UUID reportId, @Valid @RequestBody UpdateTitlePageDetailsRequest request) {
+        return service.updateTitlePageDetails(reportId, user(authentication), request);
+    }
+
+    @PostMapping("/reports/{reportId}/toc/refresh")
+    public SectionResponse refreshTableOfContents(Authentication authentication, @PathVariable UUID reportId) {
+        return service.refreshTableOfContents(reportId, user(authentication));
+    }
+
+    @PostMapping("/reports/{reportId}/figures/refresh")
+    public SectionResponse refreshListOfFigures(Authentication authentication, @PathVariable UUID reportId) {
+        return service.refreshListOfFigures(reportId, user(authentication));
+    }
+
+    @PostMapping("/reports/{reportId}/tables/refresh")
+    public SectionResponse refreshListOfTables(Authentication authentication, @PathVariable UUID reportId) {
+        return service.refreshListOfTables(reportId, user(authentication));
+    }
+
+    @PostMapping("/reports/{reportId}/repair-deterministic")
+    public DeterministicRepairResponse repairDeterministicNodes(Authentication authentication, @PathVariable UUID reportId, @RequestParam(defaultValue = "false") boolean forceReset) {
+        return service.repairDeterministicNodes(reportId, user(authentication), forceReset);
+    }
+
     @PatchMapping("/reports/{reportId}/settings")
     public ReportResponse updateReportSettings(Authentication authentication, @PathVariable UUID reportId, @Valid @RequestBody UpdateReportSettingsRequest request) {
         return service.updateReportSettings(reportId, user(authentication), request);
@@ -328,6 +363,11 @@ public class AnalysisWorkflowController {
     @PostMapping("/projects/{projectId}/literature-matrix")
     public LiteratureMatrixResponse saveLiteratureMatrix(Authentication authentication, @PathVariable UUID projectId, @Valid @RequestBody SaveLiteratureMatrixRequest request) {
         return service.saveLiteratureMatrix(projectId, user(authentication), request);
+    }
+
+    @PostMapping("/reports/{reportId}/generate-section")
+    public GeneratedDraftResponse generateSectionForReport(Authentication authentication, @PathVariable UUID reportId, @RequestBody(required = false) GenerateSectionRequest request) {
+        return service.generateSectionForReport(reportId, user(authentication), request);
     }
 
     @PostMapping("/report-sections/{sectionId}/generate")

@@ -11,4 +11,5 @@ import java.util.UUID;
 public interface ResearchReportRepository extends JpaRepository<ResearchReport, UUID> {
     Page<ResearchReport> findAllByProjectIdOrderByUpdatedAtDesc(UUID projectId, Pageable pageable);
     Optional<ResearchReport> findFirstByProjectIdOrderByUpdatedAtDesc(UUID projectId);
+    Optional<ResearchReport> findByProjectId(UUID projectId);
 }

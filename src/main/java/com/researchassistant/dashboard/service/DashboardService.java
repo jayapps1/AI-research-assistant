@@ -14,7 +14,9 @@ import com.researchassistant.document.entity.DocumentStatus;
 import com.researchassistant.document.repository.DocumentRepository;
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.notification.NotificationRepository;
+import com.researchassistant.analysis.entity.ResearchReportType;
 import com.researchassistant.project.dto.ResearchProjectResponse;
+import com.researchassistant.project.entity.AcademicWorkspaceType;
 import com.researchassistant.project.entity.ProjectMembership;
 import com.researchassistant.project.entity.ProjectMembershipStatus;
 import com.researchassistant.project.entity.ProjectRole;
@@ -508,10 +510,33 @@ public class DashboardService {
                 project.getWorkspace().getId(),
                 project.getTitle(),
                 project.getDescription(),
+                workspaceType(project),
+                workspaceTypeLabel(workspaceType(project)),
+                project.getAcademicProjectType(),
+                defaultReportType(workspaceType(project)),
+                finalDocumentLabel(workspaceType(project)),
+                workAreaLabel(workspaceType(project)),
+                project.getInstitution(),
+                project.getDepartment(),
+                project.getProgramme(),
+                project.getAcademicYear(),
+                project.getSupervisor(),
+                project.getCourseName(),
+                project.getCourseCode(),
+                project.getLecturer(),
+                project.getDeadline(),
                 project.getResearchAim(),
                 project.getStudyArea(),
                 project.getResearchType(),
                 project.getKeywords(),
+                project.getReportTemplate() == null ? null : project.getReportTemplate().getId(),
+                project.getReportTemplate() == null ? null : project.getReportTemplate().getName(),
+                project.getCitationStyle(),
+                project.isCitationStyleLocked(),
+                project.getCitationPresentation(),
+                project.getBibliographySort(),
+                project.isIncludeDoi(),
+                project.isIncludeUrl(),
                 project.getStatus(),
                 project.getCreatedBy().getId(),
                 role,
@@ -533,6 +558,44 @@ public class DashboardService {
                 overdue,
                 task.getUpdatedAt()
         );
+    }
+
+    private AcademicWorkspaceType workspaceType(ResearchProject project) {
+        return project.getWorkspaceType() == null
+                ? AcademicWorkspaceType.ACADEMIC_RESEARCH
+                : project.getWorkspaceType();
+    }
+
+    private ResearchReportType defaultReportType(AcademicWorkspaceType workspaceType) {
+        return switch (workspaceType) {
+            case ACADEMIC_RESEARCH -> ResearchReportType.RESEARCH_REPORT;
+            case ACADEMIC_PROJECT -> ResearchReportType.ACADEMIC_PROJECT_REPORT;
+            case COURSEWORK -> ResearchReportType.COURSEWORK;
+        };
+    }
+
+    private String workspaceTypeLabel(AcademicWorkspaceType workspaceType) {
+        return switch (workspaceType) {
+            case ACADEMIC_RESEARCH -> "Academic Research";
+            case ACADEMIC_PROJECT -> "Academic Project";
+            case COURSEWORK -> "Coursework";
+        };
+    }
+
+    private String finalDocumentLabel(AcademicWorkspaceType workspaceType) {
+        return switch (workspaceType) {
+            case ACADEMIC_RESEARCH -> "Research Report";
+            case ACADEMIC_PROJECT -> "Project Report";
+            case COURSEWORK -> "Coursework Document";
+        };
+    }
+
+    private String workAreaLabel(AcademicWorkspaceType workspaceType) {
+        return switch (workspaceType) {
+            case ACADEMIC_RESEARCH -> "Study Design";
+            case ACADEMIC_PROJECT -> "Project Work";
+            case COURSEWORK -> "Notes / Work";
+        };
     }
 
     private UserActivitySummary toUserActivitySummary(ProjectActivity activity) {

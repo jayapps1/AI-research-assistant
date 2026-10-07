@@ -12,6 +12,14 @@ import java.util.UUID;
 @Repository
 public class DocumentRetrievalRepository {
 
+    private static final String DOCUMENT_TITLE_SQL = """
+            coalesce(
+                nullif(btrim(d.title), ''),
+                nullif(btrim(d.bibliographic_title), ''),
+                d.document_code
+            ) as document_title
+            """;
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     public DocumentRetrievalRepository(NamedParameterJdbcTemplate jdbcTemplate) {
@@ -39,7 +47,7 @@ public class DocumentRetrievalRepository {
                        c.chunk_number,
                        c.text_content,
                        ts_rank_cd(c.search_vector, websearch_to_tsquery('english', :query)) as score,
-                       d.title as document_title
+                       """ + DOCUMENT_TITLE_SQL + """
                 from document_chunks c
                 join document_pages p on p.id = c.page_id
                 join document_versions dv on dv.id = c.document_version_id
@@ -47,6 +55,7 @@ public class DocumentRetrievalRepository {
                 join research_projects rp on rp.id = d.project_id
                 where d.project_id = :projectId
                   and d.status <> 'ARCHIVED'
+                  and (d.academic_role = 'RESEARCH_SOURCE' or d.academic_role is null)
                   and d.current_version_id = dv.id
                   and c.search_vector @@ websearch_to_tsquery('english', :query)
                 """ + documentPredicate + """
@@ -77,7 +86,7 @@ public class DocumentRetrievalRepository {
                        c.chunk_number,
                        c.text_content,
                        0.5 as score,
-                       d.title as document_title
+                       """ + DOCUMENT_TITLE_SQL + """
                 from document_chunks c
                 join document_pages p on p.id = c.page_id
                 join document_versions dv on dv.id = c.document_version_id
@@ -85,6 +94,7 @@ public class DocumentRetrievalRepository {
                 join research_projects rp on rp.id = d.project_id
                 where d.project_id = :projectId
                   and d.status <> 'ARCHIVED'
+                  and (d.academic_role = 'RESEARCH_SOURCE' or d.academic_role is null)
                   and d.current_version_id = dv.id
                   and length(trim(c.text_content)) > 0
                 """ + documentPredicate + """
@@ -116,13 +126,14 @@ public class DocumentRetrievalRepository {
                        c.chunk_number,
                        c.text_content,
                        ts_rank_cd(c.search_vector, websearch_to_tsquery('english', :query)) as score,
-                       d.title as document_title
+                       """ + DOCUMENT_TITLE_SQL + """
                 from document_chunks c
                 join document_pages p on p.id = c.page_id
                 join document_versions dv on dv.id = c.document_version_id
                 join documents d on d.id = dv.document_id
                 join research_projects rp on rp.id = d.project_id
                 where d.project_id = :projectId
+                  and (d.academic_role = 'RESEARCH_SOURCE' or d.academic_role is null)
                   and d.id in (:documentIds)
                   and d.status = 'READY'
                   and dv.id in (:versionIds)
@@ -170,13 +181,14 @@ public class DocumentRetrievalRepository {
                        c.chunk_number,
                        c.text_content,
                        0.5 as score,
-                       d.title as document_title
+                       """ + DOCUMENT_TITLE_SQL + """
                 from document_chunks c
                 join document_pages p on p.id = c.page_id
                 join document_versions dv on dv.id = c.document_version_id
                 join documents d on d.id = dv.document_id
                 join research_projects rp on rp.id = d.project_id
                 where d.project_id = :projectId
+                  and (d.academic_role = 'RESEARCH_SOURCE' or d.academic_role is null)
                   and d.id in (:documentIds)
                   and d.status = 'READY'
                   and dv.id in (:versionIds)
@@ -233,7 +245,7 @@ public class DocumentRetrievalRepository {
                        c.chunk_number,
                        c.text_content,
                        (1.0 / (1.0 + sqrt(distance.squared_distance))) as score,
-                       d.title as document_title
+                       """ + DOCUMENT_TITLE_SQL + """
                 from document_chunk_embeddings e
                 join document_chunks c on c.id = e.chunk_id
                 join document_pages p on p.id = c.page_id
@@ -247,6 +259,7 @@ public class DocumentRetrievalRepository {
                 ) distance
                 where d.project_id = :projectId
                   and d.status <> 'ARCHIVED'
+                  and (d.academic_role = 'RESEARCH_SOURCE' or d.academic_role is null)
                   and d.current_version_id = dv.id
                   and e.provider = :provider
                   and e.model = :model
@@ -293,7 +306,7 @@ public class DocumentRetrievalRepository {
                        c.chunk_number,
                        c.text_content,
                        (1.0 / (1.0 + sqrt(distance.squared_distance))) as score,
-                       d.title as document_title
+                       """ + DOCUMENT_TITLE_SQL + """
                 from document_chunk_embeddings e
                 join document_chunks c on c.id = e.chunk_id
                 join document_pages p on p.id = c.page_id
@@ -306,6 +319,7 @@ public class DocumentRetrievalRepository {
                          as value_pair(embedding_value, query_value)
                 ) distance
                 where d.project_id = :projectId
+                  and (d.academic_role = 'RESEARCH_SOURCE' or d.academic_role is null)
                   and d.id in (:documentIds)
                   and d.status = 'READY'
                   and dv.id in (:versionIds)

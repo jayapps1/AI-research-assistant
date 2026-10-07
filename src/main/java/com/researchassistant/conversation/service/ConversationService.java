@@ -713,9 +713,13 @@ public class ConversationService {
             if (isPreflightException(exception)) {
                 throw exception;
             }
+            String failureCode = exception instanceof com.researchassistant.ai.exception.AiGenerationException aiEx
+                    ? aiEx.getCode() : "PROJECT_RAG_GENERATION_FAILED";
+            String failureMessage = exception instanceof com.researchassistant.ai.exception.AiGenerationException aiEx
+                    ? safeFailureCodeMessage(aiEx.getCode(), aiEx.getMessage()) : "Project evidence retrieval or answer generation failed. Please try again.";
             run.setStatus(ConversationRunStatus.FAILED);
-            run.setFailureCode("PROJECT_RAG_GENERATION_FAILED");
-            run.setFailureMessage("Project evidence retrieval or answer generation failed. Please try again.");
+            run.setFailureCode(failureCode);
+            run.setFailureMessage(failureMessage);
             run.setCompletedAt(OffsetDateTime.now());
             run = runRepository.save(run);
             return new SubmitConversationResponse(mapper.summary(conversation), mapper.message(userMessage), null, mapper.run(run));
@@ -814,9 +818,13 @@ public class ConversationService {
             if (isPreflightException(exception)) {
                 throw exception;
             }
+            String failureCode = exception instanceof com.researchassistant.ai.exception.AiGenerationException aiEx
+                    ? aiEx.getCode() : "PROJECT_RAG_GENERATION_FAILED";
+            String failureMessage = exception instanceof com.researchassistant.ai.exception.AiGenerationException aiEx
+                    ? safeFailureCodeMessage(aiEx.getCode(), aiEx.getMessage()) : "Project answer generation failed. Please try again.";
             run.setStatus(ConversationRunStatus.FAILED);
-            run.setFailureCode("PROJECT_RAG_GENERATION_FAILED");
-            run.setFailureMessage("Project answer generation failed. Please try again.");
+            run.setFailureCode(failureCode);
+            run.setFailureMessage(failureMessage);
             run.setCompletedAt(OffsetDateTime.now());
             run = runRepository.save(run);
             return new SubmitConversationResponse(mapper.summary(conversation), mapper.message(userMessage), null, mapper.run(run));
@@ -1481,14 +1489,21 @@ public class ConversationService {
             return warning.length() <= 1000 ? warning : warning.substring(0, 1000);
         }
         String code = firstNonBlank(result.failureCode(), result.failureCategory(), "AI_GENERATION_FAILED");
+        return safeFailureCodeMessage(code, "AI generation failed. Please try again.");
+    }
+
+    private String safeFailureCodeMessage(String code, String defaultMessage) {
+        if (code == null) {
+            return defaultMessage;
+        }
         return switch (code.toUpperCase(Locale.ROOT)) {
-            case "AI_PROVIDER_AUTHENTICATION_FAILED" -> "The AI provider could not authenticate the configured key.";
+            case "AI_PROVIDER_AUTHENTICATION_FAILED" -> "The AI provider configuration could not be authenticated.";
             case "AI_MODEL_UNAVAILABLE" -> "The configured AI model is not available.";
             case "AI_PROVIDER_RATE_LIMITED" -> "The AI provider is rate limited. Try again shortly.";
             case "AI_PROVIDER_QUOTA_EXHAUSTED" -> "The AI provider quota is exhausted.";
             case "AI_PROVIDER_TIMEOUT" -> "The AI provider timed out. Try again.";
             case "CAPABILITY_UNAVAILABLE" -> "AI generation is disabled or unavailable.";
-            default -> "AI generation failed. Please try again.";
+            default -> defaultMessage != null && !defaultMessage.isBlank() ? defaultMessage : "AI generation failed. Please try again.";
         };
     }
 

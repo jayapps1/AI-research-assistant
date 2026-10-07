@@ -326,6 +326,21 @@ public class ReportRichTextService {
             appendMarkdownTable(node, out);
             return;
         }
+        if ("figure".equals(type) || "image".equals(type)) {
+            JsonNode attrs = node.path("attrs");
+            String src = attrs.path("src").asText("");
+            String label = attrs.path("figureLabel").asText("Figure");
+            String caption = attrs.path("caption").asText("");
+            String alt = attrs.path("alt").asText(caption == null || caption.isBlank() ? label : caption);
+            if (!src.isBlank()) {
+                out.append("![").append(escapeInline(alt)).append("](").append(src).append(")\n\n");
+            }
+            String renderedCaption = caption == null || caption.isBlank() ? label : label + ": " + caption;
+            if (!renderedCaption.isBlank()) {
+                out.append("*").append(escapeInline(renderedCaption)).append("*\n\n");
+            }
+            return;
+        }
         for (JsonNode child : node.path("content")) {
             appendMarkdownBlock(child, out, listLevel);
         }
@@ -483,6 +498,10 @@ public class ReportRichTextService {
 
     private String normalize(String value) {
         return value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n').trim();
+    }
+
+    private String escapeInline(String value) {
+        return value == null ? "" : value.replace("[", "\\[").replace("]", "\\]");
     }
 
     private String text(JsonNode node) {

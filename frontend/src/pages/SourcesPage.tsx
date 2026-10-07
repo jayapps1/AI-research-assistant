@@ -19,11 +19,12 @@ import { EmptyState, ErrorState, PageLoading } from '../components/states';
 import { useProjectId } from '../hooks/useProjectId';
 import { pageContent } from '../utils/collections';
 import { paths } from '../routes/paths';
-import type { DocumentItem } from '../types/api';
+import type { AcademicFileRole, DocumentItem } from '../types/api';
 
 interface UploadQueueItem {
   id: string;
   file: File;
+  role: AcademicFileRole;
   status: 'QUEUED' | 'UPLOADING' | 'READY' | 'FAILED' | 'QUOTA_EXCEEDED' | 'FILE_TOO_LARGE';
   documentCode?: string;
   errorMessage?: string | null;
@@ -46,6 +47,7 @@ export function SourcesPage() {
   const client = useQueryClient();
   const [page, setPage] = useState(0);
   const [showTrash, setShowTrash] = useState(false);
+  const [uploadRole, setUploadRole] = useState<AcademicFileRole>('RESEARCH_SOURCE');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
   const [isUploadingQueue, setIsUploadingQueue] = useState(false);
@@ -78,8 +80,11 @@ export function SourcesPage() {
     refetchInterval: (query) => {
       const data = query.state.data;
       const items = pageContent(data) as DocumentItem[];
-      const hasPending = items.some((doc) => isNonTerminalDocumentStatus(doc.status));
-      return hasPending ? 3000 : false;
+      const hasPending = items.some(
+        (doc) => isNonTerminalDocumentStatus(doc.status) || isNonTerminalDocumentStatus(doc.currentVersion?.status),
+      );
+      const isQueueBusy = uploadQueue.some((item) => item.status === 'QUEUED' || item.status === 'UPLOADING');
+      return hasPending || isQueueBusy || isUploadingQueue ? 2000 : false;
     },
   });
 
@@ -116,31 +121,6 @@ export function SourcesPage() {
     setSelectedIds(new Set());
   };
 
-  if (!projectId) {
-    return (
-      <main className="page">
-        <EmptyState title="Select a project" description="Open a research project to manage its uploaded research sources.">
-          <Button asChild style={{ marginTop: 12 }}>
-            <a href={paths.projects}>Browse Projects</a>
-          </Button>
-        </EmptyState>
-      </main>
-    );
-  }
-
-  if (sourcesQuery.isLoading && !sourcesQuery.data) {
-    return <PageLoading label="Loading research sources..." />;
-  }
-
-  if (sourcesQuery.isError) {
-    return <ErrorState title="Failed to load sources" error={sourcesQuery.error} onRetry={() => sourcesQuery.refetch()} />;
-  }
-
-  const sources = pageContent(sourcesQuery.data) as DocumentItem[];
-  const totalSources = sourcesQuery.data?.totalElements ?? sources.length;
-  const selectedDocs = sources.filter((doc) => selectedIds.has(doc.id));
-  const allSelected = sources.length > 0 && sources.every((doc) => selectedIds.has(doc.id));
-
   const startBatchUpload = async () => {
     if (uploadQueue.length === 0 || isUploadingQueue) return;
     setIsUploadingQueue(true);
@@ -156,18 +136,44 @@ export function SourcesPage() {
           prev.map((item) => (item.id === currentItem.id ? { ...item, status: 'UPLOADING', errorMessage: null } : item)),
         );
 
-        try {
-          const result = await documentApi.upload(projectId, currentItem.file);
-          const allocatedCode =
-            result.documentCode ??
-            result.docCode ??
-            (result.documentNumber ? `DOC-${String(result.documentNumber).padStart(3, '0')}` : 'DOC');
-          setUploadQueue((prev) =>
-            prev.map((item) => (item.id === currentItem.id ? { ...item, status: 'READY', documentCode: allocatedCode } : item)),
-          );
-        } catch (err: any) {
-          const errStatus = err?.status ?? err?.response?.status;
-          const errCode = err?.code ?? err?.response?.data?.code ?? err?.response?.data?.errorCode;
+        let attempt = 0;
+        let success = false;
+        let lastError: any = null;
+        const maxAttempts = 3;
+
+        while (attempt < maxAttempts && !success) {
+          attempt++;
+          try {
+            const result = await documentApi.upload(projectId, currentItem.file, undefined, currentItem.role);
+            const allocatedCode =
+              result.documentCode ??
+              result.docCode ??
+              (result.documentNumber ? `DOC-${String(result.documentNumber).padStart(3, '0')}` : 'DOC');
+            setUploadQueue((prev) =>
+              prev.map((item) =>
+                item.id === currentItem.id
+                  ? { ...item, status: 'READY', documentCode: allocatedCode, errorMessage: null }
+                  : item,
+              ),
+            );
+            success = true;
+            void invalidateDocuments();
+          } catch (err: any) {
+            lastError = err;
+            const errStatus = err?.status ?? err?.response?.status;
+            const errCode = err?.code ?? err?.response?.data?.code ?? err?.response?.data?.errorCode;
+            const isQuota = errStatus === 429 || errCode === 'QUOTA_EXCEEDED';
+            const isTooLarge = errCode === 'DOCUMENT_FILE_TOO_LARGE' || errStatus === 413;
+            if (isQuota || isTooLarge || attempt >= maxAttempts) {
+              break;
+            }
+            await new Promise((res) => setTimeout(res, 1000 * attempt));
+          }
+        }
+
+        if (!success) {
+          const errStatus = lastError?.status ?? lastError?.response?.status;
+          const errCode = lastError?.code ?? lastError?.response?.data?.code ?? lastError?.response?.data?.errorCode;
           const isQuota = errStatus === 429 || errCode === 'QUOTA_EXCEEDED';
           const isTooLarge = errCode === 'DOCUMENT_FILE_TOO_LARGE' || errStatus === 413;
           setUploadQueue((prev) =>
@@ -180,7 +186,7 @@ export function SourcesPage() {
                       ? 'Storage quota exceeded'
                       : isTooLarge
                       ? 'This file exceeds the 50 MB limit.'
-                      : err?.response?.data?.message || err?.message || 'Upload failed',
+                      : lastError?.response?.data?.message || lastError?.message || 'Upload failed after retries',
                   }
                 : item,
             ),
@@ -189,10 +195,20 @@ export function SourcesPage() {
       }
     };
 
-    await Promise.all(Array.from({ length: Math.min(2, pendingItems.length) }, () => uploadWorker()));
+    await uploadWorker();
     setIsUploadingQueue(false);
     await invalidateDocuments();
   };
+
+  useEffect(() => {
+    const hasQueued = uploadQueue.some((item) => item.status === 'QUEUED');
+    if (hasQueued && !isUploadingQueue) {
+      const timer = setTimeout(() => {
+        void startBatchUpload();
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [uploadQueue, isUploadingQueue]);
 
   const runForDoc = async (doc: DocumentItem, operation: () => Promise<unknown>) => {
     setWorkingId(doc.id);
@@ -245,6 +261,31 @@ export function SourcesPage() {
     setSourceKeywords(doc.keywords ?? '');
     setDialog({ type: 'rename', doc });
   };
+
+  const sources = pageContent(sourcesQuery.data) as DocumentItem[];
+  const totalSources = sourcesQuery.data?.totalElements ?? sources.length;
+  const selectedDocs = sources.filter((doc) => selectedIds.has(doc.id));
+  const allSelected = sources.length > 0 && sources.every((doc) => selectedIds.has(doc.id));
+
+  if (!projectId) {
+    return (
+      <main className="page">
+        <EmptyState title="Select a project" description="Open a research project to manage its uploaded research sources.">
+          <Button asChild style={{ marginTop: 12 }}>
+            <a href={paths.projects}>Browse Projects</a>
+          </Button>
+        </EmptyState>
+      </main>
+    );
+  }
+
+  if (sourcesQuery.isLoading && !sourcesQuery.data) {
+    return <PageLoading label="Loading research sources..." />;
+  }
+
+  if (sourcesQuery.isError) {
+    return <ErrorState title="Failed to load sources" error={sourcesQuery.error} onRetry={() => sourcesQuery.refetch()} />;
+  }
 
   const bulkAction = async (kind: 'trash' | 'retry' | 'download' | 'rescan') => {
     setBulkWorking(true);
@@ -306,6 +347,20 @@ export function SourcesPage() {
           )}
 
           <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ width: 260 }}>
+              <Field label="Academic File Role">
+                <select
+                  className="select"
+                  value={uploadRole}
+                  onChange={(e) => setUploadRole(e.target.value as AcademicFileRole)}
+                  disabled={isUploadingQueue}
+                >
+                  <option value="RESEARCH_SOURCE">Research Source (RAG Enabled)</option>
+                  <option value="TEMPLATE_GUIDELINE">Template Guideline (Not Cited)</option>
+                  <option value="EXAMPLE_REPORT">Example Report (Not Cited)</option>
+                </select>
+              </Field>
+            </div>
             <div style={{ flex: 1, minWidth: 260 }}>
               <Field label="Select Research Papers or Documents">
                 <Input
@@ -317,6 +372,7 @@ export function SourcesPage() {
                       const newItems: UploadQueueItem[] = Array.from(event.target.files).map((file) => ({
                         id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                         file,
+                        role: uploadRole,
                         status: file.size > MAX_DOCUMENT_FILE_SIZE_BYTES ? 'FILE_TOO_LARGE' : 'QUEUED',
                         errorMessage: file.size > MAX_DOCUMENT_FILE_SIZE_BYTES ? 'This file exceeds the 50 MB limit.' : null,
                       }));
@@ -441,7 +497,18 @@ export function SourcesPage() {
                   <td><strong style={{ fontFamily: 'monospace', fontSize: '0.88rem' }}>{docCode(doc)}</strong></td>
                   <td>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <span style={{ fontWeight: 600 }}>{doc.title ?? filename(doc)}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 600 }}>{doc.title ?? filename(doc)}</span>
+                        {doc.academicRole === 'TEMPLATE_GUIDELINE' && (
+                          <Badge tone="info" style={{ fontSize: '0.68rem' }}>TEMPLATE GUIDELINE</Badge>
+                        )}
+                        {doc.academicRole === 'EXAMPLE_REPORT' && (
+                          <Badge tone="warning" style={{ fontSize: '0.68rem' }}>EXAMPLE REPORT</Badge>
+                        )}
+                        {(!doc.academicRole || doc.academicRole === 'RESEARCH_SOURCE') && (
+                          <Badge tone="success" style={{ fontSize: '0.68rem' }}>RESEARCH SOURCE</Badge>
+                        )}
+                      </div>
                       <span className="muted" style={{ fontSize: '0.78rem' }}>{filename(doc)}</span>
                     </div>
                   </td>

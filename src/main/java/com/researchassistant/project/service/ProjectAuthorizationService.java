@@ -85,6 +85,13 @@ public class ProjectAuthorizationService {
         return requireProjectAccess(projectId, user);
     }
 
+    public ProjectAuthorizationContext requireProjectMember(
+            UUID projectId,
+            User user
+    ) {
+        return requireProjectAccess(projectId, user);
+    }
+
     public ProjectAuthorizationContext requireProjectEditor(
             UUID projectId,
             User user

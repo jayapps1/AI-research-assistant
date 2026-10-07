@@ -18,6 +18,16 @@ public interface ResearchReportSectionRepository extends JpaRepository<ResearchR
     long countByParentSectionId(UUID parentSectionId);
     List<ResearchReportSection> findAllByChapterReportId(UUID reportId);
     List<ResearchReportSection> findAllByChapterReportProjectId(UUID projectId);
+    void deleteAllByChapterId(UUID chapterId);
+
+    @Query("""
+            select section
+            from ResearchReportSection section
+            join section.chapter chapter
+            where chapter.report.id = :reportId
+            order by chapter.displayOrder asc, section.displayOrder asc
+            """)
+    List<ResearchReportSection> findAllByReportIdOrderByChapterDisplayOrderAscDisplayOrderAsc(UUID reportId);
 
     @Query("""
             select section

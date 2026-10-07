@@ -41,10 +41,19 @@ import {
 import { EmptyState, ErrorState, PageLoading } from '../components/states';
 import { useWorkspace } from '../features/workspaces/WorkspaceProvider';
 import { CreateProjectModal } from '../features/projects/CreateProjectModal';
+import {
+  finalDocumentLabel,
+  PROJECT_TYPE_LABELS,
+  projectTypeLabel,
+  templateSupportsWorkspace,
+  workAreaLabel,
+  workspaceTypeLabel,
+  workspaceTypeOf,
+} from '../features/projects/workspaceMeta';
 import { CreateWorkspaceModal } from '../features/workspaces/CreateWorkspaceModal';
 import { pageContent } from '../utils/collections';
 import { paths } from '../routes/paths';
-import type { ResearchProject } from '../types/api';
+import type { AcademicProjectType, AcademicWorkspaceType, ResearchProject } from '../types/api';
 
 function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return '0 MB';
@@ -78,6 +87,53 @@ function formatRelativeTime(dateStr?: string): string {
   } catch {
     return dateStr;
   }
+}
+
+function projectOverviewLabels(project?: ResearchProject) {
+  const type = workspaceTypeOf(project);
+  if (type === 'COURSEWORK') {
+    return {
+      setupTitle: 'Coursework Brief',
+      setupEmpty: 'No coursework instructions defined yet. Click Edit Setup to add them.',
+      sourcesTitle: 'Sources',
+      sourcesDescription: 'Upload assignment readings, case materials, and supporting academic files.',
+      writingTitle: 'Notes / Work',
+      writingDescription: 'Develop notes, outlines, and draft coursework content.',
+      aiTitle: 'AI Coursework Assistant',
+      aiDescription: 'Ask grounded questions against your sources and assignment context.',
+      modulesTitle: 'Coursework Modules',
+      continueWorkLabel: 'Continue Work',
+      continueReportLabel: `Continue ${finalDocumentLabel(project)}`,
+    };
+  }
+  if (type === 'ACADEMIC_PROJECT') {
+    return {
+      setupTitle: 'Project Setup',
+      setupEmpty: 'No project aim or scope defined yet. Click Edit Setup to add it.',
+      sourcesTitle: 'Sources',
+      sourcesDescription: 'Upload literature, specifications, standards, and project evidence.',
+      writingTitle: 'Project Work',
+      writingDescription: 'Organize design notes, implementation records, testing notes, and report drafts.',
+      aiTitle: 'AI Project Assistant',
+      aiDescription: 'Use grounded AI support across sources, design notes, and project evidence.',
+      modulesTitle: 'Project Modules',
+      continueWorkLabel: 'Continue Project Work',
+      continueReportLabel: `Continue ${finalDocumentLabel(project)}`,
+    };
+  }
+  return {
+    setupTitle: 'Research Aim & Scope',
+    setupEmpty: 'No research aim defined yet. Click Edit Setup to add an aim.',
+    sourcesTitle: 'Sources',
+    sourcesDescription: 'Upload literature and reports indexed with DOC codes for grounded AI queries.',
+    writingTitle: 'Writing Workspace',
+    writingDescription: 'Organize, review, and edit chapters from literature reviews to problem statements.',
+    aiTitle: 'AI Research Assistant',
+    aiDescription: 'Generate verifiable literature reviews and problem statements cited to your documents.',
+    modulesTitle: 'Research Modules & Workbenches',
+    continueWorkLabel: 'Continue Research',
+    continueReportLabel: 'Continue Report',
+  };
 }
 
 // =========================================================================
@@ -130,7 +186,7 @@ export function HomeDashboard() {
           </p>
         </div>
         <Button type="button" onClick={() => setCreateModalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Plus size={16} /> New Research Project
+          <Plus size={16} /> Create Workspace
         </Button>
       </div>
 
@@ -157,14 +213,14 @@ export function HomeDashboard() {
       <div className="grid cols-4" style={{ gap: 16 }}>
         <Card className="stat-card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span className="muted" style={{ fontSize: '0.88rem', fontWeight: 500 }}>Active Projects</span>
+            <span className="muted" style={{ fontSize: '0.88rem', fontWeight: 500 }}>Active Workspaces</span>
             <span style={{ color: 'var(--primary)', opacity: 0.8 }}><FolderGit2 size={20} /></span>
           </div>
           <div style={{ fontSize: '1.75rem', fontWeight: 700, lineHeight: 1.2 }}>
             {data?.activeProjectCount ?? 0}
           </div>
           <p className="muted" style={{ fontSize: '0.8rem', marginTop: 4 }}>
-            In current workspace
+            In current account workspace
           </p>
         </Card>
 
@@ -177,7 +233,7 @@ export function HomeDashboard() {
             {data?.openTaskCount ?? 0}
           </div>
           <p className="muted" style={{ fontSize: '0.8rem', marginTop: 4 }}>
-            Assigned to you across projects
+            Assigned to you across workspaces
           </p>
         </Card>
 
@@ -190,7 +246,7 @@ export function HomeDashboard() {
             {data?.documentCount ?? 0}
           </div>
           <p className="muted" style={{ fontSize: '0.8rem', marginTop: 4 }}>
-            Indexed research literature & data
+            Indexed sources and academic files
           </p>
         </Card>
 
@@ -212,10 +268,10 @@ export function HomeDashboard() {
 
       {/* Main Content Layout: 2 Columns */}
       <div className="grid cols-2" style={{ gap: 20, marginTop: 20 }}>
-        {/* Left Column: Recent Projects */}
+        {/* Left Column: Recent Workspaces */}
         <Card>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: 0 }}>Recent Projects</h2>
+            <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: 0 }}>Recent Workspaces</h2>
             <Button asChild variant="secondary" style={{ fontSize: '0.82rem', padding: '4px 10px' }}>
               <Link to={paths.projects}>View All</Link>
             </Button>
@@ -243,9 +299,10 @@ export function HomeDashboard() {
                     >
                       {project.title}
                     </Link>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: '0.78rem' }} className="muted">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: '0.78rem', flexWrap: 'wrap' }} className="muted">
                       <span>Updated {formatRelativeTime(project.updatedAt)}</span>
                       {project.currentUserRole ? <span>• {project.currentUserRole}</span> : null}
+                      <Badge tone="info" className="badge-sm">{workspaceTypeLabel(project)}</Badge>
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -261,11 +318,11 @@ export function HomeDashboard() {
             </div>
           ) : (
             <EmptyState
-              title="No research projects yet"
-              description="Create your first research project to begin literature synthesis, methodology design, and data analysis."
+              title="No academic workspaces yet"
+              description="Create your first workspace to organize sources, AI support, writing, references, and final documents."
             >
               <Button type="button" onClick={() => setCreateModalOpen(true)} style={{ marginTop: 12 }}>
-                <Plus size={14} /> Create Research Project
+                <Plus size={14} /> Create Workspace
               </Button>
             </EmptyState>
           )}
@@ -385,7 +442,7 @@ export function WorkspacePage() {
             <Plus size={16} /> Create Workspace
           </Button>
           <Button type="button" variant="secondary" onClick={() => setCreateModalOpen(true)}>
-            <Plus size={16} /> New Project
+            <Plus size={16} /> Create Workspace
           </Button>
         </div>
       </div>
@@ -410,7 +467,7 @@ export function WorkspacePage() {
           <div className="grid cols-4" style={{ gap: 12, marginTop: 12 }}>
             <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--surface-hover)' }}>
               <div className="muted" style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <FolderGit2 size={14} /> Total Projects
+                <FolderGit2 size={14} /> Academic Workspaces
               </div>
               <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: 4 }}>
                 {workspaceDashboard.data?.projectCount ?? 0}
@@ -507,16 +564,25 @@ export function ProjectsPage() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [status, setStatus] = useState('');
+  const [workspaceTypeFilter, setWorkspaceTypeFilter] = useState('');
   const [q, setQ] = useState('');
   const [deleteProject, setDeleteProject] = useState<ResearchProject | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
 
   const projectsQuery = useQuery({
-    queryKey: ['projects', workspace?.id, { page, q, status }],
+    queryKey: ['projects', workspace?.id, { page, q, status, workspaceTypeFilter }],
     queryFn: () =>
       workspace?.id
-        ? projectApi.list(workspace.id, page, 10, { q: q || undefined, status: status || undefined })
-        : projectApi.mine(page, 10, { q: q || undefined, status: status || undefined }),
+        ? projectApi.list(workspace.id, page, 10, {
+            q: q || undefined,
+            status: status || undefined,
+            workspaceType: (workspaceTypeFilter || undefined) as AcademicWorkspaceType | undefined,
+          })
+        : projectApi.mine(page, 10, {
+            q: q || undefined,
+            status: status || undefined,
+            workspaceType: (workspaceTypeFilter || undefined) as AcademicWorkspaceType | undefined,
+          }),
     enabled: Boolean(workspace?.id),
   });
 
@@ -547,13 +613,13 @@ export function ProjectsPage() {
     <section className="page">
       <div className="page-header" style={{ alignItems: 'center' }}>
         <div>
-          <h1 className="page-title">Research Projects</h1>
+          <h1 className="page-title">My Workspaces</h1>
           <p className="muted">
             Workspace: <strong>{workspace?.name ?? 'Personal'}</strong> • Manage, design, and collaborate on your academic research.
           </p>
         </div>
         <Button type="button" onClick={() => setCreateModalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Plus size={16} /> New Research Project
+          <Plus size={16} /> Create Workspace
         </Button>
       </div>
 
@@ -564,7 +630,7 @@ export function ProjectsPage() {
             <Search size={16} className="muted" />
             <Input
               aria-label="Search projects"
-              placeholder="Search projects by title or description..."
+              placeholder="Search academic workspaces by title or description..."
               value={q}
               onChange={(e) => {
                 setQ(e.target.value);
@@ -590,6 +656,21 @@ export function ProjectsPage() {
               <option value="TRASHED">Trash</option>
             </Select>
           </div>
+          <div style={{ width: 210 }}>
+            <Select
+              aria-label="Filter workspace type"
+              value={workspaceTypeFilter}
+              onChange={(e) => {
+                setWorkspaceTypeFilter(e.target.value);
+                setPage(0);
+              }}
+            >
+              <option value="">All Types</option>
+              <option value="ACADEMIC_RESEARCH">Academic Research</option>
+              <option value="ACADEMIC_PROJECT">Academic Project</option>
+              <option value="COURSEWORK">Coursework</option>
+            </Select>
+          </div>
         </div>
       </Card>
 
@@ -605,6 +686,7 @@ export function ProjectsPage() {
               <thead>
                 <tr>
                   <th>Title & Description</th>
+                  <th>Type</th>
                   <th>Status</th>
                   <th>Your Role</th>
                   <th>Last Updated</th>
@@ -626,6 +708,22 @@ export function ProjectsPage() {
                           {project.description}
                         </p>
                       ) : null}
+                      {project.institution ? (
+                        <p className="muted" style={{ fontSize: '0.78rem', margin: '4px 0 0' }}>
+                          {project.institution}
+                        </p>
+                      ) : null}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                        <Badge tone="info">{workspaceTypeLabel(project)}</Badge>
+                        {project.workspaceType === 'ACADEMIC_PROJECT' && project.projectType ? (
+                          <span className="muted" style={{ fontSize: '0.75rem' }}>{projectTypeLabel(project.projectType)}</span>
+                        ) : null}
+                        {project.workspaceType === 'COURSEWORK' && project.courseName ? (
+                          <span className="muted" style={{ fontSize: '0.75rem' }}>{project.courseName}</span>
+                        ) : null}
+                      </div>
                     </td>
                     <td>
                       <Badge tone={project.status === 'ACTIVE' ? 'success' : project.status === 'COMPLETED' ? 'info' : 'warning'}>
@@ -683,20 +781,21 @@ export function ProjectsPage() {
         </Card>
       ) : (
         <EmptyState
-          title={q || status ? 'No projects match your search filters' : 'No research projects in this workspace'}
+          title={q || status || workspaceTypeFilter ? 'No workspaces match your filters' : 'No academic workspaces yet'}
           description={
-            q || status
-              ? 'Try clearing the search text or adjusting the status filter.'
-              : 'Launch your first research project to access the 18 academic research stages, document upload, and AI grounding.'
+            q || status || workspaceTypeFilter
+              ? 'Try clearing the search text or adjusting the status or type filter.'
+              : 'Create a workspace for academic research, a project, or coursework.'
           }
         >
-          {q || status ? (
+          {q || status || workspaceTypeFilter ? (
             <Button
               type="button"
               variant="secondary"
               onClick={() => {
                 setQ('');
                 setStatus('');
+                setWorkspaceTypeFilter('');
                 setPage(0);
               }}
               style={{ marginTop: 12 }}
@@ -705,7 +804,7 @@ export function ProjectsPage() {
             </Button>
           ) : (
             <Button type="button" onClick={() => setCreateModalOpen(true)} style={{ marginTop: 12 }}>
-              <Plus size={14} /> Create Research Project
+              <Plus size={14} /> Create Workspace
             </Button>
           )}
         </EmptyState>
@@ -768,6 +867,8 @@ export function ProjectDashboard() {
   const project = data?.project;
   const progress = data?.researchProgress;
   const docs = data?.documents;
+  const workspaceType = workspaceTypeOf(project);
+  const overviewLabels = projectOverviewLabels(project);
   const keywordsList = project?.keywords
     ? project.keywords.split(',').map((k) => k.trim()).filter(Boolean)
     : [];
@@ -787,8 +888,17 @@ export function ProjectDashboard() {
               {project?.status ?? 'DRAFT'}
             </Badge>
             <Badge tone="info">
+              {workspaceTypeLabel(project)}
+            </Badge>
+            <Badge tone="info">
               {data?.currentUserRole ?? 'LEAD'}
             </Badge>
+            {project?.workspaceType === 'ACADEMIC_PROJECT' && project.projectType ? (
+              <Badge tone="info">{projectTypeLabel(project.projectType)}</Badge>
+            ) : null}
+            {project?.workspaceType === 'COURSEWORK' && project.courseName ? (
+              <Badge tone="info">{project.courseName}</Badge>
+            ) : null}
             {project?.researchType ? (
               <Badge tone="info">{project.researchType}</Badge>
             ) : null}
@@ -809,8 +919,8 @@ export function ProjectDashboard() {
             </Link>
           </Button>
           <Button asChild variant="secondary">
-            <Link to={paths.projectResearch(projectId)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <BookOpen size={14} /> Continue Research
+            <Link to={workspaceType === 'COURSEWORK' ? paths.projectWriting(projectId) : paths.projectResearch(projectId)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <BookOpen size={14} /> {overviewLabels.continueWorkLabel}
             </Link>
           </Button>
           <Button asChild variant="primary">
@@ -820,7 +930,7 @@ export function ProjectDashboard() {
           </Button>
           <Button asChild variant="secondary">
             <Link to={paths.projectReport(projectId)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <FileText size={14} /> Continue Report
+              <FileText size={14} /> {overviewLabels.continueReportLabel}
             </Link>
           </Button>
         </div>
@@ -832,10 +942,12 @@ export function ProjectDashboard() {
         <Card style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
             <div className="muted" style={{ fontSize: '0.82rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              <Target size={16} /> Research Aim & Scope
+              <Target size={16} /> {overviewLabels.setupTitle}
             </div>
             <div style={{ fontSize: '0.9rem', fontWeight: 500, lineHeight: 1.4, color: project?.researchAim ? 'var(--text)' : 'var(--muted)' }}>
-              {project?.researchAim || 'No research aim defined yet. Click Edit Setup to add an aim.'}
+              {project?.workspaceType === 'COURSEWORK'
+                ? project.description || overviewLabels.setupEmpty
+                : project?.researchAim || overviewLabels.setupEmpty}
             </div>
             {project?.studyArea ? (
               <div style={{ marginTop: 8, fontSize: '0.8rem' }} className="muted">
@@ -868,7 +980,7 @@ export function ProjectDashboard() {
         <Card style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
             <div className="muted" style={{ fontSize: '0.82rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-              <FileText size={16} /> Research Sources
+              <FileText size={16} /> {overviewLabels.sourcesTitle}
             </div>
             <div style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: 2 }}>
               {docs?.total ?? 0}
@@ -879,7 +991,7 @@ export function ProjectDashboard() {
               {docs?.failed ? <span style={{ color: 'var(--danger-text, #ef4444)' }}>• {docs.failed} Failed</span> : null}
             </div>
             <p className="muted" style={{ fontSize: '0.78rem', marginTop: 6, lineHeight: 1.3 }}>
-              PDF literature & reports indexed with DOC codes for grounded AI queries.
+              {overviewLabels.sourcesDescription}
             </p>
           </div>
           <div style={{ marginTop: 12 }}>
@@ -895,13 +1007,13 @@ export function ProjectDashboard() {
         <Card style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
             <div className="muted" style={{ fontSize: '0.82rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-              <PenTool size={16} /> Writing Workspace
+              <PenTool size={16} /> {overviewLabels.writingTitle}
             </div>
             <div style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: 2 }}>
               Drafts
             </div>
             <p className="muted" style={{ fontSize: '0.78rem', marginTop: 6, lineHeight: 1.3 }}>
-              Organize, review, and edit chapters from literature reviews to problem statements.
+              {overviewLabels.writingDescription}
             </p>
           </div>
           <div style={{ marginTop: 12 }}>
@@ -917,13 +1029,13 @@ export function ProjectDashboard() {
         <Card style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid var(--primary-border, var(--primary))' }}>
           <div>
             <div style={{ color: 'var(--primary)', fontSize: '0.82rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-              <Sparkles size={16} /> AI Grounded Synthesis
+              <Sparkles size={16} /> {overviewLabels.aiTitle}
             </div>
             <div style={{ fontSize: '1.1rem', fontWeight: 700, marginTop: 2 }}>
               Ask & Generate
             </div>
             <p className="muted" style={{ fontSize: '0.78rem', marginTop: 4, lineHeight: 1.3 }}>
-              Generate verifiable literature reviews and problem statements cited to your documents.
+              {overviewLabels.aiDescription}
             </p>
           </div>
           <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -934,7 +1046,7 @@ export function ProjectDashboard() {
             </Button>
             <Button asChild variant="secondary" style={{ width: '100%', fontSize: '0.8rem', padding: '4px 8px' }}>
               <Link to={paths.projectAssistant(projectId)}>
-                Generate Literature Review
+                Ask About This Workspace
               </Link>
             </Button>
           </div>
@@ -963,9 +1075,9 @@ export function ProjectDashboard() {
 
       {/* Project Modules Grid */}
       <h2 style={{ fontSize: '1.2rem', fontWeight: 600, marginTop: 28, marginBottom: 12 }}>
-        Project Modules & Workbenches
+        {overviewLabels.modulesTitle}
       </h2>
-      <ProjectSections projectId={projectId} />
+      <ProjectSections projectId={projectId} project={project} />
 
       {/* Recent Project Activity */}
       {data?.recentActivities && data.recentActivities.length > 0 ? (
@@ -998,19 +1110,40 @@ export function ProjectDashboard() {
   );
 }
 
-function ProjectSections({ projectId }: { projectId: string }) {
-  const sections = [
-    { title: 'Research Sources', desc: 'Upload literature, extract text, and allocate DOC codes', icon: <FileText size={20} />, path: paths.projectSources(projectId) },
-    { title: 'Research Design & Methodology', desc: 'Define conceptual framework, study design, instruments, and datasets', icon: <BookOpen size={20} />, path: paths.projectResearch(projectId) },
-    { title: 'AI Research Assistant', desc: 'Evidence-grounded synthesis, Literature Matrix, and verifications', icon: <Sparkles size={20} />, path: paths.projectAssistant(projectId) },
-    { title: 'Writing Workspace', desc: 'Draft, edit, and organize research chapters', icon: <PenTool size={20} />, path: paths.projectWriting(projectId) },
-    { title: 'Datasets & Analysis', desc: 'Import datasets, variables, and run statistical tests', icon: <Database size={20} />, path: `/app/projects/${projectId}/data` },
-    { title: 'Dissertation & Report', desc: 'Draft chapters, assemble report, and export docx/pdf', icon: <Layers size={20} />, path: paths.projectReport(projectId) },
-    { title: 'Collaboration & Tasks', desc: 'Assign research tasks, leave review notes, invite peers', icon: <Users size={20} />, path: `/app/projects/${projectId}/tasks` },
-    { title: 'References & Citations', desc: 'APA7/Harvard reference management and integrity audit', icon: <HardDrive size={20} />, path: paths.projectReferences(projectId) },
-    { title: 'Advanced Research Workflow', desc: '18 academic stages from problem statement to defense', icon: <BookOpen size={20} />, path: paths.projectAdvanced(projectId) },
-    { title: 'Project Settings', desc: 'Manage title, description, team roles, and archiving', icon: <Settings size={20} />, path: `/app/projects/${projectId}/members` },
-  ];
+function ProjectSections({ projectId, project }: { projectId: string; project?: ResearchProject }) {
+  const type = workspaceTypeOf(project);
+  const sections = type === 'COURSEWORK'
+    ? [
+        { title: 'Sources', desc: 'Upload readings, briefs, cases, and academic files.', icon: <FileText size={20} />, path: paths.projectSources(projectId) },
+        { title: 'Notes / Work', desc: 'Draft notes, outlines, and coursework responses.', icon: <PenTool size={20} />, path: paths.projectWriting(projectId) },
+        { title: 'AI Assistant', desc: 'Ask grounded questions using uploaded materials.', icon: <Sparkles size={20} />, path: paths.projectAssistant(projectId) },
+        { title: finalDocumentLabel(project), desc: 'Assemble and export the coursework document.', icon: <Layers size={20} />, path: paths.projectReport(projectId) },
+        { title: 'References', desc: 'Manage citations and bibliography entries.', icon: <HardDrive size={20} />, path: paths.projectReferences(projectId) },
+        { title: 'Settings', desc: 'Manage title, metadata, team roles, and archiving.', icon: <Settings size={20} />, path: `/app/projects/${projectId}/members` },
+      ]
+    : type === 'ACADEMIC_PROJECT'
+      ? [
+          { title: 'Sources', desc: 'Upload literature, standards, specifications, and evidence.', icon: <FileText size={20} />, path: paths.projectSources(projectId) },
+          { title: workAreaLabel(project), desc: 'Track project scope, design notes, implementation, and evaluation.', icon: <BookOpen size={20} />, path: paths.projectResearch(projectId) },
+          { title: 'Analysis & Design', desc: 'Use existing analysis tools where the project requires them.', icon: <Database size={20} />, path: paths.projectAnalysis(projectId) },
+          { title: 'AI Assistant', desc: 'Evidence-grounded synthesis and project support.', icon: <Sparkles size={20} />, path: paths.projectAssistant(projectId) },
+          { title: finalDocumentLabel(project), desc: 'Draft chapters, assemble report, and export docx/pdf.', icon: <Layers size={20} />, path: paths.projectReport(projectId) },
+          { title: 'References', desc: 'Manage citations and bibliography entries.', icon: <HardDrive size={20} />, path: paths.projectReferences(projectId) },
+          { title: 'Collaboration & Tasks', desc: 'Assign project tasks, leave review notes, invite peers.', icon: <Users size={20} />, path: `/app/projects/${projectId}/tasks` },
+          { title: 'Settings', desc: 'Manage title, metadata, team roles, and archiving.', icon: <Settings size={20} />, path: `/app/projects/${projectId}/members` },
+        ]
+      : [
+          { title: 'Sources', desc: 'Upload literature, extract text, and allocate DOC codes.', icon: <FileText size={20} />, path: paths.projectSources(projectId) },
+          { title: 'Study Design', desc: 'Define conceptual framework, methodology, instruments, and datasets.', icon: <BookOpen size={20} />, path: paths.projectResearch(projectId) },
+          { title: 'AI Assistant', desc: 'Evidence-grounded synthesis, Literature Matrix, and verifications.', icon: <Sparkles size={20} />, path: paths.projectAssistant(projectId) },
+          { title: 'Writing Workspace', desc: 'Draft, edit, and organize research chapters.', icon: <PenTool size={20} />, path: paths.projectWriting(projectId) },
+          { title: 'Data Collection', desc: 'Manage datasets, variables, and empirical source material.', icon: <Database size={20} />, path: `/app/projects/${projectId}/data` },
+          { title: 'Analysis', desc: 'Run and review statistical or qualitative analysis.', icon: <Database size={20} />, path: paths.projectAnalysis(projectId) },
+          { title: finalDocumentLabel(project), desc: 'Draft chapters, assemble report, and export docx/pdf.', icon: <Layers size={20} />, path: paths.projectReport(projectId) },
+          { title: 'References', desc: 'APA7/Harvard reference management and integrity audit.', icon: <HardDrive size={20} />, path: paths.projectReferences(projectId) },
+          { title: 'Advanced Research Workflow', desc: '18 academic stages from problem statement to defense.', icon: <BookOpen size={20} />, path: paths.projectAdvanced(projectId) },
+          { title: 'Settings', desc: 'Manage title, metadata, team roles, and archiving.', icon: <Settings size={20} />, path: `/app/projects/${projectId}/members` },
+        ];
 
   return (
     <div className="grid cols-3" style={{ gap: 16 }}>
@@ -1044,7 +1177,7 @@ function EditProjectSetupModal({
   projectId: string;
 }) {
   return (
-    <Modal title="Edit Research Topic & Setup" open={open} onClose={onClose}>
+    <Modal title={`Edit ${workspaceTypeLabel(project)} Setup`} open={open} onClose={onClose}>
       {open ? (
         <EditProjectSetupForm onClose={onClose} project={project} projectId={projectId} />
       ) : null}
@@ -1066,16 +1199,28 @@ function EditProjectSetupForm({
   const [description, setDescription] = useState(project?.description || '');
   const [researchAim, setResearchAim] = useState(project?.researchAim || '');
   const [studyArea, setStudyArea] = useState(project?.studyArea || '');
-  const [researchType, setResearchType] = useState(project?.researchType || 'SOFTWARE_SYSTEM_PROJECT');
+  const [researchType, setResearchType] = useState(project?.researchType || 'GENERAL_ACADEMIC_RESEARCH');
+  const [projectType, setProjectType] = useState(project?.projectType || 'GENERAL_ACADEMIC_PROJECT');
+  const [institution, setInstitution] = useState(project?.institution || '');
+  const [department, setDepartment] = useState(project?.department || '');
+  const [programme, setProgramme] = useState(project?.programme || '');
+  const [academicYear, setAcademicYear] = useState(project?.academicYear || '');
+  const [supervisor, setSupervisor] = useState(project?.supervisor || '');
+  const [courseName, setCourseName] = useState(project?.courseName || '');
+  const [courseCode, setCourseCode] = useState(project?.courseCode || '');
+  const [lecturer, setLecturer] = useState(project?.lecturer || '');
+  const [deadline, setDeadline] = useState(project?.deadline || '');
   const [reportTemplateId, setReportTemplateId] = useState(project?.reportTemplateId || '');
   const [citationStyle, setCitationStyle] = useState(project?.citationStyle || 'APA_7');
   const [keywords, setKeywords] = useState(project?.keywords || '');
   const [error, setError] = useState<string | null>(null);
+  const workspaceType = workspaceTypeOf(project);
 
   const templatesQuery = useQuery({
     queryKey: ['report-templates'],
     queryFn: () => reportApi.templates(),
   });
+  const compatibleTemplates = (templatesQuery.data ?? []).filter((tpl) => templateSupportsWorkspace(tpl, workspaceType));
 
   const updateMutation = useMutation({
     mutationFn: (values: Record<string, unknown>) => projectApi.update(projectId, values),
@@ -1100,12 +1245,23 @@ function EditProjectSetupForm({
     updateMutation.mutate({
       title: title.trim(),
       description: description.trim() || undefined,
-      researchAim: researchAim.trim() || undefined,
-      studyArea: studyArea.trim() || undefined,
-      researchType: researchType.trim() || undefined,
+      workspaceType,
+      projectType: workspaceType === 'ACADEMIC_PROJECT' ? projectType : undefined,
+      institution: institution.trim() || undefined,
+      department: department.trim() || undefined,
+      programme: programme.trim() || undefined,
+      academicYear: academicYear.trim() || undefined,
+      supervisor: workspaceType === 'ACADEMIC_PROJECT' ? supervisor.trim() || undefined : undefined,
+      courseName: workspaceType === 'COURSEWORK' ? courseName.trim() || undefined : undefined,
+      courseCode: workspaceType === 'COURSEWORK' ? courseCode.trim() || undefined : undefined,
+      lecturer: workspaceType === 'COURSEWORK' ? lecturer.trim() || undefined : undefined,
+      deadline: workspaceType === 'COURSEWORK' ? deadline || undefined : undefined,
+      researchAim: workspaceType === 'ACADEMIC_RESEARCH' ? researchAim.trim() || undefined : undefined,
+      studyArea: workspaceType === 'ACADEMIC_RESEARCH' ? studyArea.trim() || undefined : undefined,
+      researchType: workspaceType === 'ACADEMIC_RESEARCH' ? researchType.trim() || undefined : undefined,
       reportTemplateId: reportTemplateId || undefined,
       citationStyle: citationStyle || undefined,
-      keywords: keywords.trim() || undefined,
+      keywords: workspaceType === 'ACADEMIC_RESEARCH' ? keywords.trim() || undefined : undefined,
     });
   };
 
@@ -1113,38 +1269,115 @@ function EditProjectSetupForm({
     <>
       {error ? <div className="alert danger" style={{ marginBottom: 16 }}>{error}</div> : null}
       <form className="form" onSubmit={handleSubmit}>
-        <Field label="Research Topic / Title *">
+        <div className="alert info" style={{ marginBottom: 12 }}>
+          Workspace type: <strong>{workspaceTypeLabel(project)}</strong>. Type conversion is disabled after creation to protect existing sources, reports, references, and AI history.
+        </div>
+        <Field label={`${workspaceType === 'COURSEWORK' ? 'Assignment / Coursework Title' : workspaceType === 'ACADEMIC_PROJECT' ? 'Project Title' : 'Research Topic / Title'} *`}>
           <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
         </Field>
-        <Field label="Project Description">
+        <Field label={workspaceType === 'COURSEWORK' ? 'Description / Instructions' : 'Description'}>
           <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
         </Field>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <Field label="Study Area / Domain Context">
-            <Input value={studyArea} onChange={(e) => setStudyArea(e.target.value)} placeholder="e.g. Healthcare, Economics" />
-          </Field>
-          <Field label="Research Type">
-            <select
-              className="select-input"
-              value={researchType}
-              onChange={(e) => setResearchType(e.target.value)}
-              style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)' }}
-            >
-              {[
-                { id: 'SOFTWARE_SYSTEM_PROJECT', label: 'Software / System Project' },
-                { id: 'QUANTITATIVE_SURVEY', label: 'Quantitative Survey' },
-                { id: 'QUALITATIVE_RESEARCH', label: 'Qualitative Research' },
-                { id: 'MIXED_METHODS', label: 'Mixed Methods' },
-                { id: 'EXPERIMENTAL_RESEARCH', label: 'Experimental Research' },
-                { id: 'CASE_STUDY', label: 'Case Study' },
-                { id: 'LITERATURE_BASED_RESEARCH', label: 'Literature-Based Research' },
-                { id: 'GENERAL_ACADEMIC_RESEARCH', label: 'General Academic Research' },
-              ].map((t) => (
-                <option key={t.id} value={t.id}>{t.label}</option>
-              ))}
-            </select>
-          </Field>
-        </div>
+        {workspaceType === 'ACADEMIC_RESEARCH' ? (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Field label="Study Area / Domain Context">
+                <Input value={studyArea} onChange={(e) => setStudyArea(e.target.value)} placeholder="e.g. Healthcare, Economics" />
+              </Field>
+              <Field label="Research Type">
+                <select
+                  className="select-input"
+                  value={researchType}
+                  onChange={(e) => setResearchType(e.target.value)}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)' }}
+                >
+                  {[
+                    { id: 'QUANTITATIVE_SURVEY', label: 'Quantitative Survey' },
+                    { id: 'QUALITATIVE_RESEARCH', label: 'Qualitative Research' },
+                    { id: 'MIXED_METHODS', label: 'Mixed Methods' },
+                    { id: 'EXPERIMENTAL_RESEARCH', label: 'Experimental Research' },
+                    { id: 'CASE_STUDY', label: 'Case Study' },
+                    { id: 'LITERATURE_BASED_RESEARCH', label: 'Literature-Based Research' },
+                    { id: 'GENERAL_ACADEMIC_RESEARCH', label: 'General Academic Research' },
+                  ].map((t) => (
+                    <option key={t.id} value={t.id}>{t.label}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <Field label="Research Aim / Goal">
+              <Textarea value={researchAim} onChange={(e) => setResearchAim(e.target.value)} rows={3} placeholder="State the main objective or research question..." />
+            </Field>
+            <Field label="Keywords (comma-separated)">
+              <Input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="e.g. machine learning, clinical diagnostics" />
+            </Field>
+          </>
+        ) : null}
+        {workspaceType === 'ACADEMIC_PROJECT' ? (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Field label="Project Type">
+                <select
+                  className="select-input"
+                  value={projectType}
+                  onChange={(e) => setProjectType(e.target.value as AcademicProjectType)}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)' }}
+                >
+                  {Object.entries(PROJECT_TYPE_LABELS).map(([id, label]) => (
+                    <option key={id} value={id}>{label}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Institution">
+                <Input value={institution} onChange={(e) => setInstitution(e.target.value)} />
+              </Field>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Field label="Department">
+                <Input value={department} onChange={(e) => setDepartment(e.target.value)} />
+              </Field>
+              <Field label="Programme">
+                <Input value={programme} onChange={(e) => setProgramme(e.target.value)} />
+              </Field>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Field label="Academic Year">
+                <Input value={academicYear} onChange={(e) => setAcademicYear(e.target.value)} placeholder="2026/2027" />
+              </Field>
+              <Field label="Supervisor">
+                <Input value={supervisor} onChange={(e) => setSupervisor(e.target.value)} />
+              </Field>
+            </div>
+          </>
+        ) : null}
+        {workspaceType === 'COURSEWORK' ? (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Field label="Course Name">
+                <Input value={courseName} onChange={(e) => setCourseName(e.target.value)} />
+              </Field>
+              <Field label="Course Code">
+                <Input value={courseCode} onChange={(e) => setCourseCode(e.target.value)} />
+              </Field>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Field label="Lecturer">
+                <Input value={lecturer} onChange={(e) => setLecturer(e.target.value)} />
+              </Field>
+              <Field label="Deadline">
+                <Input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+              </Field>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Field label="Institution">
+                <Input value={institution} onChange={(e) => setInstitution(e.target.value)} />
+              </Field>
+              <Field label="Department">
+                <Input value={department} onChange={(e) => setDepartment(e.target.value)} />
+              </Field>
+            </div>
+          </>
+        ) : null}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field label="Report Template">
             <select
@@ -1153,8 +1386,8 @@ function EditProjectSetupForm({
               onChange={(e) => setReportTemplateId(e.target.value)}
               style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)' }}
             >
-              <option value="">Default (TTU Computer Science Final Project Report)</option>
-              {templatesQuery.data?.map((tpl) => (
+              <option value="">Default {finalDocumentLabel(project)}</option>
+              {compatibleTemplates.map((tpl) => (
                 <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
               ))}
             </select>
@@ -1179,12 +1412,6 @@ function EditProjectSetupForm({
             </select>
           </Field>
         </div>
-        <Field label="Research Aim / Goal">
-          <Textarea value={researchAim} onChange={(e) => setResearchAim(e.target.value)} rows={3} placeholder="State the main objective or research question..." />
-        </Field>
-        <Field label="Keywords (comma-separated)">
-          <Input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="e.g. machine learning, clinical diagnostics" />
-        </Field>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 20 }}>
           <Button type="button" variant="secondary" onClick={onClose} disabled={updateMutation.isPending}>
             Cancel

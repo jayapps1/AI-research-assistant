@@ -9,6 +9,7 @@ import type {
   AdminGrantAiCreditsRequest,
   AuthTokenResponse,
   Citation,
+  ConversationAttachment,
   ConversationDetail,
   ConversationSourceScope,
   ConversationStatus,
@@ -45,6 +46,9 @@ import type {
   SubmitConversationResponse,
   TableOfContentsResponse,
   UpdateReportSettingsRequest,
+  UpdateTitlePageDetailsRequest,
+  DeterministicRepairResponse,
+  GenerateSectionRequest,
   TotpEnrollmentResponse,
   UpdateAiCreditPackRequest,
   UpdateProfileRequest,
@@ -54,8 +58,21 @@ import type {
   UserProfileResponse,
   UserTaskSummary,
   ValidationIssue,
+  AcademicDocumentGuidelineResponse,
+  AcademicFileRole,
+  DynamicTocResponse,
+  ExtractedAcademicTemplate,
+  RecommendedTemplateItem,
+  ReportStructureValidationResponse,
   Workspace,
   WorkspaceDashboardResponse,
+  AcademicProjectType,
+  AcademicWorkspaceType,
+  EvidenceType,
+  ProjectEvidenceItem,
+  ProjectImageAnalysisResult,
+  ListOfFiguresItem,
+  ListOfTablesItem,
 } from '../types/api';
 
 export const authApi = {
@@ -89,13 +106,24 @@ export const workspaceApi = {
 };
 
 export const projectApi = {
-  list: (workspaceId: string, page = 0, size = 20, filters?: { q?: string; status?: string }) =>
+  list: (workspaceId: string, page = 0, size = 20, filters?: { q?: string; status?: string; workspaceType?: AcademicWorkspaceType }) =>
     api.get<PageResponse<ResearchProject>>(`/workspaces/${workspaceId}/projects`, { params: { page, size, ...filters } }).then((r) => r.data),
-  mine: (page = 0, size = 20, filters?: { q?: string; status?: string }) =>
+  mine: (page = 0, size = 20, filters?: { q?: string; status?: string; workspaceType?: AcademicWorkspaceType }) =>
     api.get<PageResponse<ResearchProject>>('/projects/mine', { params: { page, size, ...filters } }).then((r) => r.data),
   create: (workspaceId: string, body: {
     title: string;
     description?: string;
+    workspaceType?: AcademicWorkspaceType;
+    projectType?: AcademicProjectType;
+    institution?: string;
+    department?: string;
+    programme?: string;
+    academicYear?: string;
+    supervisor?: string;
+    courseName?: string;
+    courseCode?: string;
+    lecturer?: string;
+    deadline?: string;
     researchAim?: string;
     studyArea?: string;
     researchType?: string;
@@ -159,10 +187,11 @@ export const documentApi = {
     keywords: string;
   }>) =>
     api.patch<DocumentItem>(`/documents/${documentId}`, body).then((r) => r.data),
-  upload: (projectId: string, file: File, title?: string) => {
+  upload: (projectId: string, file: File, title?: string, role?: AcademicFileRole) => {
     const body = new FormData();
     body.append('file', file);
     if (title) body.append('title', title);
+    if (role) body.append('role', role);
     return api.post<DocumentItem>(`/projects/${projectId}/documents`, body, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data);
   },
   uploadVersion: (documentId: string, file: File) => {
@@ -288,6 +317,15 @@ export const conversationApi = {
     api.post<ConversationSummary>(`/conversations/${conversationId}/trash`).then((r) => r.data),
   moveToProject: (conversationId: string, projectId: string) =>
     api.post<ConversationSummary>(`/conversations/${conversationId}/project`, { projectId }).then((r) => r.data),
+  listAttachments: (conversationId: string) =>
+    api.get<ConversationAttachment[]>(`/conversations/${conversationId}/attachments`).then((r) => r.data),
+  uploadAttachment: (conversationId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post<ConversationAttachment>(`/conversations/${conversationId}/attachments`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then((r) => r.data);
+  },
 };
 
 export const analysisApi = {
@@ -362,15 +400,32 @@ export const reportApi = {
   updateSection: (sectionId: string, body: Record<string, unknown>) => api.patch<Record<string, unknown>>(`/report-sections/${sectionId}`, body).then((r) => r.data),
   deleteSection: (sectionId: string) => api.delete<void>(`/report-sections/${sectionId}`).then((r) => r.data),
   refreshReferences: (reportId: string) => api.post<Record<string, unknown>>(`/reports/${reportId}/references/refresh`).then((r) => r.data),
+  refreshTitlePage: (reportId: string) =>
+    api.post<Record<string, unknown>>(`/reports/${reportId}/title-page/refresh`).then((r) => r.data),
+  updateTitlePageDetails: (reportId: string, body: UpdateTitlePageDetailsRequest) =>
+    api.post<Record<string, unknown>>(`/reports/${reportId}/title-page/details`, body).then((r) => r.data),
+  refreshTableOfContents: (reportId: string) =>
+    api.post<Record<string, unknown>>(`/reports/${reportId}/toc/refresh`).then((r) => r.data),
+  refreshListOfFigures: (reportId: string) =>
+    api.post<Record<string, unknown>>(`/reports/${reportId}/figures/refresh`).then((r) => r.data),
+  refreshListOfTables: (reportId: string) =>
+    api.post<Record<string, unknown>>(`/reports/${reportId}/tables/refresh`).then((r) => r.data),
+  repairDeterministicNodes: (reportId: string, forceReset = false) =>
+    api.post<DeterministicRepairResponse>(`/reports/${reportId}/repair-deterministic?forceReset=${forceReset}`).then((r) => r.data),
   updateSettings: (reportId: string, body: UpdateReportSettingsRequest) => api.patch<Record<string, unknown>>(`/reports/${reportId}/settings`, body).then((r) => r.data),
   literatureMatrix: (projectId: string) => api.get<LiteratureMatrixResponse>(`/projects/${projectId}/literature-matrix`).then((r) => r.data),
   saveLiteratureMatrix: (projectId: string, body: SaveLiteratureMatrixRequest) => api.post<LiteratureMatrixResponse>(`/projects/${projectId}/literature-matrix`, body).then((r) => r.data),
   generateSection: (
     sectionId: string,
-    body?: { documentIds?: string[]; instructions?: string; evidenceLimit?: number },
+    body?: GenerateSectionRequest,
   ) => api.post<Record<string, unknown>>(`/report-sections/${sectionId}/generate`, body ?? {}).then((r) => r.data),
+  generateSectionForReport: (
+    reportId: string,
+    body?: GenerateSectionRequest,
+  ) => api.post<Record<string, unknown>>(`/reports/${reportId}/generate-section`, body ?? {}).then((r) => r.data),
   validate: (reportId: string) => api.post<Record<string, unknown>>(`/reports/${reportId}/validate`).then((r) => r.data),
   assemble: (reportId: string) => api.post<Record<string, unknown>>(`/reports/${reportId}/assemble`).then((r) => r.data),
+  applyTemplateFormatting: (reportId: string) => api.post<Record<string, unknown>>(`/reports/${reportId}/template-formatting/apply`).then((r) => r.data),
   finalize: (reportId: string) => api.post<Record<string, unknown>>(`/reports/${reportId}/finalize`).then((r) => r.data),
   references: (projectId: string, page = 0, size = 20, filters?: Record<string, unknown>) =>
     api.get<PageResponse<Record<string, unknown>>>(`/projects/${projectId}/references`, { params: { page, size, ...filters } }).then((r) => r.data),
@@ -514,3 +569,104 @@ export const profileApi = {
   deleteImage: () => api.delete<UserProfileResponse>('/me/profile/image').then((r) => r.data),
   getAvatarUrl: (userId: string) => `/api/v1/users/${userId}/avatar`,
 };
+
+export const academicTemplateApi = {
+  uploadGuideline: (workspaceId: string, file: File, projectId?: string | null) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (projectId) {
+      formData.append('projectId', projectId);
+    }
+    return api.post<AcademicDocumentGuidelineResponse>(
+      `/workspaces/${workspaceId}/academic-templates/upload`,
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    ).then((r) => r.data);
+  },
+  getGuideline: (guidelineId: string) =>
+    api.get<AcademicDocumentGuidelineResponse>(`/academic-templates/${guidelineId}`).then((r) => r.data),
+  listGuidelines: (workspaceId: string, projectId?: string) =>
+    api.get<AcademicDocumentGuidelineResponse[]>(`/workspaces/${workspaceId}/academic-templates`, {
+      params: projectId ? { projectId } : undefined,
+    }).then((r) => r.data),
+  updateGuideline: (guidelineId: string, data: ExtractedAcademicTemplate) =>
+    api.put<AcademicDocumentGuidelineResponse>(`/academic-templates/${guidelineId}`, data).then((r) => r.data),
+  approveAndApply: (guidelineId: string, payload: { targetProjectId?: string; applyToProject: boolean; preserveExistingContent: boolean }) =>
+    api.post<AcademicDocumentGuidelineResponse>(`/academic-templates/${guidelineId}/approve`, payload).then((r) => r.data),
+  getDynamicToc: (reportId: string) =>
+    api.get<DynamicTocResponse>(`/reports/${reportId}/dynamic-toc`).then((r) => r.data),
+  validateStructure: (reportId: string, guidelineId?: string) =>
+    api.get<ReportStructureValidationResponse>(`/reports/${reportId}/validate-structure`, {
+      params: guidelineId ? { guidelineId } : undefined,
+    }).then((r) => r.data),
+  getRecommendations: (workspaceType: string, projectType?: string, institution?: string, department?: string) =>
+    api.get<RecommendedTemplateItem[]>('/academic-templates/recommendations', {
+      params: { workspaceType, projectType, institution, department },
+    }).then((r) => r.data),
+};
+
+export const projectEvidenceApi = {
+  upload: (
+    projectId: string,
+    file: File,
+    options?: {
+      evidenceType?: EvidenceType;
+      caption?: string;
+      description?: string;
+      sectionId?: string;
+      altText?: string;
+    }
+  ) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (options?.evidenceType) formData.append('evidenceType', options.evidenceType);
+    if (options?.caption) formData.append('caption', options.caption);
+    if (options?.description) formData.append('description', options.description);
+    if (options?.sectionId) formData.append('sectionId', options.sectionId);
+    if (options?.altText) formData.append('altText', options.altText);
+    return api
+      .post<ProjectEvidenceItem>(`/projects/${projectId}/evidence/upload`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data);
+  },
+  createStructured: (
+    projectId: string,
+    body: {
+      evidenceType: EvidenceType;
+      originalFilename: string;
+      caption?: string;
+      description?: string;
+      sectionId?: string;
+      figureLabel?: string;
+      metadataJson?: string;
+    }
+  ) => api.post<ProjectEvidenceItem>(`/projects/${projectId}/evidence/structured`, body).then((r) => r.data),
+  list: (projectId: string, params?: { sectionId?: string; type?: EvidenceType }) =>
+    api.get<ProjectEvidenceItem[]>(`/projects/${projectId}/evidence`, { params }).then((r) => r.data),
+  get: (projectId: string, evidenceId: string) =>
+    api.get<ProjectEvidenceItem>(`/projects/${projectId}/evidence/${evidenceId}`).then((r) => r.data),
+  update: (
+    projectId: string,
+    evidenceId: string,
+    body: {
+      caption?: string;
+      description?: string;
+      altText?: string;
+      sectionId?: string | null;
+      evidenceType?: EvidenceType;
+      figureLabel?: string;
+    }
+  ) => api.put<ProjectEvidenceItem>(`/projects/${projectId}/evidence/${evidenceId}`, body).then((r) => r.data),
+  delete: (projectId: string, evidenceId: string) =>
+    api.delete<void>(`/projects/${projectId}/evidence/${evidenceId}`).then((r) => r.data),
+  reorder: (projectId: string, evidenceIds: string[]) =>
+    api.post<ProjectEvidenceItem[]>(`/projects/${projectId}/evidence/reorder`, { evidenceIds }).then((r) => r.data),
+  analyze: (projectId: string, evidenceId: string) =>
+    api.post<ProjectImageAnalysisResult>(`/projects/${projectId}/evidence/${evidenceId}/analyze`).then((r) => r.data),
+  listOfFigures: (projectId: string, reportId: string) =>
+    api.get<ListOfFiguresItem[]>(`/projects/${projectId}/reports/${reportId}/list-of-figures`).then((r) => r.data),
+  listOfTables: (projectId: string, reportId: string) =>
+    api.get<ListOfTablesItem[]>(`/projects/${projectId}/reports/${reportId}/list-of-tables`).then((r) => r.data),
+};
+

@@ -9,6 +9,10 @@ public record StorageObject(
         long sizeBytes
 ) implements Closeable {
 
+    public InputStream contentStream() {
+        return inputStream();
+    }
+
     @Override
     public void close() throws IOException {
         if (inputStream != null) {

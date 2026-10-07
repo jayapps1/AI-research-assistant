@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { billingApi, projectApi, workspaceApi } from '../../api/endpoints';
+import { billingApi, projectApi, reportApi, workspaceApi } from '../../api/endpoints';
 import { publicApi } from '../../api/public';
 import { clearTokens, setTokens } from '../../api/tokens';
 import { ThemeProvider } from '../../app/ThemeProvider';
@@ -42,6 +42,7 @@ describe('Workspace & FREE Plan Flow Suite', () => {
       'raa.user',
       JSON.stringify({ id: 'u-1', email: 'researcher@example.com', firstName: 'Ada', systemRoles: [] }),
     );
+    vi.spyOn(reportApi, 'templates').mockResolvedValue([]);
   });
 
   it('removes strange top full-width select and renders compact WorkspaceSwitcher', async () => {
@@ -250,14 +251,24 @@ describe('Workspace & FREE Plan Flow Suite', () => {
       </QueryClientProvider>,
     );
 
-    const titleInput = screen.getByPlaceholderText(/e\.g\., Deep Learning/i);
-    fireEvent.change(titleInput, { target: { value: 'Exceeding Project' } });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
 
-    const submitBtn = screen.getByRole('button', { name: /create project & launch/i });
+    const titleInput = screen.getByLabelText(/Title \/ Research Topic/i);
+    fireEvent.change(titleInput, { target: { value: 'Exceeding Project' } });
+    await waitFor(() => {
+      expect(titleInput).toHaveValue('Exceeding Project');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Research Report Setup/i)).toBeInTheDocument();
+    });
+
+    const submitBtn = screen.getByRole('button', { name: /create workspace & launch/i });
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(screen.getByText(/you've reached the project limit on the free plan/i)).toBeInTheDocument();
+      expect(screen.getByText(/you've reached the workspace project limit on the free plan/i)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /view plans/i })).toBeInTheDocument();
     });
   });

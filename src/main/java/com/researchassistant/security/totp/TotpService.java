@@ -36,7 +36,7 @@ public class TotpService {
     private static final int SECRET_BYTES = 20;
     private static final int CODE_DIGITS = 6;
     private static final long PERIOD_SECONDS = 30;
-    private static final int ALLOWED_WINDOW_STEPS = 1;
+    private static final int ALLOWED_WINDOW_STEPS = 2;
     private static final String HMAC_ALGORITHM = "HmacSHA1";
     private static final String INVALID_CREDENTIALS =
             "Invalid credentials.";

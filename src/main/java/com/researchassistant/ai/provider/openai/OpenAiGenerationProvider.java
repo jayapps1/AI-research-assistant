@@ -47,6 +47,7 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
     private final ObjectMapper objectMapper;
     private final AiProviderBudgetService budgetService;
     private final RagContextBudgetService contextBudgetService;
+    private final org.springframework.core.env.Environment environment;
 
     public OpenAiGenerationProvider(
             AiProperties properties,
@@ -54,7 +55,8 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
             GroundingPromptBuilder promptBuilder,
             ObjectMapper objectMapper,
             AiProviderBudgetService budgetService,
-            RagContextBudgetService contextBudgetService
+            RagContextBudgetService contextBudgetService,
+            ObjectProvider<org.springframework.core.env.Environment> environment
     ) {
         this.properties = properties;
         this.chatModel = chatModel.getIfAvailable();
@@ -62,6 +64,7 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
         this.objectMapper = objectMapper;
         this.budgetService = budgetService;
         this.contextBudgetService = contextBudgetService;
+        this.environment = environment.getIfAvailable();
     }
 
     @Override
@@ -78,13 +81,60 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
 
     @Override
     public boolean available() {
-        return properties.generation().enabled() && chatModel != null;
+        return properties.generation().enabled() && chatModel != null && openAiApiKeyPresent();
+    }
+
+    private boolean openAiApiKeyPresent() {
+        return hasText(System.getenv("OPENAI_API_KEY"))
+                || hasText(System.getProperty("OPENAI_API_KEY"))
+                || (environment != null && hasText(environment.getProperty("spring.ai.openai.api-key")));
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public <T> AiTaskResult<T> generate(AiTaskRequest request, Class<T> responseType) {
-        if (!available()) {
-            throw new IllegalStateException("OpenAI generation provider is disabled or unavailable.");
+        if (!properties.generation().enabled()) {
+            return AiTaskResult.unavailable(
+                    UUID.randomUUID(),
+                    request.taskType(),
+                    "AI generation capability is disabled."
+            );
+        }
+
+        if (!openAiApiKeyPresent()) {
+            return AiTaskResult.failure(
+                    UUID.randomUUID(),
+                    request.taskType(),
+                    AiProviderType.OPENAI,
+                    modelName(),
+                    "AI_PROVIDER_AUTHENTICATION_FAILED",
+                    "AI_PROVIDER_AUTHENTICATION_FAILED",
+                    0L,
+                    OffsetDateTime.now(),
+                    OffsetDateTime.now(),
+                    List.of("The AI provider configuration could not be authenticated."),
+                    new com.researchassistant.ai.exception.AiGenerationException("AI_PROVIDER_AUTHENTICATION_FAILED", "The AI provider configuration could not be authenticated.")
+            );
+        }
+
+        if (chatModel == null) {
+            return AiTaskResult.failure(
+                    UUID.randomUUID(),
+                    request.taskType(),
+                    AiProviderType.OPENAI,
+                    modelName(),
+                    "AI_MODEL_UNAVAILABLE",
+                    "AI_MODEL_UNAVAILABLE",
+                    0L,
+                    OffsetDateTime.now(),
+                    OffsetDateTime.now(),
+                    List.of("The configured AI model is not available."),
+                    null
+            );
         }
 
         int estimatedInputTokens = contextBudgetService.estimatePromptTokens(request.promptText());
@@ -231,6 +281,10 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
 
     @Override
     public GeneratedAnswerDraft generate(EvidenceBundle evidenceBundle) {
+        if (!openAiApiKeyPresent()) {
+            throw new com.researchassistant.ai.exception.AiGenerationException("AI_PROVIDER_AUTHENTICATION_FAILED", "The AI provider configuration could not be authenticated.");
+        }
+
         String promptText = promptBuilder.build(evidenceBundle);
         AiTaskRequest taskRequest = new AiTaskRequest(
                 com.researchassistant.ai.orchestration.AiTaskType.GROUNDED_QA,
@@ -245,9 +299,11 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
                 properties.privacy().externalResearchContentEnabled()
         );
         AiTaskResult<GeneratedAnswerDraft> result = generate(taskRequest, GeneratedAnswerDraft.class);
+
         if (result.status() == AiRequestStatus.COMPLETED && result.result() != null) {
             return result.result();
         }
+
         String failureReason = !result.warnings().isEmpty()
                 ? String.join(", ", result.warnings())
                 : (result.failureCategory() != null ? result.failureCategory() : "AI generation failed");
@@ -267,6 +323,9 @@ public class OpenAiGenerationProvider implements AiGenerationProvider, GroundedA
             GeneratedAnswerDraft draft,
             CitationVerificationResult verification
     ) {
+        if (!openAiApiKeyPresent()) {
+            throw new com.researchassistant.ai.exception.AiGenerationException("AI_PROVIDER_AUTHENTICATION_FAILED", "The AI provider configuration could not be authenticated.");
+        }
         String promptText = buildCitationRepairPrompt(evidenceBundle, draft, verification);
         AiTaskRequest taskRequest = new AiTaskRequest(
                 com.researchassistant.ai.orchestration.AiTaskType.GROUNDED_QA,

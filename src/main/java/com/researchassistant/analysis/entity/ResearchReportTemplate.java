@@ -29,6 +29,8 @@ public class ResearchReportTemplate {
     private boolean citationStyleLocked;
     @Column(length = 255)
     private String department;
+    @Column(name = "supported_workspace_types", length = 255)
+    private String supportedWorkspaceTypes;
     @Column(columnDefinition = "TEXT")
     private String description;
     @Column(name = "configuration_json", nullable = false, columnDefinition = "TEXT")
