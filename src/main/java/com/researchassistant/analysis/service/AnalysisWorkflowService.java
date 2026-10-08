@@ -2,6 +2,7 @@ package com.researchassistant.analysis.service;
 
 import com.researchassistant.analysis.dto.AnalysisDtos.*;
 import com.researchassistant.analysis.entity.*;
+import com.researchassistant.analysis.exception.ReportVersionConflictException;
 import com.researchassistant.analysis.exception.ReportValidationException;
 import com.researchassistant.analysis.exception.InsufficientProjectEvidenceException;
 import com.researchassistant.analysis.repository.*;
@@ -1400,7 +1401,7 @@ public class AnalysisWorkflowService {
 
     @Transactional
     public ReportResponse finalizeReport(UUID reportId, User user) {
-        ResearchReport report = loadReport(reportId);
+        ResearchReport report = loadReportForVersionAllocation(reportId);
         authorizationService.requireProjectAdminAccess(report.getProject().getId(), user);
         ReportValidationResponse validation = validateReport(reportId, user);
         if (!validation.errors().isEmpty()) throw new ReportValidationException(validation);
@@ -1486,9 +1487,22 @@ public class AnalysisWorkflowService {
 
     @Transactional
     public FinalDocumentResponse updateFinalDocument(UUID reportId, User user, UpdateFinalDocumentRequest request) {
-        ResearchReport report = loadReportForEdit(reportId, user);
+        ResearchReport report = loadReportForVersionAllocation(reportId);
+        authorizationService.requireProjectEditor(report.getProject().getId(), user);
+        if (report.getStatus() == ResearchReportStatus.FINAL) {
+            throw new ReportVersionConflictException(
+                    "REPORT_REVISION_REQUIRED",
+                    "Final document versions are immutable. Create a new working revision before editing the final document."
+            );
+        }
         ReportDocumentVersion version = documentVersionRepository.findFirstByReportIdOrderByVersionNumberDesc(reportId)
                 .orElseThrow(() -> new ResourceNotFoundException("No final document version found for this report. Please prepare one first."));
+        if (version.getSourceReportRevisionNumber() != report.getRevisionNumber()) {
+            throw new ReportVersionConflictException(
+                    "REPORT_VERSION_CONFLICT",
+                    "Final document is out of date. Prepare a new final document version before editing it."
+            );
+        }
         if (request.contentJson() != null && !request.contentJson().isBlank()) {
             String incomingPlainText = request.plainText() != null ? request.plainText() : richTextService.plainTextFromDocumentJson(request.contentJson());
             boolean existingNonEmpty = version.getPlainText() != null && !version.getPlainText().isBlank();
@@ -1946,6 +1960,7 @@ public class AnalysisWorkflowService {
         if (refreshReferences) {
             refreshReportReferencesInternal(report, user);
         }
+        report.setRevisionNumber(report.getRevisionNumber() + 1);
         return ReportResponse.from(report);
     }
 
@@ -1983,7 +1998,9 @@ public class AnalysisWorkflowService {
     @Transactional
     public SectionResponse refreshTitlePage(UUID reportId, User user) {
         ResearchReport report = loadReportForEdit(reportId, user);
-        return SectionResponse.from(refreshTitlePageInternal(report, user));
+        ResearchReportSection refreshed = refreshTitlePageInternal(report, user);
+        report.setRevisionNumber(report.getRevisionNumber() + 1);
+        return SectionResponse.from(refreshed);
     }
 
     @Transactional
@@ -2020,6 +2037,7 @@ public class AnalysisWorkflowService {
         titleSection.setUpdatedBy(user);
         titleSection.setRevisionNumber(titleSection.getRevisionNumber() + 1);
         citationRepository.deleteAllBySectionId(titleSection.getId());
+        report.setRevisionNumber(report.getRevisionNumber() + 1);
         return SectionResponse.from(sectionRepository.save(titleSection));
     }
 
@@ -3134,7 +3152,25 @@ public class AnalysisWorkflowService {
     private ResearchConclusion loadConclusion(UUID id) { return conclusionRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Conclusion not found.")); }
     private ResearchRecommendation loadRecommendation(UUID id) { return recommendationRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Recommendation not found.")); }
     private ResearchReport loadReport(UUID id) { return reportRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Research report not found.")); }
-    private ResearchReport loadReportForEdit(UUID id, User user) { ResearchReport r = loadReport(id); authorizationService.requireProjectEditor(r.getProject().getId(), user); if (r.getStatus() == ResearchReportStatus.FINAL) throw new IllegalStateException("Final reports cannot be silently edited. Create a new revision first."); return r; }
+    private ResearchReport loadReportForVersionAllocation(UUID id) { return reportRepository.findByIdForUpdate(id).orElseThrow(() -> new ResourceNotFoundException("Research report not found.")); }
+    private ResearchReport loadReportForEdit(UUID id, User user) {
+        ResearchReport report = loadReportForVersionAllocation(id);
+        authorizationService.requireProjectEditor(report.getProject().getId(), user);
+        return ensureWorkingRevision(report);
+    }
+
+    private ResearchReport ensureWorkingRevision(ResearchReport report) {
+        if (report.getStatus() == ResearchReportStatus.ARCHIVED || report.getStatus() == ResearchReportStatus.SUPERSEDED) {
+            throw new ReportVersionConflictException(
+                    "REPORT_VERSION_CONFLICT",
+                    "This report version is not editable."
+            );
+        }
+        if (report.getStatus() == ResearchReportStatus.FINAL) {
+            report.setStatus(ResearchReportStatus.DRAFT);
+        }
+        return report;
+    }
 
     private List<AnalysisResult> loadAnalysisResults(List<UUID> ids, UUID projectId) {
         if (ids == null || ids.isEmpty()) throw new IllegalArgumentException("At least one analysis result is required.");

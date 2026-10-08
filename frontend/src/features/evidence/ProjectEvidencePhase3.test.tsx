@@ -320,7 +320,7 @@ describe('Phase 3 Project Evidence & Figures Frontend Components', () => {
         <QueryClientProvider client={queryClient}>
           <ReportRichEditor
             content="<p>Chapter 4 text</p>"
-            onChange={vi.fn()}
+            onSave={vi.fn()}
             projectId="proj-1"
             sectionId="sec-4-1"
           />

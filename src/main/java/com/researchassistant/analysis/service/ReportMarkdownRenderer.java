@@ -1,6 +1,7 @@
 package com.researchassistant.analysis.service;
 
 import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
+import org.apache.poi.xwpf.usermodel.BreakType;
 import org.apache.poi.xwpf.usermodel.XWPFAbstractNum;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFNumbering;
@@ -19,6 +20,7 @@ import org.commonmark.node.Code;
 import org.commonmark.node.Emphasis;
 import org.commonmark.node.FencedCodeBlock;
 import org.commonmark.node.HardLineBreak;
+import org.commonmark.node.HtmlBlock;
 import org.commonmark.node.Heading;
 import org.commonmark.node.IndentedCodeBlock;
 import org.commonmark.node.Link;
@@ -115,6 +117,8 @@ public class ReportMarkdownRenderer {
                 blocks.add(new MarkdownBlock(literalText(heading), heading.getLevel()));
             } else if (child instanceof Paragraph paragraph) {
                 blocks.add(new MarkdownBlock(literalText(paragraph), 0));
+            } else if (child instanceof HtmlBlock htmlBlock && isPageBreak(htmlBlock.getLiteral())) {
+                blocks.add(new MarkdownBlock("\f", -1));
             } else {
                 List<String> lines = new ArrayList<>();
                 renderPlainBlock(child, lines, 0, 1);
@@ -181,6 +185,13 @@ public class ReportMarkdownRenderer {
         }
         if (node instanceof TableBlock tableBlock) {
             renderTable(document, tableBlock);
+            return;
+        }
+        if (node instanceof HtmlBlock htmlBlock) {
+            if (isPageBreak(htmlBlock.getLiteral())) {
+                XWPFParagraph paragraph = document.createParagraph();
+                paragraph.createRun().addBreak(BreakType.PAGE);
+            }
             return;
         }
         for (Node child = node.getFirstChild(); child != null; child = child.getNext()) {
@@ -303,6 +314,12 @@ public class ReportMarkdownRenderer {
             }
             return;
         }
+        if (node instanceof HtmlBlock htmlBlock) {
+            if (isPageBreak(htmlBlock.getLiteral())) {
+                lines.add("\f");
+            }
+            return;
+        }
         if (node instanceof FencedCodeBlock codeBlock) {
             lines.add(codeBlock.getLiteral());
             return;
@@ -332,6 +349,10 @@ public class ReportMarkdownRenderer {
         if (heading == null || heading.isBlank() || line == null) return false;
         String candidate = line.trim().replaceFirst("^#{1,6}\\s+", "").trim();
         return normalizeHeading(candidate).equals(normalizeHeading(heading));
+    }
+
+    private boolean isPageBreak(String literal) {
+        return literal != null && literal.toUpperCase(Locale.ROOT).contains("PAGE_BREAK");
     }
 
     private String normalizeHeading(String value) {

@@ -31,6 +31,8 @@ public class ReportDocumentCompiler {
     private final CitationFormattingService citationFormattingService;
     private final TitlePageRenderer titlePageRenderer;
     private final DocumentStructureExtractors structureExtractors;
+    private final com.researchassistant.evidence.repository.ProjectEvidenceRepository evidenceRepository;
+    private final com.researchassistant.evidence.service.ProjectEvidenceNumberingService evidenceNumberingService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ReportDocumentCompiler(ResearchReportChapterRepository chapterRepository,
@@ -42,6 +44,23 @@ public class ReportDocumentCompiler {
             CitationFormattingService citationFormattingService,
             TitlePageRenderer titlePageRenderer,
             DocumentStructureExtractors structureExtractors) {
+        this(chapterRepository, sectionRepository, citationRepository, projectReferenceRepository,
+                literatureMatrixRepository, richTextService, citationFormattingService, titlePageRenderer,
+                structureExtractors, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReportDocumentCompiler(ResearchReportChapterRepository chapterRepository,
+            ResearchReportSectionRepository sectionRepository,
+            ResearchReportCitationRepository citationRepository,
+            ProjectReferenceRepository projectReferenceRepository,
+            LiteratureMatrixRepository literatureMatrixRepository,
+            ReportRichTextService richTextService,
+            CitationFormattingService citationFormattingService,
+            TitlePageRenderer titlePageRenderer,
+            DocumentStructureExtractors structureExtractors,
+            com.researchassistant.evidence.repository.ProjectEvidenceRepository evidenceRepository,
+            com.researchassistant.evidence.service.ProjectEvidenceNumberingService evidenceNumberingService) {
         this.chapterRepository = chapterRepository;
         this.sectionRepository = sectionRepository;
         this.citationRepository = citationRepository;
@@ -51,6 +70,8 @@ public class ReportDocumentCompiler {
         this.citationFormattingService = citationFormattingService;
         this.titlePageRenderer = titlePageRenderer;
         this.structureExtractors = structureExtractors;
+        this.evidenceRepository = evidenceRepository;
+        this.evidenceNumberingService = evidenceNumberingService;
     }
 
     public CompiledAcademicDocument compile(ResearchReport report) {
@@ -65,6 +86,9 @@ public class ReportDocumentCompiler {
                         .comparing((ResearchReportSection section) -> section.getChapter().getDisplayOrder())
                         .thenComparingInt(ResearchReportSection::getDisplayOrder))
                 .toList();
+        int selectedNodeCount = effectiveScope.mode() == CompilationMode.SELECTED && effectiveScope.selectedNodeIds() != null
+                ? effectiveScope.selectedNodeIds().size()
+                : 0;
         Set<UUID> includedSectionIds = includedSectionIds(report, chapters, effectiveScope);
         List<ResearchReportSection> scopedSections = allSections.stream()
                 .filter(section -> includedSectionIds.contains(section.getId()))
@@ -124,11 +148,14 @@ public class ReportDocumentCompiler {
                 report.getTemplate() == null ? "{}" : nullToEmpty(report.getTemplate().getConfigurationJson())
         );
         log.info(
-                "Compiled final report document: reportId={} sourceSectionCount={} compiledSectionCount={} nonEmptySectionCount={} tocEntryCount={} figureCount={} tableCount={} referenceCount={} compiledContentCharacterCount={}",
+                "Compiled final report document: reportId={} scopeMode={} sourceSectionCount={} selectedNodeCount={} compiledSectionCount={} nonEmptySectionCount={} bodyNodeCount={} tocEntryCount={} figureCount={} tableCount={} referenceCount={} compiledContentLength={}",
                 compiled.reportId(),
+                effectiveScope.mode(),
                 compiled.sourceSectionCount(),
+                selectedNodeCount,
                 compiled.compiledSectionCount(),
                 compiled.nonEmptySectionCount(),
+                compiled.compiledSectionCount(),
                 compiled.tocEntryCount(),
                 compiled.figureCount(),
                 compiled.tableCount(),
@@ -257,10 +284,27 @@ public class ReportDocumentCompiler {
                 && !section.getContentJson().isBlank()
                 && richTextService.isValidDocumentJson(section.getContentJson())
                 && !richTextService.plainTextFromDocumentJson(section.getContentJson()).isBlank()) {
-            return section.getContentJson();
+            return richTextService.resolveFigureLabels(section.getContentJson(), figureRenderDataForSection(section));
         }
         String renderedMarkdown = exportText(section, style, referenceNumbers);
-        return richTextService.markdownToDocumentJson(renderedMarkdown);
+        return richTextService.markdownToDocumentJson(renderedMarkdown, figureRenderDataForSection(section));
+    }
+
+    private Map<UUID, ReportRichTextService.FigureRenderData> figureRenderDataForSection(ResearchReportSection section) {
+        if (evidenceRepository == null || evidenceNumberingService == null || section == null || section.getId() == null) {
+            return Map.of();
+        }
+        Map<UUID, String> labels = section.getChapter() != null && section.getChapter().getReport() != null
+                ? evidenceNumberingService.computeDynamicLabelsForReport(section.getChapter().getReport().getId())
+                : Map.of();
+        Map<UUID, ReportRichTextService.FigureRenderData> data = new LinkedHashMap<>();
+        for (var e : evidenceRepository.findAllBySectionIdOrderByDisplayOrderAscCreatedAtAsc(section.getId())) {
+            String label = labels.getOrDefault(e.getId(), e.getFigureLabel() != null ? e.getFigureLabel() : "Figure");
+            String src = e.getStorageObject() != null ? "/api/v1/storage-objects/" + e.getStorageObject().getId() + "/download" : "";
+            data.put(e.getId(), new ReportRichTextService.FigureRenderData(e.getId(), label, e.getCaption(), src,
+                    e.getAltText(), e.getStructuredDefinition(), "MERMAID"));
+        }
+        return data;
     }
 
     private int appendReferences(ResearchReport report, List<ReportRichTextService.DocumentPart> parts,

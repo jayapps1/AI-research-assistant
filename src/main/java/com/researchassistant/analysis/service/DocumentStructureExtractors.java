@@ -117,11 +117,10 @@ public class DocumentStructureExtractors {
             String captionCandidate = !captionAttr.isBlank()
                     ? captionAttr
                     : (!title.isBlank() ? title : (!alt.isBlank() ? alt : "Figure for " + section.getHeading()));
-            if (!label.isBlank() && !captionCandidate.toLowerCase(java.util.Locale.ROOT).startsWith(label.toLowerCase(java.util.Locale.ROOT))) {
-                captionCandidate = label + ": " + captionCandidate;
-            }
             String caption = captionCandidate;
-            String num = section.getSectionNumber() != null ? "Figure " + section.getSectionNumber() + "." + (figures.size() + 1) : "Figure " + (figures.size() + 1);
+            String num = !label.isBlank()
+                    ? label
+                    : (section.getSectionNumber() != null ? "Figure " + section.getSectionNumber() + "." + (figures.size() + 1) : "Figure " + (figures.size() + 1));
             boolean exists = figures.stream().anyMatch(f -> f.caption().equalsIgnoreCase(caption));
             if (!exists) {
                 figures.add(new FigureEntry(num, caption, section.getHeading()));

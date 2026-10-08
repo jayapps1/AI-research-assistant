@@ -2,9 +2,12 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Badge } from '../components/ui';
 import {
+  buildExportSelectionPayload,
   getDocumentNodeCategory,
   isDeterministicNode,
   isCorruptedDeterministicContent,
+  loadOrPrepareFinalDocument,
+  previewDiagnostics,
 } from './OperationsPages';
 
 function ComplimentaryBadge({ accessType }: { accessType: string }) {
@@ -101,3 +104,106 @@ describe('Report Node Categorization & Generation Policy Routing', () => {
   });
 });
 
+describe('Report preview/export selection payloads', () => {
+  it('sends selected stable node ids for selected content without renumbering options', () => {
+    const payload = buildExportSelectionPayload({
+      exportScopeMode: 'SELECTED',
+      selectedExportNodeIds: ['chapter-one-id', 'chapter-two-id'],
+      includeExportCoverPage: false,
+      includeExportToc: true,
+      includeExportListOfFigures: false,
+      includeExportListOfTables: false,
+      includeExportReferences: true,
+      includeExportAppendices: false,
+      exportReferenceMode: 'CITED_IN_SELECTION',
+    });
+
+    expect(payload).toMatchObject({
+      selectionMode: 'SELECTED',
+      selectedNodeIds: ['chapter-one-id', 'chapter-two-id'],
+      includeToc: true,
+      includeReferences: true,
+      referenceMode: 'CITED_IN_SELECTION',
+    });
+  });
+
+  it('uses the canonical full compiled document for entire-report preview', () => {
+    const payload = buildExportSelectionPayload({
+      exportScopeMode: 'FULL',
+      selectedExportNodeIds: ['ignored-selected-id'],
+      includeExportCoverPage: false,
+      includeExportToc: false,
+      includeExportListOfFigures: false,
+      includeExportListOfTables: false,
+      includeExportReferences: false,
+      includeExportAppendices: false,
+      exportReferenceMode: 'NONE',
+    });
+
+    expect(payload.selectedNodeIds).toEqual([]);
+    expect(payload).toMatchObject({
+      selectionMode: 'FULL',
+      includeCoverPage: true,
+      includeToc: true,
+      includeReferences: true,
+      referenceMode: 'ALL_PROJECT_REFERENCES',
+    });
+  });
+
+  it('prepares a populated working final draft when the editor has no current document', async () => {
+    const apiClient = {
+      finalDocument: async () => null,
+      prepareFinalDocument: async () => ({
+        id: 'version-13',
+        versionNumber: 13,
+        status: 'FINAL_REVIEW',
+        contentJson: '{"type":"doc","content":[{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Chapter One"}]}]}',
+        plainText: 'Chapter One\nChapter Two\nChapter Three',
+      }),
+    };
+
+    const doc = await loadOrPrepareFinalDocument('report-1', apiClient);
+    expect(doc).toMatchObject({
+      id: 'version-13',
+      versionNumber: 13,
+      contentJson: expect.stringContaining('Chapter One'),
+    });
+  });
+
+  it('prepares a fresh working version instead of opening a stale final draft', async () => {
+    const apiClient = {
+      finalDocument: async () => ({ id: 'version-12', stale: true, plainText: 'Old document' }),
+      prepareFinalDocument: async () => ({
+        id: 'version-13',
+        versionNumber: 13,
+        stale: false,
+        plainText: 'Chapter One\nChapter Two\nChapter Three',
+      }),
+    };
+
+    const doc = await loadOrPrepareFinalDocument('report-1', apiClient);
+    expect(doc).toMatchObject({ id: 'version-13', stale: false });
+  });
+
+  it('reports safe preview diagnostics without body text', () => {
+    expect(previewDiagnostics({
+      reportId: 'report-1',
+      versionId: null,
+      tocEntryCount: 8,
+      bodyNodeCount: 12,
+      nonEmptyBodyNodeCount: 9,
+      referenceCount: 4,
+      contentJson: '{"type":"doc","content":[]}',
+      plainText: 'private body text',
+    })).toEqual({
+      reportId: 'report-1',
+      versionId: null,
+      frontMatterNodeCount: 0,
+      tocEntryCount: 8,
+      bodyNodeCount: 12,
+      nonEmptyBodyNodeCount: 9,
+      referenceCount: 4,
+      contentLength: 27,
+    });
+  });
+});

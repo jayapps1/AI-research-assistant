@@ -1227,6 +1227,10 @@ export interface ProjectEvidenceItem {
   aiAnalysisStatus: EvidenceAnalysisStatus;
   aiAnalysisError?: string | null;
   metadataJson?: string | null;
+  sourceType?: string | null;
+  generationSource?: string | null;
+  structuredDefinition?: string | null;
+  evidenceSourceIds?: string | null;
   createdById?: UUID | null;
   createdByEmail?: string | null;
   createdAt: string;
@@ -1269,4 +1273,3 @@ export interface ListOfTablesItem {
   pageNumber: number;
   metadataJson?: string | null;
 }
-

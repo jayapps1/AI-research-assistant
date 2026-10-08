@@ -16,13 +16,18 @@ public final class DocumentNumberingPolicy {
     private final NumberStyle sectionNumberStyle;
     private final NumberStyle subsectionNumberStyle;
     private final boolean chapterWordPrefix;
+    private final FigureNumberingMode figureNumberingMode;
+    private final String figureCaptionSeparator;
 
     private DocumentNumberingPolicy(NumberStyle chapterNumberStyle, NumberStyle sectionNumberStyle,
-            NumberStyle subsectionNumberStyle, boolean chapterWordPrefix) {
+            NumberStyle subsectionNumberStyle, boolean chapterWordPrefix,
+            FigureNumberingMode figureNumberingMode, String figureCaptionSeparator) {
         this.chapterNumberStyle = chapterNumberStyle;
         this.sectionNumberStyle = sectionNumberStyle;
         this.subsectionNumberStyle = subsectionNumberStyle;
         this.chapterWordPrefix = chapterWordPrefix;
+        this.figureNumberingMode = figureNumberingMode;
+        this.figureCaptionSeparator = figureCaptionSeparator == null || figureCaptionSeparator.isBlank() ? ": " : figureCaptionSeparator;
     }
 
     public static DocumentNumberingPolicy fromReport(ResearchReport report) {
@@ -35,8 +40,10 @@ public final class DocumentNumberingPolicy {
         NumberStyle sectionStyle = NumberStyle.ARABIC;
         NumberStyle subsectionStyle = NumberStyle.ARABIC;
         boolean prefix = true;
+        FigureNumberingMode figureMode = FigureNumberingMode.CHAPTER_BASED;
+        String figureSeparator = ": ";
         if (template == null || template.getConfigurationJson() == null || template.getConfigurationJson().isBlank()) {
-            return new DocumentNumberingPolicy(chapterStyle, sectionStyle, subsectionStyle, prefix);
+            return new DocumentNumberingPolicy(chapterStyle, sectionStyle, subsectionStyle, prefix, figureMode, figureSeparator);
         }
         try {
             JsonNode root = MAPPER.readTree(template.getConfigurationJson());
@@ -47,6 +54,8 @@ public final class DocumentNumberingPolicy {
                 sectionStyle = NumberStyle.parse(numbering.path("sectionNumberStyle").asText(null), sectionStyle);
                 subsectionStyle = NumberStyle.parse(numbering.path("subsectionNumberStyle").asText(null), subsectionStyle);
                 prefix = numbering.path("chapterWordPrefix").asBoolean(prefix);
+                figureMode = FigureNumberingMode.parse(numbering.path("figureNumbering").asText(null), figureMode);
+                figureSeparator = numbering.path("figureCaptionSeparator").asText(figureSeparator);
             } else {
                 String headingNumbering = fp.path("headingNumbering").asText("");
                 if ("CHAPTER_ROMAN".equalsIgnoreCase(headingNumbering)) {
@@ -55,10 +64,12 @@ public final class DocumentNumberingPolicy {
                     chapterStyle = NumberStyle.ARABIC;
                 }
             }
+            figureMode = FigureNumberingMode.parse(fp.path("figureNumbering").asText(null), figureMode);
+            figureSeparator = fp.path("figureCaptionSeparator").asText(figureSeparator);
         } catch (Exception ignored) {
-            return new DocumentNumberingPolicy(chapterStyle, sectionStyle, subsectionStyle, prefix);
+            return new DocumentNumberingPolicy(chapterStyle, sectionStyle, subsectionStyle, prefix, figureMode, figureSeparator);
         }
-        return new DocumentNumberingPolicy(chapterStyle, sectionStyle, subsectionStyle, prefix);
+        return new DocumentNumberingPolicy(chapterStyle, sectionStyle, subsectionStyle, prefix, figureMode, figureSeparator);
     }
 
     public String chapterHeading(Integer chapterNumber, String title) {
@@ -97,6 +108,42 @@ public final class DocumentNumberingPolicy {
         String number = sectionNumber(storedNumber);
         String cleanHeading = heading == null ? "" : heading.trim();
         return number.isBlank() ? cleanHeading : number + " " + cleanHeading;
+    }
+
+    public FigureNumberingMode figureNumberingMode() {
+        return figureNumberingMode;
+    }
+
+    public String captionSeparator() {
+        return figureCaptionSeparator;
+    }
+
+    public String figureLabel(String noun, Integer chapterNumber, int ordinal) {
+        String cleanNoun = noun == null || noun.isBlank() ? "Figure" : noun.trim();
+        int safeOrdinal = Math.max(1, ordinal);
+        return switch (figureNumberingMode) {
+            case GLOBAL_SEQUENTIAL -> cleanNoun + " " + safeOrdinal;
+            case ROMAN_CHAPTER_BASED -> cleanNoun + " " + NumberStyle.UPPER_ROMAN.format(chapterNumber == null || chapterNumber <= 0 ? 1 : chapterNumber) + "." + safeOrdinal;
+            case CHAPTER_BASED -> cleanNoun + " " + (chapterNumber == null || chapterNumber <= 0 ? 1 : chapterNumber) + "." + safeOrdinal;
+        };
+    }
+
+    public enum FigureNumberingMode {
+        CHAPTER_BASED,
+        GLOBAL_SEQUENTIAL,
+        ROMAN_CHAPTER_BASED;
+
+        static FigureNumberingMode parse(String value, FigureNumberingMode fallback) {
+            if (value == null || value.isBlank()) return fallback;
+            String normalized = value.trim().toUpperCase(Locale.ROOT).replace('-', '_');
+            if ("GLOBAL".equals(normalized) || "SEQUENTIAL".equals(normalized)) normalized = "GLOBAL_SEQUENTIAL";
+            if ("ROMAN".equals(normalized) || "CHAPTER_ROMAN".equals(normalized)) normalized = "ROMAN_CHAPTER_BASED";
+            try {
+                return FigureNumberingMode.valueOf(normalized);
+            } catch (Exception ignored) {
+                return fallback;
+            }
+        }
     }
 
     public enum NumberStyle {

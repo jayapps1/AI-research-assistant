@@ -86,6 +86,7 @@ public class AcademicSectionGenerationService {
     private final SecurityAuditService auditService;
     private final com.researchassistant.evidence.repository.ProjectEvidenceRepository evidenceRepository;
     private final com.researchassistant.evidence.service.ProjectEvidenceNumberingService numberingService;
+    private final AcademicGeneratedFigureService generatedFigureService;
 
     public AcademicSectionGenerationService(
             AcademicSectionPromptService promptService,
@@ -112,7 +113,7 @@ public class AcademicSectionGenerationService {
                 recommendationRepository, documentRepository, citationRepository,
                 ragEvidenceRepository, referenceRegistryService, literatureMatrixRepository,
                 markdownRenderer, richTextService, transactionManager, auditService,
-                null, null);
+                null, null, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -136,7 +137,8 @@ public class AcademicSectionGenerationService {
             PlatformTransactionManager transactionManager,
             SecurityAuditService auditService,
             com.researchassistant.evidence.repository.ProjectEvidenceRepository evidenceRepository,
-            com.researchassistant.evidence.service.ProjectEvidenceNumberingService numberingService
+            com.researchassistant.evidence.service.ProjectEvidenceNumberingService numberingService,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) AcademicGeneratedFigureService generatedFigureService
     ) {
         this.promptService = promptService;
         this.ragQueryService = ragQueryService;
@@ -158,6 +160,7 @@ public class AcademicSectionGenerationService {
         this.auditService = auditService;
         this.evidenceRepository = evidenceRepository;
         this.numberingService = numberingService;
+        this.generatedFigureService = generatedFigureService;
     }
 
     public record AcademicSectionGenerationContext(
@@ -386,8 +389,16 @@ public class AcademicSectionGenerationService {
             ResearchReportSection managedSection = sectionRepository.findByIdForUpdate(sectionId)
                     .orElseThrow(() -> new ResourceNotFoundException("Report section not found."));
             String normalizedMarkdown = markdownRenderer.normalizeSectionMarkdown(managedSection.getHeading(), answer.answer());
+            Map<UUID, ReportRichTextService.FigureRenderData> figureRenderData = figureRenderDataForSection(managedSection);
+            if (generatedFigureService != null) {
+                AcademicGeneratedFigureService.FigureProcessingResult processed =
+                        generatedFigureService.process(managedSection, normalizedMarkdown, user);
+                normalizedMarkdown = processed.markdown();
+                figureRenderData = new java.util.LinkedHashMap<>(figureRenderData);
+                figureRenderData.putAll(processed.figures());
+            }
             managedSection.setContent(normalizedMarkdown);
-            managedSection.setContentJson(richTextService.markdownToDocumentJson(normalizedMarkdown));
+            managedSection.setContentJson(richTextService.markdownToDocumentJson(normalizedMarkdown, figureRenderData));
             managedSection.setPlainText(richTextService.plainTextFromDocumentJson(managedSection.getContentJson()));
             managedSection.setStatus(managedSection.getPlainText() == null || managedSection.getPlainText().isBlank() ? ReportSectionStatus.NOT_STARTED : ReportSectionStatus.DRAFT);
             managedSection.setOrigin(ContentOrigin.AI_GENERATED);
@@ -427,9 +438,17 @@ public class AcademicSectionGenerationService {
                     .orElseThrow(() -> new ResourceNotFoundException("Report section not found."));
             String existing = managedSection.getContent() != null ? managedSection.getContent() : "";
             String normalizedNew = markdownRenderer.normalizeSectionMarkdown(managedSection.getHeading(), answer.answer());
+            Map<UUID, ReportRichTextService.FigureRenderData> figureRenderData = figureRenderDataForSection(managedSection);
+            if (generatedFigureService != null) {
+                AcademicGeneratedFigureService.FigureProcessingResult processed =
+                        generatedFigureService.process(managedSection, normalizedNew, user);
+                normalizedNew = processed.markdown();
+                figureRenderData = new java.util.LinkedHashMap<>(figureRenderData);
+                figureRenderData.putAll(processed.figures());
+            }
             String appended = existing.isBlank() ? normalizedNew : existing + "\n\n" + normalizedNew;
             managedSection.setContent(appended);
-            managedSection.setContentJson(richTextService.markdownToDocumentJson(appended));
+            managedSection.setContentJson(richTextService.markdownToDocumentJson(appended, figureRenderData));
             managedSection.setPlainText(richTextService.plainTextFromDocumentJson(managedSection.getContentJson()));
             managedSection.setStatus(ReportSectionStatus.DRAFT);
             managedSection.setOrigin(ContentOrigin.AI_GENERATED);
@@ -449,6 +468,24 @@ public class AcademicSectionGenerationService {
                     managedSection.getUpdatedAt()
             );
         });
+    }
+
+    private Map<UUID, ReportRichTextService.FigureRenderData> figureRenderDataForSection(ResearchReportSection section) {
+        if (evidenceRepository == null || numberingService == null || section == null || section.getId() == null) {
+            return Map.of();
+        }
+        Map<UUID, String> labels = section.getChapter() != null && section.getChapter().getReport() != null
+                ? numberingService.computeDynamicLabelsForReport(section.getChapter().getReport().getId())
+                : Map.of();
+        Map<UUID, ReportRichTextService.FigureRenderData> data = new java.util.LinkedHashMap<>();
+        for (com.researchassistant.evidence.entity.ProjectEvidence e : evidenceRepository.findAllBySectionIdOrderByDisplayOrderAscCreatedAtAsc(section.getId())) {
+            String label = labels.getOrDefault(e.getId(), e.getFigureLabel() != null ? e.getFigureLabel() : "Figure");
+            String src = e.getStorageObject() != null ? "/api/v1/storage-objects/" + e.getStorageObject().getId() + "/download" : "";
+            data.put(e.getId(), new ReportRichTextService.FigureRenderData(
+                    e.getId(), label, e.getCaption(), src, e.getAltText(), e.getStructuredDefinition(), "MERMAID"
+            ));
+        }
+        return data;
     }
 
     private void persistSectionCitations(ResearchReportSection section, GroundedAnswerResponse answer, User user) {

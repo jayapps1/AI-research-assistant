@@ -89,6 +89,18 @@ public class ProjectEvidence {
     @Column(name = "metadata_json", columnDefinition = "TEXT")
     private String metadataJson;
 
+    @Column(name = "source_type", length = 80)
+    private String sourceType;
+
+    @Column(name = "generation_source", length = 120)
+    private String generationSource;
+
+    @Column(name = "structured_definition", columnDefinition = "TEXT")
+    private String structuredDefinition;
+
+    @Column(name = "evidence_source_ids", columnDefinition = "TEXT")
+    private String evidenceSourceIds;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "created_by_user_id", nullable = false)
     private User createdBy;

@@ -7,6 +7,7 @@ import com.researchassistant.identity.entity.User;
 import com.researchassistant.project.entity.ResearchProject;
 import com.researchassistant.reference.entity.*;
 import com.researchassistant.reference.repository.*;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,13 +46,14 @@ public class ProjectReferenceRegistryService {
                 .flatMap(link -> projectReferenceRepository.findByProjectIdAndReferenceId(project.getId(), link.getReference().getId()))
                 .orElse(null);
         if (existingProjectReference != null) {
-            syncReferenceFromDocument(existingProjectReference.getReference(), document);
+            ReferenceEntry lockedReference = lockReference(existingProjectReference.getReference());
+            syncReferenceFromDocument(lockedReference, document);
             String currentKey = existingProjectReference.getCitationKey();
             if (currentKey == null
                     || currentKey.startsWith("refnd")
                     || currentKey.matches("ref\\d*")
                     || !currentKey.matches("^[a-z]+(19|20)\\d{2}.*")) {
-                existingProjectReference.setCitationKey(uniqueCitationKey(project.getId(), existingProjectReference.getReference(), document.getAuthors(), existingProjectReference.getId()));
+                existingProjectReference.setCitationKey(uniqueCitationKey(project.getId(), lockedReference, document.getAuthors(), existingProjectReference.getId()));
                 projectReferenceRepository.save(existingProjectReference);
             }
             return existingProjectReference;
@@ -60,12 +62,13 @@ public class ProjectReferenceRegistryService {
         String normalizedDoi = normalizationService.normalizeDoi(document.getDoi());
         ReferenceEntry reference = normalizedDoi == null
                 ? null
-                : entryRepository.findFirstByNormalizedDoiIgnoreCase(normalizedDoi).orElse(null);
+                : entryRepository.findAllByNormalizedDoiForUpdate(normalizedDoi, PageRequest.of(0, 1)).stream().findFirst().orElse(null);
         if (reference == null) {
             reference = buildReference(document, normalizedDoi, user);
             reference = entryRepository.save(reference);
             saveAuthors(reference, document.getAuthors());
         } else {
+            reference = lockReference(reference);
             syncReferenceFromDocument(reference, document);
         }
 
@@ -117,6 +120,10 @@ public class ProjectReferenceRegistryService {
         return entry;
     }
 
+    private ReferenceEntry lockReference(ReferenceEntry reference) {
+        return entryRepository.findByIdForUpdate(reference.getId()).orElse(reference);
+    }
+
     private void syncReferenceFromDocument(ReferenceEntry reference, Document document) {
         if (reference.getMetadataStatus() == ReferenceMetadataStatus.VERIFIED) {
             return;
@@ -145,11 +152,58 @@ public class ProjectReferenceRegistryService {
         entryRepository.save(reference);
 
         if (!isBlank(document.getAuthors()) && reference.getMetadataStatus() != ReferenceMetadataStatus.VERIFIED) {
-            List<ReferenceAuthor> existing = authorRepository.findAllByReferenceIdAndRoleOrderByDisplayOrderAsc(reference.getId(), AuthorRole.AUTHOR);
-            authorRepository.deleteAll(existing);
-            authorRepository.flush();
-            saveAuthors(reference, document.getAuthors());
+            syncAuthors(reference, splitAuthors(document.getAuthors()));
         }
+    }
+
+    private void syncAuthors(ReferenceEntry reference, List<String> desiredNames) {
+        List<String> normalizedDesired = desiredNames.stream()
+                .map(String::trim)
+                .filter(name -> !name.isBlank())
+                .toList();
+        List<ReferenceAuthor> existing = authorRepository.findAllByReferenceIdAndRoleOrderByDisplayOrderAsc(reference.getId(), AuthorRole.AUTHOR);
+        if (authorsMatch(existing, normalizedDesired)) {
+            return;
+        }
+
+        int shared = Math.min(existing.size(), normalizedDesired.size());
+        for (int i = 0; i < shared; i++) {
+            applyAuthorName(existing.get(i), normalizedDesired.get(i), i + 1);
+        }
+        for (int i = shared; i < normalizedDesired.size(); i++) {
+            ReferenceAuthor author = new ReferenceAuthor();
+            author.setReference(reference);
+            author.setRole(AuthorRole.AUTHOR);
+            applyAuthorName(author, normalizedDesired.get(i), i + 1);
+            authorRepository.save(author);
+        }
+        for (int i = existing.size() - 1; i >= normalizedDesired.size(); i--) {
+            authorRepository.delete(existing.get(i));
+        }
+    }
+
+    private boolean authorsMatch(List<ReferenceAuthor> existing, List<String> desiredNames) {
+        if (existing.size() != desiredNames.size()) {
+            return false;
+        }
+        for (int i = 0; i < existing.size(); i++) {
+            ReferenceAuthor author = existing.get(i);
+            if (author.getDisplayOrder() != i + 1) {
+                return false;
+            }
+            if (!canonicalAuthorName(author).equals(canonicalAuthorName(desiredNames.get(i)))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String canonicalAuthorName(ReferenceAuthor author) {
+        return canonicalAuthorName(author.getLiteralName());
+    }
+
+    private String canonicalAuthorName(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
     }
 
     private void saveAuthors(ReferenceEntry reference, String authors) {
@@ -160,29 +214,33 @@ public class ProjectReferenceRegistryService {
         for (String name : splitAuthors(authors)) {
             ReferenceAuthor author = new ReferenceAuthor();
             author.setReference(reference);
-            author.setLiteralName(name);
-            author.setDisplayOrder(order++);
             author.setRole(AuthorRole.AUTHOR);
-
-            String familyName = null;
-            String givenName = null;
-            if (name.contains(",")) {
-                String[] parts = name.split(",", 2);
-                familyName = parts[0].trim();
-                givenName = parts[1].trim();
-            } else {
-                String[] parts = name.trim().split("\\s+");
-                if (parts.length > 1) {
-                    familyName = parts[parts.length - 1];
-                    givenName = name.substring(0, name.lastIndexOf(familyName)).trim();
-                } else if (parts.length == 1) {
-                    familyName = parts[0];
-                }
-            }
-            author.setFamilyName(familyName);
-            author.setGivenName(givenName);
+            applyAuthorName(author, name, order++);
             authorRepository.save(author);
         }
+    }
+
+    private void applyAuthorName(ReferenceAuthor author, String name, int order) {
+        author.setLiteralName(name);
+        author.setDisplayOrder(order);
+
+        String familyName = null;
+        String givenName = null;
+        if (name.contains(",")) {
+            String[] parts = name.split(",", 2);
+            familyName = parts[0].trim();
+            givenName = parts[1].trim();
+        } else {
+            String[] parts = name.trim().split("\\s+");
+            if (parts.length > 1) {
+                familyName = parts[parts.length - 1];
+                givenName = name.substring(0, name.lastIndexOf(familyName)).trim();
+            } else if (parts.length == 1) {
+                familyName = parts[0];
+            }
+        }
+        author.setFamilyName(familyName);
+        author.setGivenName(givenName);
     }
 
     private java.util.List<String> splitAuthors(String authors) {

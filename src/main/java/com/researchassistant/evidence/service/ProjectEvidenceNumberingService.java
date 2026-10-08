@@ -2,6 +2,7 @@ package com.researchassistant.evidence.service;
 
 import com.researchassistant.analysis.entity.ResearchReportChapter;
 import com.researchassistant.analysis.entity.ResearchReportSection;
+import com.researchassistant.analysis.service.DocumentNumberingPolicy;
 import com.researchassistant.evidence.entity.EvidenceType;
 import com.researchassistant.evidence.entity.ProjectEvidence;
 import com.researchassistant.evidence.repository.ProjectEvidenceRepository;
@@ -44,6 +45,29 @@ public class ProjectEvidenceNumberingService {
 
     public Map<UUID, String> computeLabels(List<ProjectEvidence> assignedEvidence) {
         Map<UUID, String> labels = new HashMap<>();
+        DocumentNumberingPolicy policy = assignedEvidence.stream()
+                .map(ProjectEvidence::getSection)
+                .filter(Objects::nonNull)
+                .map(ResearchReportSection::getChapter)
+                .filter(Objects::nonNull)
+                .map(ResearchReportChapter::getReport)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .map(DocumentNumberingPolicy::fromReport)
+                .orElse(DocumentNumberingPolicy.fromTemplate(null));
+
+        if (policy.figureNumberingMode() == DocumentNumberingPolicy.FigureNumberingMode.GLOBAL_SEQUENTIAL) {
+            int figureCount = 1;
+            int tableCount = 1;
+            for (ProjectEvidence e : assignedEvidence) {
+                if (isTableType(e.getEvidenceType())) {
+                    labels.put(e.getId(), policy.figureLabel("Table", null, tableCount++));
+                } else {
+                    labels.put(e.getId(), policy.figureLabel("Figure", null, figureCount++));
+                }
+            }
+            return labels;
+        }
 
         // Group by Chapter ID
         Map<UUID, List<ProjectEvidence>> byChapter = new LinkedHashMap<>();
@@ -69,10 +93,10 @@ public class ProjectEvidenceNumberingService {
 
             for (ProjectEvidence e : chapterEvidence) {
                 if (isTableType(e.getEvidenceType())) {
-                    labels.put(e.getId(), "Table " + chapterPrefix + "." + tableCount);
+                    labels.put(e.getId(), policy.figureLabel("Table", chapterPrefix, tableCount));
                     tableCount++;
                 } else {
-                    labels.put(e.getId(), "Figure " + chapterPrefix + "." + figureCount);
+                    labels.put(e.getId(), policy.figureLabel("Figure", chapterPrefix, figureCount));
                     figureCount++;
                 }
             }

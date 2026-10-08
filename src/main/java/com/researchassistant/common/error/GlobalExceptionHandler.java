@@ -3,6 +3,8 @@ package com.researchassistant.common.error;
 import com.researchassistant.common.exception.AuthenticationFailedException;
 import com.researchassistant.common.exception.DuplicateResourceException;
 import com.researchassistant.common.exception.ResourceNotFoundException;
+import com.researchassistant.analysis.exception.ReportVersionConflictException;
+import com.researchassistant.analysis.exception.ReportExportSelectionException;
 import com.researchassistant.analysis.dto.AnalysisDtos.ValidationIssue;
 import com.researchassistant.analysis.exception.ReportValidationException;
 import com.researchassistant.collaboration.exception.ArtifactVersionConflictException;
@@ -27,11 +29,14 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotWritableException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.io.IOException;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.LinkedHashMap;
@@ -47,6 +52,7 @@ import org.slf4j.MDC;
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     /**
      * Converts authentication and token refresh failures into
@@ -515,6 +521,34 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(ReportVersionConflictException.class)
+    public ResponseEntity<ApiErrorResponse> handleReportVersionConflict(
+            ReportVersionConflictException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                exception.getCode(),
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(ReportExportSelectionException.class)
+    public ResponseEntity<ApiErrorResponse> handleReportExportSelection(
+            ReportExportSelectionException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                exception.getCode(),
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiErrorResponse> handleIllegalArgument(
             IllegalArgumentException exception,
@@ -621,6 +655,25 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler({HttpMessageNotWritableException.class, AsyncRequestNotUsableException.class})
+    public ResponseEntity<ApiErrorResponse> handleResponseWriteFailure(
+            Exception exception,
+            HttpServletRequest request
+    ) {
+        if (isClientDisconnect(exception)) {
+            log.debug("Client disconnected while writing response [uri={}]: {}", request.getRequestURI(), exception.getMessage());
+            return null;
+        }
+        logException("RESPONSE_WRITE_FAILED", exception, request);
+        return buildResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "RESPONSE_WRITE_FAILED",
+                "The response could not be written.",
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
 
     @ExceptionHandler(com.researchassistant.identity.exception.InvalidPhoneNumberException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidPhoneNumber(
@@ -675,6 +728,10 @@ public class GlobalExceptionHandler {
             Exception exception,
             HttpServletRequest request
     ) {
+        if (isClientDisconnect(exception)) {
+            log.debug("Client disconnected before the response completed [uri={}]: {}", request.getRequestURI(), exception.getMessage());
+            return null;
+        }
         logException("INTERNAL_SERVER_ERROR", exception, request);
         return buildResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR,
@@ -687,10 +744,30 @@ public class GlobalExceptionHandler {
 
     private void logException(String code, Throwable t, HttpServletRequest request) {
         String correlationId = MDC.get("requestId");
-        org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class).error(
+        log.error(
                 "API Error [code={}, correlationId={}, uri={}]: {}",
                 code, correlationId, request.getRequestURI(), t.getMessage(), t
         );
+    }
+
+    private boolean isClientDisconnect(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String className = current.getClass().getName();
+            String message = current.getMessage() == null ? "" : current.getMessage().toLowerCase();
+            if (className.endsWith("ClientAbortException")
+                    || current instanceof AsyncRequestNotUsableException
+                    || (current instanceof IOException && (
+                            message.contains("broken pipe")
+                                    || message.contains("connection reset")
+                                    || message.contains("connection was aborted")
+                                    || message.contains("forcibly closed")
+                    ))) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private String storageMessage(String code) {

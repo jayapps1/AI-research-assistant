@@ -3,6 +3,7 @@ package com.researchassistant.analysis.service;
 import com.researchassistant.analysis.dto.AnalysisDtos.ReportValidationResponse;
 import com.researchassistant.analysis.controller.ReportExportController.DocumentExportSelection;
 import com.researchassistant.analysis.entity.*;
+import com.researchassistant.analysis.exception.ReportExportSelectionException;
 import com.researchassistant.analysis.exception.ReportValidationException;
 import com.researchassistant.analysis.repository.*;
 import com.researchassistant.common.storage.StorageObjectCategory;
@@ -607,7 +608,10 @@ public class ReportExportService {
             float y = cursor.y;
             List<ReportMarkdownRenderer.MarkdownBlock> blocks = markdownRenderer.plainBlocks(finalVersionMarkdown(version), null);
             for (ReportMarkdownRenderer.MarkdownBlock block : blocks) {
-                if (block.headingLevel() == 1) {
+                if (block.headingLevel() == -1 || "\f".equals(block.text())) {
+                    cursor.newPage();
+                    y = 790;
+                } else if (block.headingLevel() == 1) {
                     y = ensurePage(cursor, y);
                     y = pdfLine(cursor, 14, 60, y - 10, block.text());
                 } else if (block.headingLevel() == 2) {
@@ -639,7 +643,10 @@ public class ReportExportService {
             }
             List<ReportMarkdownRenderer.MarkdownBlock> blocks = markdownRenderer.plainBlocks(compiled.markdown(), null);
             for (ReportMarkdownRenderer.MarkdownBlock block : blocks) {
-                if (block.headingLevel() == 1) {
+                if (block.headingLevel() == -1 || "\f".equals(block.text())) {
+                    cursor.newPage();
+                    y = 790;
+                } else if (block.headingLevel() == 1) {
                     y = ensurePage(cursor, y);
                     y = pdfLine(cursor, 14, 60, y - 10, block.text());
                 } else if (block.headingLevel() == 2) {
@@ -1059,7 +1066,10 @@ public class ReportExportService {
 
     private void validateSelectedNodeIds(ResearchReport report, Set<UUID> selectedIds) {
         if (selectedIds == null || selectedIds.isEmpty()) {
-            throw new IllegalArgumentException("EXPORT_SELECTION_REQUIRED: select at least one chapter or section.");
+            throw new ReportExportSelectionException(
+                    "REPORT_EXPORT_SELECTION_EMPTY",
+                    "Selected content export requires at least one selected chapter or section."
+            );
         }
         Set<UUID> allowed = new LinkedHashSet<>();
         chapterRepository.findAllByReportIdOrderByDisplayOrderAsc(report.getId()).forEach(chapter -> allowed.add(chapter.getId()));

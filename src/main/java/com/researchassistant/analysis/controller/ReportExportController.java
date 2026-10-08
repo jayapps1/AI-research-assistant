@@ -6,6 +6,8 @@ import com.researchassistant.document.storage.DocumentStorageObject;
 import com.researchassistant.identity.entity.User;
 import com.researchassistant.identity.service.AuthenticatedUserResolver;
 import jakarta.validation.constraints.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.*;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +18,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1")
 public class ReportExportController {
+    private static final Logger log = LoggerFactory.getLogger(ReportExportController.class);
     private final ReportExportService exportService;
     private final AuthenticatedUserResolver userResolver;
 
@@ -38,8 +41,10 @@ public class ReportExportController {
     ) {}
     public record CreateReportExportRequest(@NotNull ReportExportFormat format, Boolean draft, DocumentExportSelection selection) {}
     public record ReportPreviewRequest(DocumentExportSelection selection) {}
-    public record ReportPreviewResponse(UUID reportId, String title, String contentJson, String plainText, String markdown,
-                                        int sourceSectionCount, int compiledSectionCount, int referenceCount) {}
+    public record ReportPreviewResponse(UUID reportId, UUID versionId, String title, String contentJson, String plainText, String markdown,
+                                        int sourceSectionCount, int compiledSectionCount, int nonEmptySectionCount,
+                                        int frontMatterNodeCount, int tocEntryCount, int bodyNodeCount,
+                                        int nonEmptyBodyNodeCount, int referenceCount, int contentLength) {}
     public record ReportExportResponse(UUID id, UUID reportId, ReportExportFormat format, ReportExportStatus status,
                                        String filename, String mimeType, Long fileSizeBytes, String checksumSha256,
                                        int reportRevisionNumber) {
@@ -58,8 +63,16 @@ public class ReportExportController {
     @PostMapping("/reports/{reportId}/preview")
     public ReportPreviewResponse preview(Authentication authentication, @PathVariable UUID reportId, @RequestBody(required = false) ReportPreviewRequest request) {
         var compiled = exportService.preview(reportId, request == null ? null : request.selection(), user(authentication));
-        return new ReportPreviewResponse(compiled.reportId(), compiled.title(), compiled.contentJson(), compiled.plainText(), compiled.markdown(),
-                compiled.sourceSectionCount(), compiled.compiledSectionCount(), compiled.referenceCount());
+        int contentLength = compiled.contentJson() == null ? 0 : compiled.contentJson().length();
+        log.info(
+                "Report preview DTO: reportId={} versionId={} frontMatterNodeCount={} tocEntryCount={} bodyNodeCount={} nonEmptyBodyNodeCount={} referenceCount={} contentLength={}",
+                compiled.reportId(), null, 0, compiled.tocEntryCount(), compiled.compiledSectionCount(),
+                compiled.nonEmptySectionCount(), compiled.referenceCount(), contentLength
+        );
+        return new ReportPreviewResponse(compiled.reportId(), null, compiled.title(), compiled.contentJson(), compiled.plainText(), compiled.markdown(),
+                compiled.sourceSectionCount(), compiled.compiledSectionCount(), compiled.nonEmptySectionCount(),
+                0, compiled.tocEntryCount(), compiled.compiledSectionCount(),
+                compiled.nonEmptySectionCount(), compiled.referenceCount(), contentLength);
     }
 
     @GetMapping("/report-exports/{exportId}")

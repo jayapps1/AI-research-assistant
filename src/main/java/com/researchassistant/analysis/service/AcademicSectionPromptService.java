@@ -168,6 +168,7 @@ public class AcademicSectionPromptService {
         sb.append("PURPOSE-SPECIFIC DRAFTING INSTRUCTIONS\n");
         sb.append("============================================================\n");
         sb.append(getPurposeSpecificGuidance(context)).append("\n\n");
+        sb.append(getFigurePolicyGuidance(context)).append("\n\n");
 
         sb.append("============================================================\n");
         sb.append("FORMATTING AND CONSTRAINTS\n");
@@ -389,6 +390,45 @@ public class AcademicSectionPromptService {
                     "CRITICAL SECTION PURPOSE - CUSTOM DOCUMENT SECTION:\nWrite targeted body prose specifically addressing the actual section heading '" + heading + "' within the chapter '" + chapterTitle + "', template requirements, and project context. The actual title must materially shape the draft. Do not default to generic literature review.";
             default ->
                     "CRITICAL SECTION PURPOSE - CONTENT:\nDraft professional academic prose specifically aligned with '" + heading + "' for '" + chapterTitle + "'.";
+        };
+    }
+
+    private String getFigurePolicyGuidance(SectionGenerationContext context) {
+        SectionSemanticPurpose purpose = context.semanticPurpose() != null ? context.semanticPurpose() : SectionSemanticPurpose.CUSTOM;
+        return switch (purpose) {
+            case LITERATURE_REVIEW -> """
+                    INTEGRATED FIGURE POLICY - OPTIONAL:
+                    Add a figure only if it materially improves academic synthesis and the relationships are supported by the retrieved literature. Allowed figure types: CONCEPTUAL_SYNTHESIS, THEMATIC_RELATIONSHIP, THEORETICAL_MODEL. Surround the figure with cited prose explaining that it synthesizes the reviewed literature. Do not copy source figures. Do not invent unsupported relationships.
+                    If a figure is justified, insert it exactly where it belongs using one fenced block:
+                    ```academic_figure
+                    {"figureType":"CONCEPTUAL_SYNTHESIS","title":"Short title","caption":"Academic caption without figure number","definition":"flowchart LR\\nA[Supported concept] --> B[Supported relationship]","evidenceIds":["E1","E2"]}
+                    ```
+                    Do not write literal figure numbers such as Figure 2.1; use the phrase "the figure" before the academic_figure block.
+                    """;
+            case THEORETICAL_FRAMEWORK, CONCEPTUAL_FRAMEWORK -> """
+                    INTEGRATED FIGURE POLICY - OPTIONAL:
+                    A theoretical or conceptual model may be generated when it clarifies constructs, variables, or relationships supported by the section evidence/context. Use an original Mermaid-style definition in an academic_figure block. Never hardcode figure numbers in prose; numbering is resolved by the document engine.
+                    """;
+            case METHODOLOGY, POPULATION_SAMPLING, DATA_COLLECTION_METHOD -> """
+                    INTEGRATED FIGURE POLICY - OPTIONAL:
+                    A research process, sampling workflow, or data-collection flowchart may be generated only when it clarifies the actual proposed method. Mark proposed steps as proposed when fieldwork is not completed. Use an academic_figure block with FLOWCHART or RESEARCH_WORKFLOW. Do not create result charts.
+                    """;
+            case SYSTEM_REQUIREMENTS, SYSTEM_DESIGN, RELATED_SYSTEMS -> """
+                    INTEGRATED FIGURE POLICY - RECOMMENDED WHEN USEFUL:
+                    Create a use-case, context, architecture, ERD, DFD, sequence, or activity figure only when it helps explain the system design in this exact section. Use an academic_figure block and keep the structured definition editable. Do not create a separate diagram workspace or standalone diagram product.
+                    """;
+            case IMPLEMENTATION -> """
+                    INTEGRATED FIGURE POLICY - OPTIONAL:
+                    Include deployment or implementation architecture only when supported by project context/evidence. Use an academic_figure block. Do not invent implemented services, integrations, or infrastructure not present in the project context.
+                    """;
+            case FINDINGS, DISCUSSION, TESTING -> """
+                    INTEGRATED FIGURE POLICY - DATA REQUIRED:
+                    Do not generate charts, heatmaps, benchmark graphs, survey percentages, coverage maps, RSSI maps, or statistical plots unless real supplied data or stored result evidence is explicitly present. Without real data, write prose only. Never fabricate empirical visuals.
+                    """;
+            default -> """
+                    INTEGRATED FIGURE POLICY - NO FORCED FIGURE:
+                    Generate prose only unless a figure would materially improve academic understanding. Any generated figure must be introduced, inserted in-place, captioned without a hardcoded number, and explained immediately after.
+                    """;
         };
     }
 

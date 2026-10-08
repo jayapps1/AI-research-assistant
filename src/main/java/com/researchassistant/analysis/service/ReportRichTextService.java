@@ -16,6 +16,7 @@ import org.commonmark.node.Code;
 import org.commonmark.node.Emphasis;
 import org.commonmark.node.FencedCodeBlock;
 import org.commonmark.node.HardLineBreak;
+import org.commonmark.node.HtmlBlock;
 import org.commonmark.node.Heading;
 import org.commonmark.node.IndentedCodeBlock;
 import org.commonmark.node.Link;
@@ -30,15 +31,25 @@ import org.commonmark.parser.Parser;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class ReportRichTextService {
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private static final Pattern FIGURE_PLACEHOLDER = Pattern.compile("^\\s*\\[\\[figure:([a-fA-F0-9-]{36})]]\\s*$");
+    private static final Pattern FIGURE_REF_TOKEN = Pattern.compile("\\[\\[figure-ref:([a-fA-F0-9-]{36})]]");
     private final Parser parser = Parser.builder()
             .extensions(List.of(TablesExtension.create()))
             .build();
 
     public String markdownToDocumentJson(String markdown) {
+        return markdownToDocumentJson(markdown, Map.of());
+    }
+
+    public String markdownToDocumentJson(String markdown, Map<UUID, FigureRenderData> figures) {
         ObjectNode doc = docNode();
         ArrayNode content = doc.putArray("content");
         String normalized = normalize(markdown);
@@ -48,7 +59,7 @@ public class ReportRichTextService {
         }
         Node parsed = parser.parse(normalized);
         for (Node child = parsed.getFirstChild(); child != null; child = child.getNext()) {
-            appendBlock(content, child);
+            appendBlock(content, child, figures == null ? Map.of() : figures);
         }
         if (content.isEmpty()) {
             content.add(paragraphNode(""));
@@ -124,14 +135,35 @@ public class ReportRichTextService {
         return write(doc);
     }
 
-    private void appendBlock(ArrayNode target, Node node) {
+    public String resolveFigureLabels(String contentJson, Map<UUID, FigureRenderData> figures) {
+        if (contentJson == null || contentJson.isBlank() || figures == null || figures.isEmpty()) {
+            return contentJson;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(contentJson);
+            updateFigureNodes(root, figures);
+            return write(root);
+        } catch (Exception ignored) {
+            return contentJson;
+        }
+    }
+
+    private void appendBlock(ArrayNode target, Node node, Map<UUID, FigureRenderData> figures) {
         if (node instanceof Heading heading) {
             target.add(headingNode(literalText(heading), heading.getLevel()));
             return;
         }
         if (node instanceof Paragraph paragraph) {
+            String literal = literalText(paragraph);
+            Matcher placeholder = FIGURE_PLACEHOLDER.matcher(literal);
+            if (placeholder.matches()) {
+                UUID figureId = parseUuid(placeholder.group(1));
+                FigureRenderData data = figureId == null ? null : figures.get(figureId);
+                target.add(figureNode(figureId, data));
+                return;
+            }
             ObjectNode p = paragraphNode(null);
-            appendInline(p.putArray("content"), paragraph.getFirstChild());
+            appendInline(p.putArray("content"), paragraph.getFirstChild(), figures);
             if (!p.has("content") || p.get("content").isEmpty()) {
                 p.remove("content");
             }
@@ -158,7 +190,7 @@ public class ReportRichTextService {
             ObjectNode quoteNode = typed("blockquote");
             ArrayNode content = quoteNode.putArray("content");
             for (Node child = quote.getFirstChild(); child != null; child = child.getNext()) {
-                appendBlock(content, child);
+                appendBlock(content, child, figures);
             }
             target.add(quoteNode);
             return;
@@ -175,8 +207,14 @@ public class ReportRichTextService {
             target.add(tableNode(table));
             return;
         }
+        if (node instanceof HtmlBlock htmlBlock) {
+            if (htmlBlock.getLiteral() != null && htmlBlock.getLiteral().toUpperCase(java.util.Locale.ROOT).contains("PAGE_BREAK")) {
+                target.add(typed("pageBreak"));
+            }
+            return;
+        }
         for (Node child = node.getFirstChild(); child != null; child = child.getNext()) {
-            appendBlock(target, child);
+            appendBlock(target, child, figures);
         }
     }
 
@@ -188,7 +226,7 @@ public class ReportRichTextService {
             ObjectNode itemNode = typed("listItem");
             ArrayNode itemContent = itemNode.putArray("content");
             for (Node child = item.getFirstChild(); child != null; child = child.getNext()) {
-                appendBlock(itemContent, child);
+                appendBlock(itemContent, child, Map.of());
             }
             if (itemContent.isEmpty()) {
                 itemContent.add(paragraphNode(""));
@@ -198,13 +236,17 @@ public class ReportRichTextService {
     }
 
     private void appendInline(ArrayNode target, Node node) {
-        appendInline(target, node, null);
+        appendInline(target, node, null, Map.of());
     }
 
-    private void appendInline(ArrayNode target, Node node, ArrayNode inheritedMarks) {
+    private void appendInline(ArrayNode target, Node node, Map<UUID, FigureRenderData> figures) {
+        appendInline(target, node, null, figures);
+    }
+
+    private void appendInline(ArrayNode target, Node node, ArrayNode inheritedMarks, Map<UUID, FigureRenderData> figures) {
         for (Node child = node; child != null; child = child.getNext()) {
             if (child instanceof Text text) {
-                target.add(textNode(text.getLiteral(), inheritedMarks));
+                appendTextWithFigureRefs(target, text.getLiteral(), inheritedMarks, figures);
             } else if (child instanceof Code code) {
                 ArrayNode marks = copyMarks(inheritedMarks);
                 marks.add(mark("code"));
@@ -212,23 +254,23 @@ public class ReportRichTextService {
             } else if (child instanceof StrongEmphasis) {
                 ArrayNode marks = copyMarks(inheritedMarks);
                 marks.add(mark("bold"));
-                appendInline(target, child.getFirstChild(), marks);
+                appendInline(target, child.getFirstChild(), marks, figures);
             } else if (child instanceof Emphasis) {
                 ArrayNode marks = copyMarks(inheritedMarks);
                 marks.add(mark("italic"));
-                appendInline(target, child.getFirstChild(), marks);
+                appendInline(target, child.getFirstChild(), marks, figures);
             } else if (child instanceof Link link) {
                 ArrayNode marks = copyMarks(inheritedMarks);
                 ObjectNode linkMark = mark("link");
                 linkMark.putObject("attrs").put("href", link.getDestination());
                 marks.add(linkMark);
-                appendInline(target, child.getFirstChild(), marks);
+                appendInline(target, child.getFirstChild(), marks, figures);
             } else if (child instanceof SoftLineBreak) {
                 target.add(textNode(" ", inheritedMarks));
             } else if (child instanceof HardLineBreak) {
                 target.add(typed("hardBreak"));
             } else {
-                appendInline(target, child.getFirstChild(), inheritedMarks);
+                appendInline(target, child.getFirstChild(), inheritedMarks, figures);
             }
         }
     }
@@ -257,7 +299,7 @@ public class ReportRichTextService {
                 ObjectNode cellNode = typed(header ? "tableHeader" : "tableCell");
                 ArrayNode cellContent = cellNode.putArray("content");
                 ObjectNode p = paragraphNode(null);
-                appendInline(p.putArray("content"), tableCell.getFirstChild());
+                appendInline(p.putArray("content"), tableCell.getFirstChild(), Map.of());
                 cellContent.add(p);
                 cells.add(cellNode);
             }
@@ -271,6 +313,17 @@ public class ReportRichTextService {
             out.append(node.get("text").asText());
         }
         String type = text(node.get("type"));
+        if ("figure".equals(type)) {
+            JsonNode attrs = node.path("attrs");
+            String label = attrs.path("figureLabel").asText("Figure");
+            String caption = attrs.path("caption").asText("");
+            out.append(label);
+            if (!caption.isBlank()) {
+                out.append(": ").append(caption);
+            }
+        } else if ("figureReference".equals(type)) {
+            out.append(node.path("attrs").path("label").asText("Figure"));
+        }
         if ("hardBreak".equals(type)) {
             out.append('\n');
         }
@@ -293,6 +346,10 @@ public class ReportRichTextService {
         if ("paragraph".equals(type)) {
             String value = inlineMarkdown(node);
             if (!value.isBlank()) out.append(value).append("\n\n");
+            return;
+        }
+        if ("pageBreak".equals(type)) {
+            out.append("<!-- PAGE_BREAK -->\n\n");
             return;
         }
         if ("bulletList".equals(type) || "orderedList".equals(type)) {
@@ -386,6 +443,8 @@ public class ReportRichTextService {
                 out.append("[[citation:")
                         .append(child.path("attrs").path("referenceId").asText(""))
                         .append("]]");
+            } else if ("figureReference".equals(type)) {
+                out.append(child.path("attrs").path("label").asText("Figure"));
             } else {
                 appendInlineMarkdown(child.path("content"), out);
             }
@@ -444,6 +503,78 @@ public class ReportRichTextService {
             node.putArray("content").add(textNode(text, null));
         }
         return node;
+    }
+
+    private ObjectNode figureNode(UUID figureId, FigureRenderData data) {
+        ObjectNode node = typed("figure");
+        ObjectNode attrs = node.putObject("attrs");
+        if (figureId != null) {
+            attrs.put("figureId", figureId.toString());
+            attrs.put("evidenceId", figureId.toString());
+        }
+        attrs.put("src", data == null || data.src() == null ? "" : data.src());
+        attrs.put("alt", data == null || data.alt() == null ? "" : data.alt());
+        attrs.put("figureLabel", data == null || data.label() == null ? "Figure" : data.label());
+        attrs.put("caption", data == null || data.caption() == null ? "" : data.caption());
+        attrs.put("alignment", "center");
+        if (data != null && data.definition() != null) attrs.put("structuredDefinition", data.definition());
+        if (data != null && data.definitionFormat() != null) attrs.put("definitionFormat", data.definitionFormat());
+        return node;
+    }
+
+    private ObjectNode figureReferenceNode(UUID figureId, FigureRenderData data) {
+        ObjectNode node = typed("figureReference");
+        ObjectNode attrs = node.putObject("attrs");
+        if (figureId != null) {
+            attrs.put("figureId", figureId.toString());
+            attrs.put("evidenceId", figureId.toString());
+        }
+        attrs.put("label", data == null || data.label() == null ? "Figure" : data.label());
+        return node;
+    }
+
+    private void appendTextWithFigureRefs(ArrayNode target, String value, ArrayNode marks, Map<UUID, FigureRenderData> figures) {
+        if (value == null || value.isEmpty()) {
+            return;
+        }
+        Matcher matcher = FIGURE_REF_TOKEN.matcher(value);
+        int last = 0;
+        while (matcher.find()) {
+            if (matcher.start() > last) {
+                target.add(textNode(value.substring(last, matcher.start()), marks));
+            }
+            UUID figureId = parseUuid(matcher.group(1));
+            target.add(figureReferenceNode(figureId, figureId == null ? null : figures.get(figureId)));
+            last = matcher.end();
+        }
+        if (last < value.length()) {
+            target.add(textNode(value.substring(last), marks));
+        }
+    }
+
+    private void updateFigureNodes(JsonNode node, Map<UUID, FigureRenderData> figures) {
+        if (node == null || node.isNull()) return;
+        if (node instanceof ObjectNode objectNode) {
+            String type = text(objectNode.get("type"));
+            if ("figure".equals(type) || "figureReference".equals(type)) {
+                ObjectNode attrs = objectNode.withObject("/attrs");
+                UUID id = parseUuid(attrs.path("figureId").asText(attrs.path("evidenceId").asText(null)));
+                FigureRenderData data = id == null ? null : figures.get(id);
+                if (data != null) {
+                    attrs.put("figureId", id.toString());
+                    attrs.put("evidenceId", id.toString());
+                    attrs.put("figureLabel", data.label());
+                    attrs.put("label", data.label());
+                    attrs.put("caption", data.caption() == null ? "" : data.caption());
+                    attrs.put("src", data.src() == null ? "" : data.src());
+                    attrs.put("alt", data.alt() == null ? "" : data.alt());
+                }
+            }
+        }
+        JsonNode content = node.get("content");
+        if (content != null && content.isArray()) {
+            for (JsonNode child : content) updateFigureNodes(child, figures);
+        }
     }
 
     private ObjectNode textNode(String value, ArrayNode marks) {
@@ -517,4 +648,15 @@ public class ReportRichTextService {
     }
 
     public record DocumentPart(String heading, int level, String contentJson, String plainText) {}
+    public record FigureRenderData(UUID figureId, String label, String caption, String src, String alt,
+                                   String definition, String definitionFormat) {}
+
+    private UUID parseUuid(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return UUID.fromString(value.trim());
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
 }

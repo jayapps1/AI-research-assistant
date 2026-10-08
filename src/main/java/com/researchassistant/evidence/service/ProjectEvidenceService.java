@@ -153,6 +153,7 @@ public class ProjectEvidenceService {
         evidence.setDescription(description != null ? description.trim() : null);
         evidence.setAltText(altText != null ? altText.trim() : null);
         evidence.setDisplayOrder(nextOrder);
+        evidence.setSourceType("USER_UPLOAD");
         evidence.setCreatedBy(user);
         evidence.setAiAnalysisStatus(EvidenceAnalysisStatus.NOT_ANALYZED);
 
@@ -200,6 +201,7 @@ public class ProjectEvidenceService {
         evidence.setDescription(request.description());
         evidence.setAltText(request.altText());
         evidence.setMetadataJson(request.metadataJson());
+        evidence.setSourceType("USER_UPLOAD");
         evidence.setDisplayOrder(nextOrder);
         evidence.setCreatedBy(user);
         evidence.setAiAnalysisStatus(EvidenceAnalysisStatus.NOT_ANALYZED);

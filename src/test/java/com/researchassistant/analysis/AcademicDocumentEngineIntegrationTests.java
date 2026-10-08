@@ -22,9 +22,13 @@ import com.researchassistant.common.enums.ContentOrigin;
 import com.researchassistant.analysis.repository.ReportDocumentVersionRepository;
 import com.researchassistant.analysis.entity.ReportChapterType;
 import com.researchassistant.analysis.entity.ReportSectionType;
+import com.researchassistant.analysis.entity.ResearchReportStatus;
 import com.researchassistant.analysis.entity.SectionGenerationPolicy;
 import com.researchassistant.analysis.entity.SectionSemanticPurpose;
 import com.researchassistant.analysis.exception.InsufficientProjectEvidenceException;
+import com.researchassistant.analysis.controller.ReportExportController.DocumentExportSelection;
+import com.researchassistant.analysis.service.ReportDocumentCompiler;
+import com.researchassistant.analysis.service.ReportExportService;
 import com.researchassistant.analysis.service.ReportSectionPromptBuilder;
 import com.researchassistant.analysis.service.AnalysisWorkflowService;
 import com.researchassistant.identity.dto.CreateUserRequest;
@@ -81,6 +85,9 @@ class AcademicDocumentEngineIntegrationTests extends IntegrationTestSupport {
     @Autowired
     private ReportDocumentVersionRepository reportDocumentVersionRepository;
 
+    @Autowired
+    private ReportExportService reportExportService;
+
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     private User primaryUser;
@@ -120,6 +127,23 @@ class AcademicDocumentEngineIntegrationTests extends IntegrationTestSupport {
                 .findFirst()
                 .orElseThrow();
         return chapter.sections().stream().findFirst().orElseThrow();
+    }
+
+    private List<SectionStructureResponse> flattenSections(ReportStructureResponse structure) {
+        List<SectionStructureResponse> sections = new ArrayList<>();
+        for (ChapterStructureResponse chapter : structure.chapters()) {
+            for (SectionStructureResponse section : chapter.sections()) {
+                collectSection(section, sections);
+            }
+        }
+        return sections;
+    }
+
+    private void collectSection(SectionStructureResponse section, List<SectionStructureResponse> sections) {
+        sections.add(section);
+        for (SectionStructureResponse child : section.subsections()) {
+            collectSection(child, sections);
+        }
     }
 
     @Test
@@ -542,11 +566,82 @@ class AcademicDocumentEngineIntegrationTests extends IntegrationTestSupport {
         assertThat(finalDoc.plainText()).contains("Background content for the queue management system.");
         assertThat(finalDoc.plainText()).contains("Literature review content comparing appointment scheduling systems.");
         assertThat(finalDoc.plainText()).contains("System design content describing modules, database schema, and workflows.");
-        assertThat(finalDoc.plainText()).contains("Chapter 6: Deployment and Maintenance");
+        assertThat(finalDoc.plainText()).contains("Deployment and Maintenance");
         assertThat(finalDoc.plainText()).contains("Deployment environment content for production hosting.");
         assertThat(finalDoc.plainText()).contains("References");
         assertThat(finalDoc.plainText().indexOf("Table of Contents"))
                 .isLessThan(finalDoc.plainText().indexOf("Background content for the queue management system."));
+
+        DocumentExportSelection fullSelection = new DocumentExportSelection(
+                "FULL", List.of(), true, true, true, true, true, true, true, "ALL_PROJECT_REFERENCES"
+        );
+        ReportDocumentCompiler.CompiledAcademicDocument fullPreview = reportExportService.preview(report.id(), fullSelection, primaryUser);
+        assertThat(fullPreview.plainText()).contains("Background content for the queue management system.");
+        assertThat(fullPreview.plainText()).contains("Literature review content comparing appointment scheduling systems.");
+        assertThat(fullPreview.plainText()).contains("System design content describing modules, database schema, and workflows.");
+        assertThat(fullPreview.compiledSectionCount()).isGreaterThan(0);
+        assertThat(fullPreview.nonEmptySectionCount()).isGreaterThan(0);
+    }
+
+    @Test
+    @DisplayName("Selected preview compiles chapter parents with descendants in canonical numbering")
+    void testSelectedPreviewCompilesChapterSelectionsWithCanonicalNumbering() throws Exception {
+        ResearchProjectResponse project = createWorkspaceProject(AcademicWorkspaceType.ACADEMIC_PROJECT, "Wi-Fi Coverage Optimization");
+        ReportResponse report = analysisWorkflowService.ensureReportInitialized(project.id(), primaryUser);
+        ReportStructureResponse structure = analysisWorkflowService.getReportStructure(report.id(), primaryUser);
+
+        ChapterStructureResponse chapterOne = structure.chapters().stream()
+                .filter(chapter -> chapter.chapterNumber() != null && chapter.chapterNumber() == 1)
+                .findFirst().orElseThrow();
+        ChapterStructureResponse chapterTwo = structure.chapters().stream()
+                .filter(chapter -> chapter.chapterNumber() != null && chapter.chapterNumber() == 2)
+                .findFirst().orElseThrow();
+        SectionStructureResponse chapterOneSection = chapterOne.sections().stream().findFirst().orElseThrow();
+        SectionStructureResponse chapterTwoSection = chapterTwo.sections().stream().findFirst().orElseThrow();
+
+        analysisWorkflowService.updateSection(chapterOneSection.id(), primaryUser, new UpdateSectionRequest(
+                null, null, "Chapter one Wi-Fi access point coverage analysis body.", null, null, null, null, null, null, null, null, null, null, null
+        ));
+        analysisWorkflowService.updateSection(chapterTwoSection.id(), primaryUser, new UpdateSectionRequest(
+                null, null, "Chapter two radio-frequency propagation literature body.", null, null, null, null, null, null, null, null, null, null, null
+        ));
+
+        DocumentExportSelection chapterOneSelection = new DocumentExportSelection(
+                "SELECTED", List.of(chapterOne.id()), false, false, false, false, false, true, false, "CITED_IN_SELECTION"
+        );
+        ReportDocumentCompiler.CompiledAcademicDocument chapterOnePreview = reportExportService.preview(report.id(), chapterOneSelection, primaryUser);
+        assertThat(chapterOnePreview.plainText()).contains("CHAPTER 1");
+        assertThat(chapterOnePreview.plainText()).contains("Chapter one Wi-Fi access point coverage analysis body.");
+        assertThat(chapterOnePreview.plainText()).doesNotContain("Chapter two radio-frequency propagation literature body.");
+        assertThat(chapterOnePreview.compiledSectionCount()).isGreaterThan(0);
+
+        DocumentExportSelection chapterTwoSelection = new DocumentExportSelection(
+                "SELECTED", List.of(chapterTwo.id()), false, false, false, false, false, true, false, "CITED_IN_SELECTION"
+        );
+        ReportDocumentCompiler.CompiledAcademicDocument chapterTwoPreview = reportExportService.preview(report.id(), chapterTwoSelection, primaryUser);
+        assertThat(chapterTwoPreview.plainText()).contains("CHAPTER 2");
+        assertThat(chapterTwoPreview.plainText()).contains(chapterTwoSection.sectionNumber());
+        assertThat(chapterTwoPreview.plainText()).contains("Chapter two radio-frequency propagation literature body.");
+        assertThat(chapterTwoPreview.plainText()).doesNotContain("CHAPTER 1");
+        assertThat(chapterTwoPreview.plainText()).doesNotContain("Chapter one Wi-Fi access point coverage analysis body.");
+
+        DocumentExportSelection chaptersOneAndTwoSelection = new DocumentExportSelection(
+                "SELECTED", List.of(chapterOne.id(), chapterTwo.id()), false, false, true, false, false, true, false, "CITED_IN_SELECTION"
+        );
+        ReportDocumentCompiler.CompiledAcademicDocument chaptersOneAndTwoPreview = reportExportService.preview(report.id(), chaptersOneAndTwoSelection, primaryUser);
+        assertThat(chaptersOneAndTwoPreview.plainText()).contains("Table of Contents");
+        assertThat(chaptersOneAndTwoPreview.plainText()).contains("CHAPTER 1");
+        assertThat(chaptersOneAndTwoPreview.plainText()).contains("CHAPTER 2");
+        assertThat(chaptersOneAndTwoPreview.plainText().indexOf("CHAPTER 1"))
+                .isLessThan(chaptersOneAndTwoPreview.plainText().indexOf("CHAPTER 2"));
+        assertThat(chaptersOneAndTwoPreview.compiledSectionCount()).isGreaterThanOrEqualTo(2);
+        assertThat(chaptersOneAndTwoPreview.tocEntryCount()).isGreaterThanOrEqualTo(2);
+
+        DocumentExportSelection emptySelection = new DocumentExportSelection(
+                "SELECTED", List.of(), false, false, false, false, false, true, false, "CITED_IN_SELECTION"
+        );
+        assertThatThrownBy(() -> reportExportService.preview(report.id(), emptySelection, primaryUser))
+                .hasMessageContaining("Selected content export requires at least one selected chapter or section.");
     }
 
     @Test
@@ -572,6 +667,46 @@ class AcademicDocumentEngineIntegrationTests extends IntegrationTestSupport {
         assertThat(v2.versionNumber()).isEqualTo(v1.versionNumber() + 1);
         assertThat(v2.stale()).isFalse();
         assertThat(v2.plainText()).contains("Updated background body after section editing.");
+        assertThat(reportDocumentVersionRepository.findById(v1.id())).isPresent();
+    }
+
+    @Test
+    @DisplayName("Finalized report can reopen working revision and finalize a new immutable version")
+    void testFinalizedReportReopensWorkingRevisionForNextFinalVersion() throws Exception {
+        ResearchProjectResponse project = createWorkspaceProject(AcademicWorkspaceType.ACADEMIC_PROJECT, "Clinic Queue System");
+        ReportResponse report = analysisWorkflowService.ensureReportInitialized(project.id(), primaryUser);
+        ReportStructureResponse structure = analysisWorkflowService.getReportStructure(report.id(), primaryUser);
+        for (SectionStructureResponse section : flattenSections(structure)) {
+            if (section.type() == ReportSectionType.LITERATURE_REVIEW || section.type() == ReportSectionType.CONCLUSIONS) {
+                analysisWorkflowService.updateSection(section.id(), primaryUser, new UpdateSectionRequest(
+                        null, null, section.heading() + " completed content.", null, null, null, null, null, null, null, null, null, null, null
+                ));
+            }
+        }
+
+        ReportResponse finalized = analysisWorkflowService.finalizeReport(report.id(), primaryUser);
+        assertThat(finalized.status()).isEqualTo(ResearchReportStatus.FINAL);
+        FinalDocumentResponse v1 = analysisWorkflowService.getFinalDocument(report.id(), primaryUser);
+
+        SectionStructureResponse background = firstNumberedSection(
+                analysisWorkflowService.getReportStructure(report.id(), primaryUser),
+                1
+        );
+        analysisWorkflowService.updateSection(background.id(), primaryUser, new UpdateSectionRequest(
+                null, null, "Background changed after first finalization.", null, null, null, null, null, null, null, null, null, null, null
+        ));
+
+        FinalDocumentResponse stale = analysisWorkflowService.getFinalDocument(report.id(), primaryUser);
+        assertThat(stale.id()).isEqualTo(v1.id());
+        assertThat(stale.stale()).isTrue();
+
+        ReportResponse refinalized = analysisWorkflowService.finalizeReport(report.id(), primaryUser);
+        FinalDocumentResponse v2 = analysisWorkflowService.getFinalDocument(report.id(), primaryUser);
+
+        assertThat(refinalized.status()).isEqualTo(ResearchReportStatus.FINAL);
+        assertThat(v2.versionNumber()).isEqualTo(v1.versionNumber() + 1);
+        assertThat(v2.stale()).isFalse();
+        assertThat(v2.plainText()).contains("Background changed after first finalization.");
         assertThat(reportDocumentVersionRepository.findById(v1.id())).isPresent();
     }
 
