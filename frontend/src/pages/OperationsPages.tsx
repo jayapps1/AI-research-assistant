@@ -178,6 +178,74 @@ export function isCorruptedDeterministicContent(content?: string, category?: Doc
   );
 }
 
+export type ExportReferenceMode = 'CITED_IN_SELECTION' | 'ALL_PROJECT_REFERENCES' | 'NONE';
+export type ExportScopeMode = 'FULL' | 'SELECTED';
+
+export interface ExportSelectionOptions {
+  exportScopeMode: ExportScopeMode;
+  selectedExportNodeIds: string[];
+  includeExportCoverPage: boolean;
+  includeExportToc: boolean;
+  includeExportListOfFigures: boolean;
+  includeExportListOfTables: boolean;
+  includeExportReferences: boolean;
+  includeExportAppendices: boolean;
+  exportReferenceMode: ExportReferenceMode;
+}
+
+export function buildExportSelectionPayload(options: ExportSelectionOptions) {
+  const full = options.exportScopeMode === 'FULL';
+  return {
+    selectionMode: options.exportScopeMode,
+    selectedNodeIds: full ? [] : options.selectedExportNodeIds,
+    includeCoverPage: full ? true : options.includeExportCoverPage,
+    includeFrontMatter: full,
+    includeToc: full ? true : options.includeExportToc,
+    includeListOfFigures: full ? true : options.includeExportListOfFigures,
+    includeListOfTables: full ? true : options.includeExportListOfTables,
+    includeReferences: full ? true : options.includeExportReferences,
+    includeAppendices: full ? true : options.includeExportAppendices,
+    referenceMode: full ? 'ALL_PROJECT_REFERENCES' : options.exportReferenceMode,
+  };
+}
+
+export function previewDiagnostics(previewDoc: any) {
+  const contentJson = typeof previewDoc?.contentJson === 'string' ? previewDoc.contentJson : '';
+  const plainText = typeof previewDoc?.plainText === 'string' ? previewDoc.plainText : '';
+  return {
+    reportId: previewDoc?.reportId ?? null,
+    versionId: previewDoc?.versionId ?? null,
+    frontMatterNodeCount: Number(previewDoc?.frontMatterNodeCount ?? 0),
+    tocEntryCount: Number(previewDoc?.tocEntryCount ?? 0),
+    bodyNodeCount: Number(previewDoc?.bodyNodeCount ?? previewDoc?.compiledSectionCount ?? 0),
+    nonEmptyBodyNodeCount: Number(previewDoc?.nonEmptyBodyNodeCount ?? previewDoc?.nonEmptySectionCount ?? 0),
+    referenceCount: Number(previewDoc?.referenceCount ?? 0),
+    contentLength: contentJson.length || plainText.length,
+  };
+}
+
+function safeParseDocumentContent(contentJson?: string) {
+  if (!contentJson) return [];
+  try {
+    const parsed = JSON.parse(contentJson);
+    return Array.isArray(parsed?.content) ? parsed.content : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function loadOrPrepareFinalDocument(
+  reportId: string,
+  apiClient: Pick<typeof reportApi, 'finalDocument' | 'prepareFinalDocument'> = reportApi,
+) {
+  const existing = await apiClient.finalDocument(reportId);
+  const hasExistingDocument = existing && typeof existing === 'object' && Object.keys(existing).length > 0;
+  if (!hasExistingDocument || Boolean((existing as any).stale)) {
+    return apiClient.prepareFinalDocument(reportId);
+  }
+  return existing;
+}
+
 export function ReportPage() {
   const projectId = useProjectId();
   const queryClient = useQueryClient();
@@ -222,7 +290,7 @@ export function ReportPage() {
 
   // Edit Title Page Modal State
   const [showEditTitlePageModal, setShowEditTitlePageModal] = useState(false);
-  const [exportScopeMode, setExportScopeMode] = useState<'FULL' | 'SELECTED'>('FULL');
+  const [exportScopeMode, setExportScopeMode] = useState<ExportScopeMode>('FULL');
   const [selectedExportNodeIds, setSelectedExportNodeIds] = useState<string[]>([]);
   const [includeExportCoverPage, setIncludeExportCoverPage] = useState(false);
   const [includeExportToc, setIncludeExportToc] = useState(false);
@@ -230,7 +298,7 @@ export function ReportPage() {
   const [includeExportListOfTables, setIncludeExportListOfTables] = useState(false);
   const [includeExportReferences, setIncludeExportReferences] = useState(true);
   const [includeExportAppendices, setIncludeExportAppendices] = useState(false);
-  const [exportReferenceMode, setExportReferenceMode] = useState<'CITED_IN_SELECTION' | 'ALL_PROJECT_REFERENCES' | 'NONE'>('CITED_IN_SELECTION');
+  const [exportReferenceMode, setExportReferenceMode] = useState<ExportReferenceMode>('CITED_IN_SELECTION');
   const [titlePageForm, setTitlePageForm] = useState<UpdateTitlePageDetailsRequest>({
     title: '',
     authorName: '',
@@ -285,18 +353,20 @@ export function ReportPage() {
     },
   });
 
-  useEffect(() => {
-    if (projectId) {
-      ensureReport.mutate();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
-
   const reports = useQuery({
     queryKey: ['reports', projectId, 0, 20],
     queryFn: () => reportApi.reports(projectId, 0, 20),
     enabled: Boolean(projectId),
   });
+
+  useEffect(() => {
+    if (!projectId || reports.isLoading || ensureReport.isPending) {
+      return;
+    }
+    if (pageContent(reports.data).length === 0) {
+      ensureReport.mutate();
+    }
+  }, [projectId, reports.isLoading, reports.data, ensureReport]);
 
   const capabilitiesQuery = useQuery({
     queryKey: ['section-capabilities', projectId],
@@ -346,21 +416,20 @@ export function ReportPage() {
   // Final document query
   const finalDocQuery = useQuery({
     queryKey: ['report-final-document', reportId],
-    queryFn: () => reportApi.finalDocument(reportId),
-    enabled: Boolean(reportId) && (activeTab === 'final-doc' || activeTab === 'preview'),
+    queryFn: () => loadOrPrepareFinalDocument(reportId),
+    enabled: Boolean(reportId) && activeTab === 'final-doc',
   });
 
-  const exportSelectionPayload = useMemo(() => ({
-    selectionMode: exportScopeMode,
-    selectedNodeIds: exportScopeMode === 'SELECTED' ? selectedExportNodeIds : [],
-    includeCoverPage: exportScopeMode === 'FULL' ? true : includeExportCoverPage,
-    includeFrontMatter: exportScopeMode === 'FULL',
-    includeToc: exportScopeMode === 'FULL' ? true : includeExportToc,
-    includeListOfFigures: exportScopeMode === 'FULL' ? true : includeExportListOfFigures,
-    includeListOfTables: exportScopeMode === 'FULL' ? true : includeExportListOfTables,
-    includeReferences: exportScopeMode === 'FULL' ? true : includeExportReferences,
-    includeAppendices: exportScopeMode === 'FULL' ? true : includeExportAppendices,
-    referenceMode: exportScopeMode === 'FULL' ? 'ALL_PROJECT_REFERENCES' : exportReferenceMode,
+  const exportSelectionPayload = useMemo(() => buildExportSelectionPayload({
+    exportScopeMode,
+    selectedExportNodeIds,
+    includeExportCoverPage,
+    includeExportToc,
+    includeExportListOfFigures,
+    includeExportListOfTables,
+    includeExportReferences,
+    includeExportAppendices,
+    exportReferenceMode,
   }), [exportScopeMode, selectedExportNodeIds, includeExportCoverPage, includeExportToc, includeExportListOfFigures, includeExportListOfTables, includeExportReferences, includeExportAppendices, exportReferenceMode]);
 
   const previewQuery = useQuery({
@@ -368,6 +437,28 @@ export function ReportPage() {
     queryFn: () => reportApi.preview(reportId, { selection: exportSelectionPayload }),
     enabled: Boolean(reportId) && activeTab === 'preview' && (exportScopeMode === 'FULL' || selectedExportNodeIds.length > 0),
   });
+
+  useEffect(() => {
+    if (!previewQuery.data) return;
+    console.info('Report preview compiled document diagnostics', {
+      scope: exportScopeMode,
+      ...previewDiagnostics(previewQuery.data),
+      contentPresent: Boolean(String((previewQuery.data as any)?.contentJson || (previewQuery.data as any)?.plainText || '').trim()),
+    });
+  }, [exportScopeMode, previewQuery.data]);
+
+  useEffect(() => {
+    if (!finalDocQuery.data) return;
+    const doc = finalDocQuery.data as any;
+    const nodes = safeParseDocumentContent(doc.contentJson);
+    console.info('Final document diagnostics', {
+      receivedVersionId: doc.id ?? null,
+      status: doc.status ?? null,
+      contentType: doc.contentJson ? 'TIPTAP_JSON' : doc.plainText ? 'PLAIN_TEXT' : 'EMPTY',
+      contentLength: String(doc.contentJson || doc.plainText || '').length,
+      nodeCount: nodes.length,
+    });
+  }, [finalDocQuery.data]);
 
   // Validation query for preview panel
   const validationQuery = useQuery({
@@ -856,6 +947,8 @@ export function ReportPage() {
   const selectAllExportNodes = () => setSelectedExportNodeIds(exportableChapters.map((chapter) => String(chapter.id)));
   const clearExportNodes = () => setSelectedExportNodeIds([]);
   const valData = validationQuery.data as any;
+  const previewContentPresent = Boolean(String(previewDoc?.contentJson || previewDoc?.plainText || '').trim());
+  const showLegacyPreview = Boolean((globalThis as any).__SHOW_LEGACY_REPORT_PREVIEW__);
   const selectedSectionContent = typeof selectedSection?.content === 'string' ? selectedSection.content : '';
   const hasSectionContent = selectedSectionContent.trim().length > 0;
   const nodeCategory = getDocumentNodeCategory(selectedSection, selectedChapter);
@@ -2008,7 +2101,18 @@ export function ReportPage() {
       {activeTab === 'final-doc' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {finalDocQuery.isLoading ? (
-            <Card style={{ padding: '2rem', textAlign: 'center' }}>Loading assembled final document...</Card>
+            <Card style={{ padding: '2rem', textAlign: 'center' }}>Loading document...</Card>
+          ) : finalDocQuery.isError ? (
+            <Card style={{ padding: '2rem', textAlign: 'center' }}>
+              <AlertTriangle size={32} className="text-danger" style={{ margin: '0 auto 0.75rem' }} />
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>Unable to load document content.</h2>
+              <p className="muted" style={{ margin: '0.35rem auto 1rem', maxWidth: 520 }}>
+                {String((finalDocQuery.error as any)?.message || 'The final document could not be loaded.')}
+              </p>
+              <Button type="button" variant="secondary" onClick={() => finalDocQuery.refetch()}>
+                <RefreshCw size={14} style={{ marginRight: 4 }} /> Retry
+              </Button>
+            </Card>
           ) : !finalDoc ? (
             <Card style={{ padding: '2.5rem', textAlign: 'center' }}>
               <FileText size={40} className="text-primary" style={{ margin: '0 auto 1rem' }} />
@@ -2079,9 +2183,12 @@ export function ReportPage() {
 
               {/* Full Document Rich Editor */}
               <ReportRichEditor
-                key={`final-doc-${finalDoc.id}-${finalDoc.updatedAt}`}
+                key={`final-doc-${finalDoc.id}`}
                 content={String(finalDoc.plainText || '')}
                 contentJson={String(finalDoc.contentJson || '')}
+                hydrationKey={String(finalDoc.id || '')}
+                isLoading={finalDocQuery.isLoading || finalDocQuery.isFetching}
+                formattingProfile={(finalDoc.formattingProfile || finalDoc.formattingRules || finalDoc.templateFormattingRules) as any}
                 projectId={projectId}
                 citationStyle={currentCitationStyle}
                 minHeight="750px"
@@ -2114,7 +2221,7 @@ export function ReportPage() {
                 </Button>
               </div>
 
-              {/* A4 Paper Mockup Preview */}
+              {/* Canonical compiled A4 preview */}
               <div
                 style={{
                   background: 'var(--surface-bg, #f1f5f9)',
@@ -2127,7 +2234,9 @@ export function ReportPage() {
                   overflowY: 'auto',
                 }}
               >
-                {/* Title Page */}
+                {showLegacyPreview && (
+                <>
+                {/* Legacy synthetic title/TOC preview intentionally disabled; compiler DTO is canonical. */}
                 <div
                   className="preview-page"
                   style={{
@@ -2230,17 +2339,80 @@ export function ReportPage() {
                   </div>
                 </div>
 
-                {/* Body Content Preview */}
-                {previewDoc ? (
+                </>
+                )}
+                {previewQuery.isLoading || previewQuery.isFetching ? (
+                  <div
+                    className="preview-page"
+                    style={{
+                      width: '100%',
+                      maxWidth: '750px',
+                      minHeight: '320px',
+                      background: '#fff',
+                      color: '#1e293b',
+                      padding: '3rem',
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
+                      fontFamily: '"Times New Roman", Times, serif',
+                      lineHeight: 1.7,
+                      textAlign: 'center',
+                    }}
+                  >
+                    <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>Loading document...</h2>
+                  </div>
+                ) : previewQuery.isError ? (
+                  <div
+                    className="preview-page"
+                    style={{
+                      width: '100%',
+                      maxWidth: '750px',
+                      minHeight: '320px',
+                      background: '#fff',
+                      color: '#1e293b',
+                      padding: '3rem',
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
+                      fontFamily: '"Times New Roman", Times, serif',
+                      lineHeight: 1.7,
+                      textAlign: 'center',
+                    }}
+                  >
+                    <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>Unable to load document content.</h2>
+                    <p className="muted">{String((previewQuery.error as any)?.message || 'The preview request failed.')}</p>
+                    <Button type="button" variant="secondary" onClick={() => previewQuery.refetch()}>
+                      <RefreshCw size={14} style={{ marginRight: 4 }} /> Retry
+                    </Button>
+                  </div>
+                ) : previewDoc && previewContentPresent ? (
                   <ReportRichEditor
-                    key={`preview-${exportScopeMode}-${selectedExportNodeIds.join('-')}-${previewDoc.sourceSectionCount || 0}`}
+                    key={`preview-${exportScopeMode}-${selectedExportNodeIds.join('-')}-${String(previewDoc.reportId || reportId)}`}
                     content={String(previewDoc.plainText || '')}
                     contentJson={String(previewDoc.contentJson || '')}
+                    hydrationKey={`${String(previewDoc.reportId || reportId)}-${exportScopeMode}-${selectedExportNodeIds.join('-')}-${String(previewDoc.contentLength || previewDoc.contentJson?.length || 0)}`}
+                    isLoading={previewQuery.isFetching}
+                    formattingProfile={(previewDoc.formattingProfile || previewDoc.formattingRules || previewDoc.templateFormattingRules) as any}
                     projectId={projectId}
                     citationStyle={currentCitationStyle}
                     readOnly
                     minHeight="680px"
                   />
+                ) : previewDoc ? (
+                  <div
+                    className="preview-page"
+                    style={{
+                      width: '100%',
+                      maxWidth: '750px',
+                      minHeight: '320px',
+                      background: '#fff',
+                      color: '#1e293b',
+                      padding: '3rem',
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
+                      fontFamily: '"Times New Roman", Times, serif',
+                      lineHeight: 1.7,
+                      textAlign: 'center',
+                    }}
+                  >
+                    <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>This report does not contain any saved sections yet.</h2>
+                    <p className="muted">Save content in the section editor, then return to preview.</p>
+                  </div>
                 ) : (
                   <div
                     className="preview-page"
